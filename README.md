@@ -1,6 +1,7 @@
 
 
 																									
+```text
                                          Aker (Egyptian: ꜣkr) was an
                                          ancient Egyptian earth god,
                                          often depicted as two lions
@@ -18,6 +19,7 @@
                                          JSON-RPC to the LLM, the
                                          other manipulating the
                                          engine's main thread via IPC.
+```
 
 # MCPSharp
 
