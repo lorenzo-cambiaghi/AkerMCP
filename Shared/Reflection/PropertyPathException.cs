@@ -1,6 +1,6 @@
 using System;
 
-namespace MCPSharp.Shared.Reflection
+namespace AkerMcp.Shared.Reflection
 {
     public class PropertyPathException : Exception
     {

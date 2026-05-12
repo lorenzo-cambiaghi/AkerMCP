@@ -3,7 +3,7 @@ using System.Collections.Concurrent;
 using System.Linq.Expressions;
 using System.Reflection;
 
-namespace MCPSharp.Shared.Reflection
+namespace AkerMcp.Shared.Reflection
 {
     public class ReflectionCache
     {

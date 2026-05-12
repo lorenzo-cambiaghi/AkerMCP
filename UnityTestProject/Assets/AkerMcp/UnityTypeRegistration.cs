@@ -1,8 +1,8 @@
 using System.Collections.Generic;
 using UnityEngine;
-using MCPSharp.Shared.Serialization;
+using AkerMcp.Shared.Serialization;
 
-namespace MCPSharp.Unity
+namespace AkerMcp.Unity
 {
     public static class UnityTypeRegistration
     {

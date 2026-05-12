@@ -2,7 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace MCPSharp.Server
+namespace AkerMcp.Server
 {
     class Program
     {

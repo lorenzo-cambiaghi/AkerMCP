@@ -1,6 +1,6 @@
 using MessagePack;
 
-namespace MCPSharp.Shared.Ipc
+namespace AkerMcp.Shared.Ipc
 {
     [MessagePackObject]
     public class IpcRequest

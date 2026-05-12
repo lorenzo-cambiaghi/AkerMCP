@@ -3,9 +3,9 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using UnityEngine;
 using UnityEngine.SceneManagement;
-using MCPSharp.Shared.Abstraction;
+using AkerMcp.Shared.Abstraction;
 
-namespace MCPSharp.Unity
+namespace AkerMcp.Unity
 {
     public class UnitySceneGraph : ISceneGraph
     {

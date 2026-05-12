@@ -5,12 +5,12 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using MCPSharp.Shared.Abstraction;
-using MCPSharp.Shared.Ipc;
-using MCPSharp.Shared.Reflection;
-using MCPSharp.Shared.Serialization;
+using AkerMcp.Shared.Abstraction;
+using AkerMcp.Shared.Ipc;
+using AkerMcp.Shared.Reflection;
+using AkerMcp.Shared.Serialization;
 
-namespace MCPSharp.Client
+namespace AkerMcp.Client
 {
     public class IpcRequestHandler
     {

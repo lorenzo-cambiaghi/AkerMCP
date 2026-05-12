@@ -7,7 +7,7 @@ using System.Text.Json;
 using MessagePack;
 using MessagePack.Resolvers;
 
-namespace MCPSharp.Shared.Serialization
+namespace AkerMcp.Shared.Serialization
 {
     public class GenericSerializer
     {

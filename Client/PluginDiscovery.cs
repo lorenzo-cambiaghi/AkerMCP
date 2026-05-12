@@ -2,9 +2,9 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
-using MCPSharp.Shared.Ipc;
+using AkerMcp.Shared.Ipc;
 
-namespace MCPSharp.Client
+namespace AkerMcp.Client
 {
     public class PluginDiscovery : IDisposable
     {

@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace MCPSharp.Shared.Protocol
+namespace AkerMcp.Shared.Protocol
 {
     public class JsonRpcRequest
     {

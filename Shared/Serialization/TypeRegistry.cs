@@ -3,7 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace MCPSharp.Shared.Serialization
+namespace AkerMcp.Shared.Serialization
 {
     public class TypeRegistry
     {

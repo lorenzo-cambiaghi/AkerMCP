@@ -32,7 +32,7 @@ UnityTestProject/Recordings/
 UnityTestProject/obj/
 
 # Unity - Plugin DLLs (built from source, not vendored)
-UnityTestProject/Assets/Plugins/MCPSharp/*.dll
+UnityTestProject/Assets/Plugins/AkerMcp/*.dll
 
 # Crash reports
 sysinfo.txt

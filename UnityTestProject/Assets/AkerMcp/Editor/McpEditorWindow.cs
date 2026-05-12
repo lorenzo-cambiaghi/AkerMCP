@@ -2,19 +2,19 @@
 using UnityEngine;
 using UnityEditor;
 
-namespace MCPSharp.Unity.Editor
+namespace AkerMcp.Unity.Editor
 {
     public class McpEditorWindow : EditorWindow
     {
-        [MenuItem("Window/MCPSharp")]
+        [MenuItem("Window/AkerMcp")]
         public static void ShowWindow()
         {
-            GetWindow<McpEditorWindow>("MCPSharp");
+            GetWindow<McpEditorWindow>("AkerMcp");
         }
 
         private void OnGUI()
         {
-            GUILayout.Label("MCPSharp — Game Engine MCP Bridge", EditorStyles.boldLabel);
+            GUILayout.Label("AkerMcp — Game Engine MCP Bridge", EditorStyles.boldLabel);
             EditorGUILayout.Space(10);
 
             var isRunning = UnityMcpPlugin.IsRunning;
@@ -43,14 +43,14 @@ namespace MCPSharp.Unity.Editor
             // Start/Stop button
             if (!isRunning)
             {
-                if (GUILayout.Button("Start MCPSharp Plugin", GUILayout.Height(35)))
+                if (GUILayout.Button("Start AkerMcp Plugin", GUILayout.Height(35)))
                 {
                     UnityMcpPlugin.Instance.Start();
                 }
             }
             else
             {
-                if (GUILayout.Button("Stop MCPSharp Plugin", GUILayout.Height(35)))
+                if (GUILayout.Button("Stop AkerMcp Plugin", GUILayout.Height(35)))
                 {
                     UnityMcpPlugin.Instance.Stop();
                 }
@@ -61,14 +61,14 @@ namespace MCPSharp.Unity.Editor
                 "How to connect:\n" +
                 "1. Click 'Start' above\n" +
                 "2. Run: dotnet run --project Server\n" +
-                "   (from the MCPSharp folder)\n" +
+                "   (from the AkerMcp folder)\n" +
                 "3. The server auto-discovers this plugin\n\n" +
                 "Claude Desktop config:\n" +
                 "{\n" +
                 "  \"mcpServers\": {\n" +
                 "    \"game-engine\": {\n" +
                 "      \"command\": \"dotnet\",\n" +
-                "      \"args\": [\"run\", \"--project\", \"/path/to/MCPSharp/Server\"]\n" +
+                "      \"args\": [\"run\", \"--project\", \"/path/to/AkerMcp/Server\"]\n" +
                 "    }\n" +
                 "  }\n" +
                 "}",

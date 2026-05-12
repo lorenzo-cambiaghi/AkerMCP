@@ -2,9 +2,9 @@ using System;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using MCPSharp.Shared.Protocol;
+using AkerMcp.Shared.Protocol;
 
-namespace MCPSharp.Server
+namespace AkerMcp.Server
 {
     public class McpServer
     {
@@ -27,7 +27,7 @@ namespace MCPSharp.Server
 
         public async Task Run(CancellationToken ct)
         {
-            StdioTransport.LogInfo("MCPSharp server starting...");
+            StdioTransport.LogInfo("AkerMcp server starting...");
 
             while (!ct.IsCancellationRequested)
             {
@@ -37,7 +37,7 @@ namespace MCPSharp.Server
                 await HandleMessage(message.Value, ct).ConfigureAwait(false);
             }
 
-            StdioTransport.LogInfo("MCPSharp server shutting down.");
+            StdioTransport.LogInfo("AkerMcp server shutting down.");
         }
 
         private async Task HandleMessage(JsonElement message, CancellationToken ct)
@@ -132,7 +132,7 @@ namespace MCPSharp.Server
                 ProtocolVersion = McpConstants.ProtocolVersion,
                 ServerInfo = new ImplementationInfo
                 {
-                    Name = "MCPSharp",
+                    Name = "AkerMcp",
                     Version = "1.0.0"
                 },
                 Capabilities = new ServerCapabilities

@@ -1,8 +1,8 @@
 #if UNITY_EDITOR
 using UnityEditor;
-using MCPSharp.Client;
+using AkerMcp.Client;
 
-namespace MCPSharp.Unity
+namespace AkerMcp.Unity
 {
     public class UnityMainThreadDispatcher : MainThreadDispatcherBase
     {

@@ -3,7 +3,7 @@ using System.Collections;
 using System.Reflection;
 using System.Text.RegularExpressions;
 
-namespace MCPSharp.Shared.Reflection
+namespace AkerMcp.Shared.Reflection
 {
     public class PropertyPathResolver
     {

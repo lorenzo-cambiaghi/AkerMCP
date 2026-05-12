@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace MCPSharp.Shared.Protocol
+namespace AkerMcp.Shared.Protocol
 {
     public class InitializeRequestParams
     {
@@ -64,7 +64,7 @@ namespace MCPSharp.Shared.Protocol
     public class ImplementationInfo
     {
         [JsonPropertyName("name")]
-        public string Name { get; set; } = "MCPSharp";
+        public string Name { get; set; } = "AkerMcp";
 
         [JsonPropertyName("version")]
         public string Version { get; set; } = "1.0.0";

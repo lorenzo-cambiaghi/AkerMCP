@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace MCPSharp.Shared.Abstraction
+namespace AkerMcp.Shared.Abstraction
 {
     public interface IEngineCapabilities
     {

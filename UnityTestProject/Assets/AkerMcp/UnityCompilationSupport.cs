@@ -5,9 +5,9 @@ using System.Linq;
 using UnityEditor;
 using UnityEditor.Compilation;
 using UnityEngine;
-using MCPSharp.Shared.Abstraction;
+using AkerMcp.Shared.Abstraction;
 
-namespace MCPSharp.Unity
+namespace AkerMcp.Unity
 {
     public class UnityCompilationSupport : ICompilationSupport
     {
@@ -40,7 +40,7 @@ namespace MCPSharp.Unity
             AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
             CompilationPipeline.RequestScriptCompilation(RequestScriptCompilationOptions.CleanBuildCache);
 
-            Debug.Log("[MCPSharp] Script recompilation requested.");
+            Debug.Log("[AkerMcp] Script recompilation requested.");
         }
 
         public CompilationStatus GetCompilationStatus()
@@ -83,9 +83,9 @@ namespace MCPSharp.Unity
             var warningCount = _messages.Count(m => m.Type == CompileMessageType.Warning);
 
             if (errorCount > 0)
-                Debug.LogWarning($"[MCPSharp] Compilation finished with {errorCount} error(s), {warningCount} warning(s).");
+                Debug.LogWarning($"[AkerMcp] Compilation finished with {errorCount} error(s), {warningCount} warning(s).");
             else
-                Debug.Log($"[MCPSharp] Compilation succeeded. {warningCount} warning(s).");
+                Debug.Log($"[AkerMcp] Compilation succeeded. {warningCount} warning(s).");
         }
 
         private void OnAssemblyCompilationFinished(string assemblyPath, CompilerMessage[] messages)

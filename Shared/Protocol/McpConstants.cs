@@ -1,4 +1,4 @@
-namespace MCPSharp.Shared.Protocol
+namespace AkerMcp.Shared.Protocol
 {
     public static class McpConstants
     {

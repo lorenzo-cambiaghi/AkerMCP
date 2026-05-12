@@ -2,10 +2,10 @@ using System;
 using System.IO.Pipes;
 using System.Threading;
 using System.Threading.Tasks;
-using MCPSharp.Shared.Abstraction;
-using MCPSharp.Shared.Ipc;
+using AkerMcp.Shared.Abstraction;
+using AkerMcp.Shared.Ipc;
 
-namespace MCPSharp.Client
+namespace AkerMcp.Client
 {
     public abstract class EnginePluginBase : IDisposable
     {
@@ -50,7 +50,7 @@ namespace MCPSharp.Client
             _cts = new CancellationTokenSource();
 
             _ = Task.Run(() => RunPipeServer(_cts.Token));
-            Log($"MCPSharp plugin started. Pipe: {_discovery.PipeName}");
+            Log($"AkerMcp plugin started. Pipe: {_discovery.PipeName}");
         }
 
         public void Stop()
@@ -63,7 +63,7 @@ namespace MCPSharp.Client
             _pipeServer?.Dispose();
             _discovery?.Dispose();
 
-            Log("MCPSharp plugin stopped.");
+            Log("AkerMcp plugin stopped.");
         }
 
         private async Task RunPipeServer(CancellationToken ct)

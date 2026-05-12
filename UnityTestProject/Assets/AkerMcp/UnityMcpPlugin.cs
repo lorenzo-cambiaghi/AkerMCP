@@ -1,10 +1,10 @@
 #if UNITY_EDITOR
 using UnityEngine;
-using MCPSharp.Client;
-using MCPSharp.Shared.Abstraction;
-using MCPSharp.Shared.Serialization;
+using AkerMcp.Client;
+using AkerMcp.Shared.Abstraction;
+using AkerMcp.Shared.Serialization;
 
-namespace MCPSharp.Unity
+namespace AkerMcp.Unity
 {
     public class UnityMcpPlugin : EnginePluginBase
     {
@@ -44,8 +44,8 @@ namespace MCPSharp.Unity
             return _compilationSupport;
         }
 
-        protected override void Log(string message) => Debug.Log($"[MCPSharp] {message}");
-        protected override void LogError(string message) => Debug.LogError($"[MCPSharp] {message}");
+        protected override void Log(string message) => Debug.Log($"[AkerMcp] {message}");
+        protected override void LogError(string message) => Debug.LogError($"[AkerMcp] {message}");
 
         public new void Stop()
         {
