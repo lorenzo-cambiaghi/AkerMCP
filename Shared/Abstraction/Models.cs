@@ -64,9 +64,17 @@ namespace AkerMcp.Shared.Abstraction
     {
         public string TypeName { get; set; } = null!;
         public string? Path { get; set; }
+        public List<ComponentInfo>? Components { get; set; }
         public List<PropertyDescriptor> Properties { get; set; } = new();
         public List<MethodDescriptor>? Methods { get; set; }
         public List<string>? ChildNames { get; set; }
         public string? Summary { get; set; }
+    }
+
+    public class ComponentInfo
+    {
+        public string Name { get; set; } = null!;
+        public string FullTypeName { get; set; } = null!;
+        public bool Enabled { get; set; } = true;
     }
 }

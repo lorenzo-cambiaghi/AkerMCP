@@ -29,7 +29,7 @@ aker-mcp lets AI assistants inspect, query, and manipulate game scenes through a
 
 Traditional MCP integrations for game engines implement hundreds of hand-written tools, one per operation. Every new component type or API change requires new code.
 
-aker-mcp replaces that with **11 generic tools** powered by runtime reflection and property path resolution. A single `set_property` tool can modify any property on any object in any engine. The engine-specific adapter layer is typically under 500 lines.
+aker-mcp replaces that with **13 generic tools** powered by runtime reflection and property path resolution. A single `set_property` tool can modify any property on any object in any engine. The engine-specific adapter layer is typically under 500 lines.
 
 ### Key Features
 
@@ -53,7 +53,7 @@ aker-mcp replaces that with **11 generic tools** powered by runtime reflection a
                              │ JSON-RPC 2.0 / stdio
                   ┌──────────▼───────────┐
                   │    aker-mcp Server   │   .NET 8 console process
-                  │   11 MCP tools       │
+                  │   13 MCP tools       │
                   │    5 MCP resources   │
                   └──────────┬───────────┘
                              │ Named Pipe + MessagePack
@@ -81,13 +81,15 @@ The `netstandard2.1` target ensures compatibility with Unity 2021+ and Godot (.N
 
 | Tool | Description |
 |------|-------------|
-| `inspect` | Return properties, methods, and children of a scene object or type |
+| `inspect` | Return components, properties, methods, and children of a scene object or type |
 | `get_property` | Read a property via dot-notation path (e.g. `transform.position.x`) |
 | `set_property` | Write a property — supports primitives, structs, arrays, nested objects |
 | `call_method` | Invoke a method on a scene object or a static class method |
 | `query` | Find objects by type name, name pattern, tag, or property values |
 | `create` | Add a new object to the scene with optional initial properties |
 | `delete` | Remove an object from the scene (supports undo) |
+| `select` | Select a GameObject in the editor — highlights it in the Hierarchy and Inspector |
+| `get_selection` | Get the currently selected object with its components, properties, and children |
 
 ### Development Workflow
 
@@ -102,7 +104,7 @@ The `netstandard2.1` target ensures compatibility with Unity 2021+ and Godot (.N
 
 | URI | Description |
 |-----|-------------|
-| `scene://hierarchy` | Scene tree structure |
+| `scene://hierarchy` | Full scene tree with components listed per object |
 | `project://info` | Engine name/version, project path, active scene |
 | `editor://logs` | Recent console entries |
 | `editor://compile_status` | Compilation status, error/warning counts |
@@ -238,13 +240,25 @@ dotnet build -c Release
 ← {
     "typeName": "Rigidbody",
     "path": "/Player",
+    "components": [
+      {"name": "Transform", "enabled": true},
+      {"name": "Rigidbody", "enabled": true}
+    ],
     "properties": [
       {"name": "position", "type": "Vector3", "value": {"x":0,"y":1,"z":0}},
-      {"name": "mass", "type": "float", "value": 1.0},
+      {"name": "Rigidbody.mass", "type": "float", "value": 1.0},
       ...
     ],
     "childNames": ["PlayerCamera"]
   }
+
+→ select {"object_path": "/Player/PlayerCamera"}
+← {"selected": true, "path": "/Player/PlayerCamera", "name": "PlayerCamera",
+    "components": [{"name":"Transform"}, {"name":"Camera"}]}
+
+→ get_selection {}
+← {"selected": true, "path": "/Player/PlayerCamera", "type": "Camera",
+    "components": [...], "properties": [...], "childCount": 0}
 
 → set_property {
     "object_path": "/Player",

@@ -77,6 +77,8 @@ namespace AkerMcp.Client
                     IpcConstants.Methods.GetCompileErrors => await HandleGetCompileErrors(request, ct),
                     IpcConstants.Methods.GetConsoleLogs => HandleGetConsoleLogs(request),
                     IpcConstants.Methods.ClearConsole => HandleClearConsole(),
+                    IpcConstants.Methods.SelectObject => await HandleSelectObject(request, ct),
+                    IpcConstants.Methods.GetSelection => await HandleGetSelection(ct),
                     _ => throw new InvalidOperationException($"Unknown method: {request.Method}")
                 };
 
@@ -114,6 +116,7 @@ namespace AkerMcp.Client
 
                 var result = _inspector.Inspect(node.UnderlyingObject, depth, includeMethods, filter);
                 result.Path = node.Path;
+                result.Components = node.GetComponents().ToList();
                 result.ChildNames = node.Children.Select(c => c.Name).ToList();
                 return JsonSerializer.Serialize(result, _jsonOptions);
             }, ct);
@@ -483,6 +486,67 @@ namespace AkerMcp.Client
             return "Console state noted. (Logs are retained in buffer for AI access)";
         }
 
+        private async Task<string> HandleSelectObject(IpcRequest request, CancellationToken ct)
+        {
+            if (_editorContext == null)
+                return "{\"error\": \"Editor context not available\"}";
+
+            var args = ParseArgs(request);
+            var objectPath = args.GetProperty("object_path").GetString()!;
+
+            return await _dispatcher.RunOnMainThread(() =>
+            {
+                var node = _sceneGraph.GetNode(objectPath);
+                if (node == null)
+                    return $"{{\"error\": \"Object not found: {objectPath}\"}}";
+
+                _editorContext.SetSelection(objectPath);
+
+                var components = node.GetComponents().ToList();
+                var compList = string.Join(", ", components.Select(c => c.Name));
+
+                return JsonSerializer.Serialize(new
+                {
+                    selected = true,
+                    path = node.Path,
+                    name = node.Name,
+                    components = components
+                }, _jsonOptions);
+            }, ct);
+        }
+
+        private async Task<string> HandleGetSelection(CancellationToken ct)
+        {
+            if (_editorContext == null)
+                return "{\"error\": \"Editor context not available\"}";
+
+            return await _dispatcher.RunOnMainThread(() =>
+            {
+                var selectedPath = _editorContext.GetSelectedObjectPath();
+                if (selectedPath == null)
+                    return "{\"selected\": false, \"message\": \"Nothing selected\"}";
+
+                var node = _sceneGraph.GetNode(selectedPath);
+                if (node == null)
+                    return "{\"selected\": false, \"message\": \"Selection is not a scene object\"}";
+
+                var components = node.GetComponents().ToList();
+                var properties = node.GetProperties().Take(20).ToList();
+
+                return JsonSerializer.Serialize(new
+                {
+                    selected = true,
+                    path = node.Path,
+                    name = node.Name,
+                    type = node.TypeName,
+                    components = components,
+                    properties = properties,
+                    childCount = node.Children.Count(),
+                    childNames = node.Children.Select(c => c.Name).ToList()
+                }, _jsonOptions);
+            }, ct);
+        }
+
         private static JsonElement ParseArgs(IpcRequest request)
         {
             if (request.Payload == null || request.Payload.Length == 0)
@@ -495,8 +559,10 @@ namespace AkerMcp.Client
             var sb = new System.Text.StringBuilder();
             foreach (var node in nodes)
             {
-                sb.Append(new string(' ', indent * 2));
-                sb.AppendLine($"[{node.TypeName}] {node.Name}");
+                var pad = new string(' ', indent * 2);
+                var components = node.GetComponents().ToList();
+                var compList = string.Join(", ", components.Select(c => c.Name));
+                sb.AppendLine($"{pad}{node.Name}  [{compList}]");
                 foreach (var child in node.Children)
                 {
                     sb.Append(RenderTree(new[] { child }, indent + 1));

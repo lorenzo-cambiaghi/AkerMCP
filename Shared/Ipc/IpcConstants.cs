@@ -26,6 +26,8 @@ namespace AkerMcp.Shared.Ipc
             public const string GetCompileErrors = "get_compile_errors";
             public const string GetConsoleLogs = "get_console_logs";
             public const string ClearConsole = "clear_console";
+            public const string SelectObject = "select_object";
+            public const string GetSelection = "get_selection";
         }
     }
 }

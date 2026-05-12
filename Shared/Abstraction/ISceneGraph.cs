@@ -24,6 +24,7 @@ namespace AkerMcp.Shared.Abstraction
         void SetProperty(string propertyPath, object? value);
         object? CallMethod(string methodName, object?[]? args);
 
+        IEnumerable<ComponentInfo> GetComponents();
         IEnumerable<PropertyDescriptor> GetProperties();
         IEnumerable<MethodDescriptor> GetMethods();
 
