@@ -2,7 +2,6 @@
 
 A generic, engine-agnostic [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) bridge for game engines.
 
-																									
 ```text
                                          Aker (Egyptian: ꜣkr) was an
                                          ancient Egyptian earth god,
@@ -14,64 +13,291 @@ A generic, engine-agnostic [Model Context Protocol](https://modelcontextprotocol
    \      /          \      /            passage of the sun through the
     | /    \        /    \ |             underworld, opening the gates
     | |    )|      |(    | |             for its safe transit.
-  (___)  _//        \\_  (___)           
+  (___)  _//        \\_  (___)
        _\_/          \_/_                In this architecture, Aker
                                          serves as the unyielding
                                          bridge: one face speaking
                                          JSON-RPC to the LLM, the
                                          other manipulating the
                                          engine's main thread via IPC.
+```
+
 aker-mcp lets AI assistants inspect, query, and manipulate game scenes through a small set of reflection-based tools that work across **Unity**, **Godot**, and any .NET-compatible engine — without writing engine-specific tool classes.
 
 ---
 
-## Overview
+## In 30 Seconds
 
-Traditional MCP integrations for game engines implement hundreds of hand-written tools, one per operation. Every new component type or API change requires new code.
+Traditional MCP integrations for game engines ship 100+ hand-written tools — one per operation, one per component type. Every engine update breaks them.
 
-aker-mcp replaces that with **13 generic tools** powered by runtime reflection and property path resolution. A single `set_property` tool can modify any property on any object in any engine. The engine-specific adapter layer is typically under 500 lines.
+aker-mcp replaces all of that with **13 generic tools** powered by runtime reflection. A single `set_property` tool can modify *any* property on *any* object in *any* engine. The engine-specific adapter is under 500 lines.
 
-### Key Features
+```
+AI: "Set the player's position to (10, 0, 5)"
 
-- **Engine-agnostic core** — shared protocol, reflection, and serialization layers
-- **Reflection-based property access** — dot-notation paths like `transform.position.x`
-- **Automatic struct handling** — Vector3, Color, Quaternion, Bounds, and custom types
-- **Array and collection support** — get/set elements in arrays, lists, and dictionaries
-- **Script compilation control** — trigger recompilation and retrieve errors with file/line info
-- **Console log access** — read engine logs with level and text filtering
-- **MessagePack IPC** — binary serialization for fast server-to-engine communication
-- **Auto-discovery** — server finds running engine plugins via lock files
+→ set_property {"object_path": "/Player", "property_path": "position", "value": {"x":10,"y":0,"z":5}}
+← Property 'position' set successfully on /Player
+```
+
+No custom tool class needed. No code generation. Just reflection.
 
 ---
 
-## Architecture
+## Table of Contents
+
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Unity Plugin Setup](#unity-plugin-setup)
+- [Connecting an AI Client](#connecting-an-ai-client)
+  - [Claude Code (CLI)](#claude-code-cli)
+  - [Claude Desktop](#claude-desktop)
+  - [Cursor](#cursor)
+  - [Windsurf](#windsurf)
+  - [VS Code + Copilot](#vs-code--copilot)
+- [Verifying the Connection](#verifying-the-connection)
+- [MCP Tools](#mcp-tools)
+- [MCP Resources](#mcp-resources)
+- [Type System](#type-system)
+- [Example Session](#example-session)
+- [Architecture](#architecture)
+- [Writing an Engine Adapter](#writing-an-engine-adapter)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
+
+---
+
+## Prerequisites
+
+You need two things installed before starting:
+
+| Requirement | Version | Check | Install |
+|-------------|---------|-------|---------|
+| **.NET SDK** | 8.0+ | `dotnet --version` | [dotnet.microsoft.com/download](https://dotnet.microsoft.com/download) |
+| **Unity** | 2021.3+ | Unity Hub | [unity.com/download](https://unity.com/download) |
+
+> **Note:** aker-mcp also works with Godot 4.x (.NET), but this guide focuses on Unity. See [Writing an Engine Adapter](#writing-an-engine-adapter) for Godot.
+
+---
+
+## Installation
+
+### Step 1 — Clone the repository
+
+```bash
+git clone https://github.com/lorenzo-cambiaghi/aker-mcp.git
+cd aker-mcp
+```
+
+### Step 2 — Build
+
+```bash
+dotnet build -c Release
+```
+
+You should see:
 
 ```
-                  ┌──────────────────────┐
-                  │  LLM (Claude, etc.)  │
-                  └──────────┬───────────┘
-                             │ JSON-RPC 2.0 / stdio
-                  ┌──────────▼───────────┐
-                  │    aker-mcp Server   │   .NET 8 console process
-                  │   13 MCP tools       │
-                  │    5 MCP resources   │
-                  └──────────┬───────────┘
-                             │ Named Pipe + MessagePack
-                  ┌──────────▼───────────┐
-                  │   Engine Plugin      │   runs inside Unity / Godot
-                  │   ISceneGraph impl   │
-                  └──────────────────────┘
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
 ```
 
-The system is split into three .NET projects:
+### Step 3 — Publish dependencies
 
-| Project | Target | Description |
-|---------|--------|-------------|
-| `AkerMcp.Shared` | netstandard2.1 | Protocol models, engine abstractions, reflection engine, serialization, IPC |
-| `AkerMcp.Server` | net8.0 | MCP server — JSON-RPC over stdio, routes tool calls to the engine plugin |
-| `AkerMcp.Client` | netstandard2.1 | Plugin base class — runs inside the engine, handles IPC and main-thread dispatch |
+This gathers all required DLLs (including MessagePack) into a single folder:
 
-The `netstandard2.1` target ensures compatibility with Unity 2021+ and Godot (.NET).
+```bash
+dotnet publish Shared/AkerMcp.Shared.csproj -c Release -o .publish
+```
+
+That's it. The server is ready to run. Now set up the Unity side.
+
+---
+
+## Unity Plugin Setup
+
+### Step 1 — Copy DLLs into your Unity project
+
+If you're using the included test project (`UnityTestProject/`):
+
+```bash
+./copy-dlls.sh
+```
+
+> If you want to add aker-mcp to your **own** Unity project, copy the DLLs manually:
+>
+> ```bash
+> DEST=path/to/YourProject/Assets/Plugins/AkerMcp
+> mkdir -p $DEST
+>
+> cp .publish/AkerMcp.Shared.dll                        $DEST/
+> cp Client/bin/Release/netstandard2.1/AkerMcp.Client.dll $DEST/
+> cp .publish/MessagePack.dll                            $DEST/
+> cp .publish/MessagePack.Annotations.dll                $DEST/
+> cp .publish/Microsoft.Bcl.AsyncInterfaces.dll          $DEST/
+> cp .publish/Microsoft.NET.StringTools.dll              $DEST/
+> cp .publish/System.Buffers.dll                         $DEST/
+> cp .publish/System.Collections.Immutable.dll           $DEST/
+> cp .publish/System.Memory.dll                          $DEST/
+> cp .publish/System.Runtime.CompilerServices.Unsafe.dll $DEST/
+> cp .publish/System.Text.Encodings.Web.dll              $DEST/
+> cp .publish/System.Text.Json.dll                       $DEST/
+> cp .publish/System.Threading.Tasks.Extensions.dll      $DEST/
+> ```
+>
+> Then copy the adapter scripts from `UnityTestProject/Assets/AkerMcp/` into your project's `Assets/` folder.
+
+### Step 2 — Open the Unity project
+
+Open `UnityTestProject/` (or your own project) in **Unity Hub**.
+
+### Step 3 — Create a test scene (optional)
+
+Menu bar: **AkerMcp → Setup Test Scene**
+
+This creates a scene with a Player (Rigidbody + Camera), three Enemies, a Ground plane, lights, and props — enough to test all tools.
+
+### Step 4 — Start the plugin
+
+Menu bar: **Window → AkerMcp**
+
+Click **Start AkerMcp Plugin**.
+
+You'll see a green **Running** status and a pipe name like `aker-mcp-unity-12345`. The plugin is now waiting for the MCP server to connect.
+
+> **Tip:** The plugin must be running *before* you start the server. The server discovers it automatically via a lock file in your system's temp directory.
+
+---
+
+## Connecting an AI Client
+
+The MCP server is a standalone .NET process that the AI client launches. You configure it once, and it connects to the Unity plugin automatically.
+
+> **Important:** Make sure the Unity plugin is running (green status in the AkerMcp window) before using any tools from the AI client.
+
+### Claude Code (CLI)
+
+Run this once to add the server to your Claude Code configuration:
+
+```bash
+claude mcp add game-engine -- dotnet run --project /absolute/path/to/aker-mcp/Server
+```
+
+Or add it manually to your project's `.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "game-engine": {
+      "command": "dotnet",
+      "args": ["run", "--project", "/absolute/path/to/aker-mcp/Server"]
+    }
+  }
+}
+```
+
+Verify it's registered:
+
+```bash
+claude mcp list
+```
+
+### Claude Desktop
+
+Open **Settings → Developer → Edit Config** and add:
+
+```json
+{
+  "mcpServers": {
+    "game-engine": {
+      "command": "dotnet",
+      "args": ["run", "--project", "/absolute/path/to/aker-mcp/Server"]
+    }
+  }
+}
+```
+
+Config file location:
+- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+
+Restart Claude Desktop after saving.
+
+### Cursor
+
+Open **Settings → MCP** and click **+ Add new MCP server**, then choose **command** type:
+
+```json
+{
+  "mcpServers": {
+    "game-engine": {
+      "command": "dotnet",
+      "args": ["run", "--project", "/absolute/path/to/aker-mcp/Server"]
+    }
+  }
+}
+```
+
+Or add it directly to `.cursor/mcp.json` in your project root.
+
+### Windsurf
+
+Open **Settings → MCP** and add:
+
+```json
+{
+  "mcpServers": {
+    "game-engine": {
+      "command": "dotnet",
+      "args": ["run", "--project", "/absolute/path/to/aker-mcp/Server"]
+    }
+  }
+}
+```
+
+### VS Code + Copilot
+
+Add to your `.vscode/settings.json` or use the **MCP: Add Server** command:
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "game-engine": {
+        "command": "dotnet",
+        "args": ["run", "--project", "/absolute/path/to/aker-mcp/Server"]
+      }
+    }
+  }
+}
+```
+
+> **Windows users:** Replace `/absolute/path/to/aker-mcp/Server` with the full Windows path, e.g. `C:\\Users\\you\\aker-mcp\\Server`. Use double backslashes in JSON.
+
+---
+
+## Verifying the Connection
+
+Once both the Unity plugin and an AI client are running, you can verify the connection:
+
+1. **In Unity** — the AkerMcp window should show **Running** (green)
+2. **In the AI client** — ask the AI to use the `inspect` tool:
+
+```
+"Inspect the scene hierarchy"
+```
+
+You should get back a tree of GameObjects with their components:
+
+```
+Player  [Transform, Rigidbody]
+  PlayerCamera  [Transform, Camera]
+Enemy_1  [Transform, MeshFilter, MeshRenderer, BoxCollider, Rigidbody]
+Enemy_2  [Transform, MeshFilter, MeshRenderer, BoxCollider, Rigidbody]
+Ground  [Transform, MeshFilter, MeshRenderer, MeshCollider]
+```
+
+If you see this, everything is working.
 
 ---
 
@@ -100,7 +326,21 @@ The `netstandard2.1` target ensures compatibility with Unity 2021+ and Godot (.N
 | `get_console_logs` | Read engine console entries with level and text filtering |
 | `execute` | Run arbitrary C# code in the engine context |
 
-### MCP Resources
+### How property paths work
+
+Properties are accessed via **dot-notation paths** resolved at runtime through reflection:
+
+```
+transform.position.x          → float
+Rigidbody.mass                → float (targets a specific component)
+MeshRenderer.material.color   → Color
+```
+
+When a property name is ambiguous (e.g. `enabled` exists on multiple components), prefix it with the component type: `Rigidbody.enabled`, `MeshRenderer.enabled`.
+
+---
+
+## MCP Resources
 
 | URI | Description |
 |-----|-------------|
@@ -124,7 +364,7 @@ The serializer converts between JSON and .NET types via reflection. It handles:
 - **Nested types** — recursive resolution (e.g. `Bounds` containing `Vector3` fields)
 - **Nullable** — automatic unwrap
 
-Engine adapters register custom converters for domain-specific types. The Unity adapter includes converters for:
+The Unity adapter registers optimized converters for:
 
 ```
 Vector2  Vector3  Vector4  Vector2Int  Vector3Int
@@ -132,103 +372,13 @@ Quaternion  Color  Color32  Rect  RectInt
 Bounds  BoundsInt  LayerMask
 ```
 
-JSON format examples:
+JSON examples:
 
 ```json
-{ "x": 1.0, "y": 2.0, "z": 3.0 }
-{ "r": 0.5, "g": 0.0, "b": 1.0, "a": 1.0 }
-{ "center": { "x": 0, "y": 0, "z": 0 }, "size": { "x": 10, "y": 10, "z": 10 } }
-[{ "x": 0, "y": 0, "z": 0 }, { "x": 1, "y": 1, "z": 1 }]
-```
-
----
-
-## Getting Started
-
-### Prerequisites
-
-- [.NET 8 SDK](https://dotnet.microsoft.com/download)
-- Unity 2021.3+ or Godot 4.x (.NET)
-
-### Build
-
-```bash
-git clone https://github.com/youruser/aker-mcp.git
-cd aker-mcp
-dotnet build -c Release
-```
-
-### Unity Setup
-
-1. **Publish dependencies**
-
-   ```bash
-   dotnet publish Shared/AkerMcp.Shared.csproj -c Release -o .publish
-   ```
-
-2. **Copy DLLs into the Unity project**
-
-   ```bash
-   DEST=UnityTestProject/Assets/Plugins/AkerMcp
-   mkdir -p $DEST
-
-   cp .publish/AkerMcp.Shared.dll                        $DEST/
-   cp Client/bin/Release/netstandard2.1/AkerMcp.Client.dll $DEST/
-   cp .publish/MessagePack.dll                            $DEST/
-   cp .publish/MessagePack.Annotations.dll                $DEST/
-   cp .publish/Microsoft.Bcl.AsyncInterfaces.dll          $DEST/
-   cp .publish/Microsoft.NET.StringTools.dll              $DEST/
-   cp .publish/System.Buffers.dll                         $DEST/
-   cp .publish/System.Collections.Immutable.dll           $DEST/
-   cp .publish/System.Memory.dll                          $DEST/
-   cp .publish/System.Runtime.CompilerServices.Unsafe.dll $DEST/
-   cp .publish/System.Text.Encodings.Web.dll              $DEST/
-   cp .publish/System.Text.Json.dll                       $DEST/
-   cp .publish/System.Threading.Tasks.Extensions.dll      $DEST/
-   ```
-
-3. **Open** `UnityTestProject/` in Unity Hub
-
-4. **Create test objects** — menu **AkerMcp > Setup Test Scene**
-
-5. **Start the plugin** — menu **Window > AkerMcp**, click **Start**
-
-6. **Launch the MCP server**
-
-   ```bash
-   dotnet run --project Server
-   ```
-
-   The server discovers the running plugin automatically.
-
-### LLM Configuration
-
-**Claude Desktop / Claude Code**
-
-```json
-{
-  "mcpServers": {
-    "game-engine": {
-      "command": "dotnet",
-      "args": ["run", "--project", "/absolute/path/to/aker-mcp/Server"]
-    }
-  }
-}
-```
-
-**Cursor / VS Code Copilot**
-
-```json
-{
-  "mcp": {
-    "servers": {
-      "game-engine": {
-        "command": "dotnet",
-        "args": ["run", "--project", "/absolute/path/to/aker-mcp/Server"]
-      }
-    }
-  }
-}
+{ "x": 1.0, "y": 2.0, "z": 3.0 }                                              // Vector3
+{ "r": 0.5, "g": 0.0, "b": 1.0, "a": 1.0 }                                    // Color
+{ "center": { "x": 0, "y": 0, "z": 0 }, "size": { "x": 10, "y": 10, "z": 10 }} // Bounds
+[{ "x": 0, "y": 0, "z": 0 }, { "x": 1, "y": 1, "z": 1 }]                      // Vector3[]
 ```
 
 ---
@@ -256,10 +406,6 @@ dotnet build -c Release
 ← {"selected": true, "path": "/Player/PlayerCamera", "name": "PlayerCamera",
     "components": [{"name":"Transform"}, {"name":"Camera"}]}
 
-→ get_selection {}
-← {"selected": true, "path": "/Player/PlayerCamera", "type": "Camera",
-    "components": [...], "properties": [...], "childCount": 0}
-
 → set_property {
     "object_path": "/Player",
     "property_path": "position",
@@ -282,9 +428,71 @@ dotnet build -c Release
 
 ---
 
+## Architecture
+
+```
+                  ┌──────────────────────┐
+                  │  LLM (Claude, etc.)  │
+                  └──────────┬───────────┘
+                             │ JSON-RPC 2.0 / stdio
+                  ┌──────────▼───────────┐
+                  │    aker-mcp Server   │   .NET 8 console process
+                  │   13 MCP tools       │
+                  │    5 MCP resources   │
+                  └──────────┬───────────┘
+                             │ Named Pipe + MessagePack
+                  ┌──────────▼───────────┐
+                  │   Engine Plugin      │   runs inside Unity / Godot
+                  │   ISceneGraph impl   │
+                  └──────────────────────┘
+```
+
+| Project | Target | Description |
+|---------|--------|-------------|
+| `AkerMcp.Shared` | netstandard2.1 | Protocol models, engine abstractions, reflection engine, serialization, IPC |
+| `AkerMcp.Server` | net8.0 | MCP server — JSON-RPC over stdio, routes tool calls to the engine plugin |
+| `AkerMcp.Client` | netstandard2.1 | Plugin base class — runs inside the engine, handles IPC and main-thread dispatch |
+
+### How it works
+
+1. The **engine plugin** starts a named-pipe server and writes a lock file to the system temp directory.
+2. The **MCP server** scans for lock files, connects to the pipe, and begins forwarding tool calls.
+3. The **LLM** sends JSON-RPC requests over stdio. The server forwards them to the engine plugin via MessagePack IPC and returns results as JSON.
+4. The **engine plugin** dispatches requests to the main thread, executes reflection-based operations through `ISceneGraph`/`ISceneNode`, and returns results.
+
+Property paths like `transform.position.x` are resolved at runtime by `PropertyPathResolver`, which walks the object graph via cached reflection metadata. Struct value-type propagation is handled automatically.
+
+### Project structure
+
+```
+aker-mcp/
+├── AkerMcp.sln
+├── Shared/                              AkerMcp.Shared (netstandard2.1)
+│   ├── Protocol/                        JSON-RPC and MCP message models
+│   ├── Abstraction/                     Engine-agnostic interfaces
+│   ├── Reflection/                      PropertyPathResolver, inspector, cache
+│   ├── Serialization/                   GenericSerializer, TypeRegistry
+│   └── Ipc/                             Named pipe channel, binary framing
+├── Server/                              AkerMcp.Server (net8.0 console app)
+│   ├── McpServer.cs                     JSON-RPC dispatcher, MCP lifecycle
+│   ├── ToolRegistry.cs                  13 generic tool definitions
+│   ├── ResourceRegistry.cs             5 resource definitions
+│   ├── EngineConnection.cs             IPC client to engine plugin
+│   └── StdioTransport.cs              stdin/stdout transport
+├── Client/                              AkerMcp.Client (netstandard2.1)
+│   ├── EnginePluginBase.cs             Abstract base for adapters
+│   ├── IpcRequestHandler.cs            Request routing and execution
+│   ├── PluginDiscovery.cs              Lock-file based auto-discovery
+│   └── MainThreadDispatcherBase.cs     Thread-safe queue with TCS pattern
+└── UnityTestProject/                    Unity 6 test project
+    └── Assets/AkerMcp/                  Unity adapter (~500 LOC)
+```
+
+---
+
 ## Writing an Engine Adapter
 
-Subclass `EnginePluginBase` and implement the required interfaces:
+To support a new engine (e.g. Godot), subclass `EnginePluginBase` and implement the required interfaces:
 
 ```csharp
 public class MyEnginePlugin : EnginePluginBase
@@ -307,68 +515,49 @@ public class MyEnginePlugin : EnginePluginBase
 | Interface | Purpose | Required |
 |-----------|---------|:--------:|
 | `ISceneGraph` | Scene tree traversal, create/delete, query | Yes |
-| `ISceneNode` | Property get/set, method invocation per object | Yes |
+| `ISceneNode` | Property get/set, method invocation, component listing | Yes |
 | `IEngineCapabilities` | Type resolution, engine metadata | Yes |
 | `IMainThreadDispatcher` | Marshal actions to the engine's main thread | Yes |
 | `IEditorContext` | Selection, scene management, console logs | No |
 | `IAssetManager` | Asset search, load, save, delete | No |
 | `ICompilationSupport` | Script recompilation, error retrieval | No |
 
-Register custom type converters via `TypeRegistry.Instance.RegisterCustomSerializer<T>(...)` for engine-specific structs.
+Register custom type converters for engine-specific structs:
 
----
-
-## Project Structure
-
-```
-aker-mcp/
-├── AkerMcp.sln
-│
-├── Shared/                              AkerMcp.Shared (netstandard2.1)
-│   ├── Protocol/                        JSON-RPC and MCP message models
-│   ├── Abstraction/                     Engine-agnostic interfaces
-│   ├── Reflection/                      PropertyPathResolver, inspector, cache
-│   ├── Serialization/                   GenericSerializer, TypeRegistry
-│   └── Ipc/                             Named pipe channel, binary framing
-│
-├── Server/                              AkerMcp.Server (net8.0 console app)
-│   ├── McpServer.cs                     JSON-RPC dispatcher, MCP lifecycle
-│   ├── ToolRegistry.cs                  11 generic tool definitions
-│   ├── ResourceRegistry.cs             5 resource definitions
-│   ├── EngineConnection.cs             IPC client to engine plugin
-│   └── StdioTransport.cs              stdin/stdout transport
-│
-├── Client/                              AkerMcp.Client (netstandard2.1)
-│   ├── EnginePluginBase.cs             Abstract base for adapters
-│   ├── IpcRequestHandler.cs            Request routing and execution
-│   ├── PluginDiscovery.cs              Lock-file based auto-discovery
-│   └── MainThreadDispatcherBase.cs     Thread-safe queue with TCS pattern
-│
-└── UnityTestProject/                    Unity 6 test project
-    └── Assets/AkerMcp/                  Unity adapter (~500 LOC)
-        ├── UnitySceneGraph.cs
-        ├── UnitySceneNode.cs
-        ├── UnityCapabilities.cs
-        ├── UnityEditorContext.cs
-        ├── UnityCompilationSupport.cs
-        ├── UnityMainThreadDispatcher.cs
-        ├── UnityMcpPlugin.cs
-        ├── UnityTypeRegistration.cs
-        └── Editor/
-            ├── McpEditorWindow.cs       Start/Stop UI panel
-            └── TestSceneSetup.cs        Menu item to populate a test scene
+```csharp
+TypeRegistry.Instance.RegisterCustomSerializer<Vector3>(
+    v => new Dictionary<string, object?> { ["x"] = v.x, ["y"] = v.y, ["z"] = v.z },
+    d => new Vector3(F(d, "x"), F(d, "y"), F(d, "z"))
+);
 ```
 
 ---
 
-## How It Works
+## Troubleshooting
 
-1. The **engine plugin** starts a named-pipe server and writes a lock file to the system temp directory with the pipe name.
-2. The **MCP server** scans for lock files, connects to the pipe, and begins forwarding tool calls.
-3. The **LLM** sends JSON-RPC requests over stdio. The server deserializes them, forwards to the engine plugin via MessagePack-encoded IPC, and returns the result as JSON.
-4. The **engine plugin** receives IPC requests, dispatches them to the main thread via `IMainThreadDispatcher`, executes reflection-based operations through `ISceneGraph`/`ISceneNode`, and returns serialized results.
+**The server says "No engine plugin discovered"**
 
-Property paths like `transform.position.x` are resolved at runtime by `PropertyPathResolver`, which walks the object graph via cached reflection metadata. Struct value-type propagation is handled automatically — setting a nested field on a `Vector3` correctly propagates the boxed copy back up the chain.
+The Unity plugin must be started *before* the MCP server. Open **Window → AkerMcp** in Unity and click **Start** first.
+
+**Unity shows DLL loading errors**
+
+Make sure you copied *all* DLLs from the `.publish/` folder, including `System.Text.Json.dll`. Unity does not ship this library by default.
+
+**Property not found on component**
+
+Prefix the property with the component type name: `Rigidbody.mass` instead of just `mass`. This disambiguates when multiple components share property names.
+
+**The first server start is slow**
+
+`dotnet run` compiles the server on first launch. Subsequent starts are fast. You can also use `dotnet build -c Release` ahead of time, then run the compiled binary directly:
+
+```bash
+./Server/bin/Release/net8.0/AkerMcp.Server
+```
+
+**Connection drops after Unity recompiles scripts**
+
+Domain reload in Unity tears down the plugin. Re-click **Start** in the AkerMcp window after a recompile, then restart the server.
 
 ---
 
