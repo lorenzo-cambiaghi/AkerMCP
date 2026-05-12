@@ -1,4 +1,5 @@
-#if UNITY_EDITOR
+#nullable enable
+
 using UnityEditor;
 using AkerMcp.Client;
 
@@ -28,4 +29,3 @@ namespace AkerMcp.Unity
         }
     }
 }
-#endif

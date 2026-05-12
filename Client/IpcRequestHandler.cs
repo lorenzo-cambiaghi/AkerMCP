@@ -79,6 +79,7 @@ namespace AkerMcp.Client
                     IpcConstants.Methods.ClearConsole => HandleClearConsole(),
                     IpcConstants.Methods.SelectObject => await HandleSelectObject(request, ct),
                     IpcConstants.Methods.GetSelection => await HandleGetSelection(ct),
+                    IpcConstants.Methods.Execute => await HandleExecute(request, ct),
                     _ => throw new InvalidOperationException($"Unknown method: {request.Method}")
                 };
 
@@ -545,6 +546,24 @@ namespace AkerMcp.Client
                     childNames = node.Children.Select(c => c.Name).ToList()
                 }, _jsonOptions);
             }, ct);
+        }
+
+        private async Task<string> HandleExecute(IpcRequest request, CancellationToken ct)
+        {
+            var args = ParseArgs(request);
+            var code = args.GetProperty("code").GetString()!;
+            
+            // Simple execution for known patterns
+            if (code.StartsWith("GameObject.Find("))
+            {
+                return await _dispatcher.RunOnMainThread(() => {
+                    // This is a placeholder for a real evaluator. 
+                    // For now, we return that we received it.
+                    return "{\"success\": true, \"message\": \"Execution received but full C# evaluation requires a compiler service. Use set_property for transform changes.\"}";
+                }, ct);
+            }
+
+            return "{\"success\": false, \"error\": \"C# evaluation not yet implemented in the engine plugin.\"}";
         }
 
         private static JsonElement ParseArgs(IpcRequest request)

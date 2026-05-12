@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -50,7 +52,7 @@ namespace AkerMcp.Unity
             }
         }
 
-        public ISceneNode Parent
+        public ISceneNode? Parent
         {
             get
             {
@@ -70,7 +72,7 @@ namespace AkerMcp.Unity
 
         public object UnderlyingObject => _go;
 
-        public object GetProperty(string propertyPath)
+        public object? GetProperty(string propertyPath)
         {
             var segments = propertyPath.Split(new[] { '.' }, 2);
             var firstSegment = segments[0];
@@ -96,7 +98,7 @@ namespace AkerMcp.Unity
                 $"Property '{propertyPath}' not found on '{Name}' or any of its components");
         }
 
-        public void SetProperty(string propertyPath, object value)
+        public void SetProperty(string propertyPath, object? value)
         {
             // Direct GameObject properties
             if (TrySetGameObjectProperty(propertyPath, value))
@@ -124,7 +126,7 @@ namespace AkerMcp.Unity
                 $"Cannot set property '{propertyPath}' on '{Name}' — not found on any component");
         }
 
-        public object CallMethod(string methodName, object[] args)
+        public object? CallMethod(string methodName, object?[]? args)
         {
             var invoker = new MethodInvoker();
 
@@ -191,7 +193,7 @@ namespace AkerMcp.Unity
                     var displayName = prefix + prop.Name;
                     if (!seen.Add(displayName)) continue;
 
-                    object value = null;
+                    object? value = null;
                     try { if (prop.CanRead) value = prop.GetValue(component); } catch { }
 
                     yield return new PropertyDescriptor
@@ -239,7 +241,7 @@ namespace AkerMcp.Unity
             }
         }
 
-        private bool TryGetGameObjectProperty(string name, string remainder, out object result)
+        private bool TryGetGameObjectProperty(string name, string? remainder, out object? result)
         {
             result = null;
             switch (name.ToLowerInvariant())
@@ -253,7 +255,7 @@ namespace AkerMcp.Unity
             }
         }
 
-        private bool TrySetGameObjectProperty(string propertyPath, object value)
+        private bool TrySetGameObjectProperty(string propertyPath, object? value)
         {
             switch (propertyPath.ToLowerInvariant())
             {

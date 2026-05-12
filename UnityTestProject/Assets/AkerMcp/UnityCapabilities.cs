@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -23,7 +25,7 @@ namespace AkerMcp.Unity
 
         public IEnumerable<string> GetRegisteredTypeNames() => _aliases.Keys;
 
-        public Type ResolveType(string typeName)
+        public Type? ResolveType(string typeName)
         {
             if (_aliases.TryGetValue(typeName, out var type))
                 return type;
@@ -44,7 +46,7 @@ namespace AkerMcp.Unity
             _aliases[alias] = type;
         }
 
-        public static Type ResolveUnityType(string typeName)
+        public static Type? ResolveUnityType(string typeName)
         {
             var builtins = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase)
             {

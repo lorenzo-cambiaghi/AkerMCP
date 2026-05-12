@@ -1,4 +1,5 @@
-#if UNITY_EDITOR
+#nullable enable
+
 using UnityEngine;
 using AkerMcp.Client;
 using AkerMcp.Shared.Abstraction;
@@ -8,9 +9,9 @@ namespace AkerMcp.Unity
 {
     public class UnityMcpPlugin : EnginePluginBase
     {
-        private static UnityMcpPlugin _instance;
-        private UnityMainThreadDispatcher _dispatcher;
-        private UnityCompilationSupport _compilationSupport;
+        private static UnityMcpPlugin? _instance;
+        private UnityMainThreadDispatcher? _dispatcher;
+        private UnityCompilationSupport? _compilationSupport;
 
         public static UnityMcpPlugin Instance
         {
@@ -23,7 +24,7 @@ namespace AkerMcp.Unity
         }
 
         public static bool IsRunning => _instance != null && _instance.Config.PipeName != null;
-        public string CurrentPipeName => Config.PipeName;
+        public string? CurrentPipeName => Config.PipeName;
 
         protected override ISceneGraph CreateSceneGraph()
         {
@@ -36,9 +37,9 @@ namespace AkerMcp.Unity
             _dispatcher = new UnityMainThreadDispatcher();
             return _dispatcher;
         }
-        protected override IEditorContext CreateEditorContext() => new UnityEditorContext();
-        protected override IAssetManager CreateAssetManager() => null;
-        protected override ICompilationSupport CreateCompilationSupport()
+        protected override IEditorContext? CreateEditorContext() => new UnityEditorContext();
+        protected override IAssetManager? CreateAssetManager() => null;
+        protected override ICompilationSupport? CreateCompilationSupport()
         {
             _compilationSupport = new UnityCompilationSupport();
             return _compilationSupport;
@@ -55,4 +56,3 @@ namespace AkerMcp.Unity
         }
     }
 }
-#endif
