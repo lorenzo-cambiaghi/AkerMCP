@@ -1,0 +1,43 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.userprefs
+*.nupkg
+*.snupkg
+project.lock.json
+*.nuget.props
+*.nuget.targets
+.vs/
+
+# IDE
+.idea/
+*.swp
+*~
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Unity - Library, Temp, Build
+UnityTestProject/Library/
+UnityTestProject/Temp/
+UnityTestProject/Logs/
+UnityTestProject/UserSettings/
+UnityTestProject/Builds/
+UnityTestProject/MemoryCaptures/
+UnityTestProject/Recordings/
+UnityTestProject/obj/
+
+# Unity - Plugin DLLs (built from source, not vendored)
+UnityTestProject/Assets/Plugins/MCPSharp/*.dll
+
+# Crash reports
+sysinfo.txt
+crashlytics-build.properties
+
+# Publish output
+/publish/
+/tmp/
