@@ -1,19 +1,23 @@
 
 
 																									
-    ,=^-=,                    ,=^-=,
-  ./  o   \                  /   o  \.        Aker (Egyptian: ꜣkr) was an ancient Egyptian earth god,
-  #~ <    |                  |    > ~#        often depicted as two lions seated back-to-back facing
-  '._    /                   \    _.'         opposite horizons. Named Sef and Duau (Yesterday and
-     '._--\                  /--_.'           Today), they guarded the passage of the sun through the
-      /    \                /     \           underworld, opening the gates for its safe transit.
-      |   /|               |  |\  |          
-      |  /   \             /    \ |           In this architecture, Aker serves as the unyielding
-      / |   _ \           / _   | \           bridge: one face speaking JSON-RPC to the LLM, the
-     /  |  | | |         | | |  |  \          other manipulating the engine's main thread via IPC.
-   _/  /|  |_| |         | |_|  |\  \_       
-  (___/  \_(__.|         |.__)_/  \___)      
-=========\'___/_|_______|_\___/'=========
+                                         Aker (Egyptian: ꜣkr) was an
+                                         ancient Egyptian earth god,
+                                         often depicted as two lions
+    /\__/\             /\__/\            seated back-to-back facing
+  (  -.-  )          (  -.-  )           opposite horizons. Named
+  >       <          >       <           Sef and Duau (Yesterday and
+   /      )          (      \            Today), they guarded the
+   \      /          \      /            passage of the sun through the
+    | /    \        /    \ |             underworld, opening the gates
+    | |    )|      |(    | |             for its safe transit.
+  (___)  _//        \\_  (___)           
+       _\_/          \_/_                In this architecture, Aker
+                                         serves as the unyielding
+                                         bridge: one face speaking
+                                         JSON-RPC to the LLM, the
+                                         other manipulating the
+                                         engine's main thread via IPC.
 
 # MCPSharp
 
