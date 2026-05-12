@@ -40,5 +40,13 @@ crashlytics-build.properties
 
 # Publish output
 .publish/
+.publish_debug/
 /publish/
 /tmp/
+
+# Temporary files
+*.txt
+!README.txt
+
+# Unity - Plugin DLL meta files
+UnityTestProject/Assets/Plugins/AkerMcp/*.dll.meta

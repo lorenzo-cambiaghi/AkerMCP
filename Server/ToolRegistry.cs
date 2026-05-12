@@ -59,8 +59,8 @@ namespace AkerMcp.Server
                     ""type"": ""object"",
                     ""properties"": {
                         ""target"": { ""type"": ""string"", ""description"": ""Scene path (e.g. '/root/Player') or type name"" },
-                        ""depth"": { ""type"": ""integer"", ""description"": ""Inspection depth (default: 1)"", ""default"": 1 },
-                        ""include_methods"": { ""type"": ""boolean"", ""description"": ""Include method signatures"", ""default"": false },
+                        ""depth"": { ""type"": ""integer"", ""description"": ""Inspection depth (default: 1)"" },
+                        ""include_methods"": { ""type"": ""boolean"", ""description"": ""Include method signatures"" },
                         ""filter"": { ""type"": ""string"", ""description"": ""Regex filter on names"" }
                     },
                     ""required"": [""target""]
@@ -88,7 +88,7 @@ namespace AkerMcp.Server
                     ""properties"": {
                         ""object_path"": { ""type"": ""string"", ""description"": ""Scene path to the object"" },
                         ""property_path"": { ""type"": ""string"", ""description"": ""Dot-notation property path"" },
-                        ""value"": { ""description"": ""Value to set (JSON object for complex types)"" }
+                        ""value"": { ""description"": ""Value to set (can be number, string, bool, or object)"" }
                     },
                     ""required"": [""object_path"", ""property_path"", ""value""]
                 }"),
@@ -101,7 +101,7 @@ namespace AkerMcp.Server
                     ""properties"": {
                         ""target"": { ""type"": ""string"", ""description"": ""Scene path or fully qualified type name"" },
                         ""method"": { ""type"": ""string"", ""description"": ""Method name"" },
-                        ""args"": { ""type"": ""array"", ""description"": ""Method arguments in order"" }
+                        ""args"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Method arguments in order (as strings)"" }
                     },
                     ""required"": [""target"", ""method""]
                 }"),
@@ -116,7 +116,7 @@ namespace AkerMcp.Server
                         ""name_pattern"": { ""type"": ""string"", ""description"": ""Glob or regex on object name"" },
                         ""property_filter"": { ""type"": ""object"", ""description"": ""Key-value pairs to match"" },
                         ""tag"": { ""type"": ""string"" },
-                        ""max_results"": { ""type"": ""integer"", ""default"": 50 }
+                        ""max_results"": { ""type"": ""integer"", ""description"": ""Max results (default 50)"" }
                     }
                 }"),
                 (args, ct) => _engine.ForwardToolCall("query", args, ct),
@@ -142,7 +142,7 @@ namespace AkerMcp.Server
                     ""type"": ""object"",
                     ""properties"": {
                         ""object_path"": { ""type"": ""string"", ""description"": ""Path to the object to delete"" },
-                        ""recursive"": { ""type"": ""boolean"", ""default"": true }
+                        ""recursive"": { ""type"": ""boolean"", ""description"": ""Delete children recursively"" }
                     },
                     ""required"": [""object_path""]
                 }"),
@@ -154,7 +154,7 @@ namespace AkerMcp.Server
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
-                        ""wait_for_completion"": { ""type"": ""boolean"", ""description"": ""Wait for compilation to finish before returning (default: true)"", ""default"": true }
+                        ""wait_for_completion"": { ""type"": ""boolean"", ""description"": ""Wait for compilation to finish before returning (default: true)"" }
                     }
                 }"),
                 (args, ct) => _engine.ForwardToolCall("refresh_scripts", args, ct));
@@ -164,7 +164,7 @@ namespace AkerMcp.Server
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
-                        ""errors_only"": { ""type"": ""boolean"", ""description"": ""Only return errors, skip warnings (default: false)"", ""default"": false }
+                        ""errors_only"": { ""type"": ""boolean"", ""description"": ""Only return errors, skip warnings (default: false)"" }
                     }
                 }"),
                 (args, ct) => _engine.ForwardToolCall("get_compile_errors", args, ct),
@@ -175,8 +175,8 @@ namespace AkerMcp.Server
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
-                        ""count"": { ""type"": ""integer"", ""description"": ""Number of recent entries to return (default: 50)"", ""default"": 50 },
-                        ""level_filter"": { ""type"": ""string"", ""description"": ""Filter by level: 'error', 'warning', 'info', or 'all' (default: 'all')"", ""default"": ""all"" },
+                        ""count"": { ""type"": ""integer"", ""description"": ""Number of recent entries to return (default: 50)"" },
+                        ""level_filter"": { ""type"": ""string"", ""description"": ""Filter by level: 'error', 'warning', 'info', or 'all' (default: 'all')"" },
                         ""search"": { ""type"": ""string"", ""description"": ""Filter messages containing this text"" }
                     }
                 }"),
@@ -209,7 +209,7 @@ namespace AkerMcp.Server
                     ""type"": ""object"",
                     ""properties"": {
                         ""code"": { ""type"": ""string"", ""description"": ""C# code to execute"" },
-                        ""timeout_ms"": { ""type"": ""integer"", ""default"": 5000 }
+                        ""timeout_ms"": { ""type"": ""integer"", ""description"": ""Timeout in ms"" }
                     },
                     ""required"": [""code""]
                 }"),

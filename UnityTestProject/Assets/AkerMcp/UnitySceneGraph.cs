@@ -1,3 +1,5 @@
+#nullable enable
+
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -9,7 +11,7 @@ namespace AkerMcp.Unity
 {
     public class UnitySceneGraph : ISceneGraph
     {
-        public ISceneNode GetNode(string path)
+        public ISceneNode? GetNode(string path)
         {
             var go = FindByPath(path);
             if (go == null) return null;
@@ -29,7 +31,7 @@ namespace AkerMcp.Unity
 
         public IEnumerable<ISceneNode> Query(QueryFilter filter)
         {
-            var allObjects = Object.FindObjectsByType<GameObject>(FindObjectsSortMode.None);
+            var allObjects = Object.FindObjectsByType<GameObject>(FindObjectsInactive.Exclude);
             int count = 0;
 
             foreach (var go in allObjects)
@@ -68,7 +70,7 @@ namespace AkerMcp.Unity
             }
         }
 
-        public ISceneNode CreateNode(string type, string name, string parentPath)
+        public ISceneNode CreateNode(string type, string? name, string? parentPath)
         {
             var go = new GameObject(name ?? type);
 
@@ -107,10 +109,10 @@ namespace AkerMcp.Unity
 
         public int GetTotalNodeCount()
         {
-            return Object.FindObjectsByType<GameObject>(FindObjectsSortMode.None).Length;
+            return Object.FindObjectsByType<GameObject>(FindObjectsInactive.Exclude).Length;
         }
 
-        private static GameObject FindByPath(string path)
+        private static GameObject? FindByPath(string? path)
         {
             if (string.IsNullOrEmpty(path)) return null;
 
@@ -126,7 +128,7 @@ namespace AkerMcp.Unity
             var current = root;
             for (int i = 1; i < parts.Length; i++)
             {
-                Transform child = null;
+                Transform? child = null;
                 for (int j = 0; j < current.transform.childCount; j++)
                 {
                     var c = current.transform.GetChild(j);

@@ -65,17 +65,30 @@ namespace AkerMcp.Shared.Serialization
                 return JsonElementToObject(element, underlyingNullable);
 
             // Primitives
-            if (targetType == typeof(string)) return element.GetString();
-            if (targetType == typeof(int)) return element.TryGetInt32(out var i) ? i : (int)element.GetDouble();
-            if (targetType == typeof(long)) return element.TryGetInt64(out var l) ? l : (long)element.GetDouble();
-            if (targetType == typeof(float)) return (float)element.GetDouble();
-            if (targetType == typeof(double)) return element.GetDouble();
-            if (targetType == typeof(bool)) return element.GetBoolean();
-            if (targetType == typeof(decimal)) return element.GetDecimal();
-            if (targetType == typeof(byte)) return (byte)element.GetInt32();
-            if (targetType == typeof(short)) return (short)element.GetInt32();
-            if (targetType == typeof(uint)) return (uint)element.GetInt64();
-            if (targetType == typeof(ulong)) return (ulong)element.GetDouble();
+            if (targetType == typeof(string)) return element.ValueKind == JsonValueKind.String ? element.GetString() : element.GetRawText();
+            
+            if (targetType == typeof(int)) 
+                return element.ValueKind == JsonValueKind.String && int.TryParse(element.GetString(), out var i2) ? i2 : (element.TryGetInt32(out var i) ? i : (int)element.GetDouble());
+            
+            if (targetType == typeof(long)) 
+                return element.ValueKind == JsonValueKind.String && long.TryParse(element.GetString(), out var l2) ? l2 : (element.TryGetInt64(out var l) ? l : (long)element.GetDouble());
+            
+            if (targetType == typeof(float)) 
+                return element.ValueKind == JsonValueKind.String && float.TryParse(element.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var f2) ? f2 : (float)element.GetDouble();
+            
+            if (targetType == typeof(double)) 
+                return element.ValueKind == JsonValueKind.String && double.TryParse(element.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d2) ? d2 : element.GetDouble();
+            
+            if (targetType == typeof(bool)) 
+                return element.ValueKind == JsonValueKind.String && bool.TryParse(element.GetString(), out var b2) ? b2 : element.GetBoolean();
+            
+            if (targetType == typeof(decimal)) 
+                return element.ValueKind == JsonValueKind.String && decimal.TryParse(element.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var dec2) ? dec2 : element.GetDecimal();
+            
+            if (targetType == typeof(byte)) return (byte)(element.ValueKind == JsonValueKind.String ? byte.Parse(element.GetString()!) : element.GetInt32());
+            if (targetType == typeof(short)) return (short)(element.ValueKind == JsonValueKind.String ? short.Parse(element.GetString()!) : element.GetInt32());
+            if (targetType == typeof(uint)) return (uint)(element.ValueKind == JsonValueKind.String ? uint.Parse(element.GetString()!) : element.GetInt64());
+            if (targetType == typeof(ulong)) return (ulong)(element.ValueKind == JsonValueKind.String ? ulong.Parse(element.GetString()!) : element.GetDouble());
 
             // Enum
             if (targetType.IsEnum)

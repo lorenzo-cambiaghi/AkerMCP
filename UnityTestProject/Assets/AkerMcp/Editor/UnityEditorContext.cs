@@ -1,4 +1,5 @@
-#if UNITY_EDITOR
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -7,6 +8,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using AkerMcp.Shared.Abstraction;
 using LogLevel = AkerMcp.Shared.Abstraction.LogLevel;
+using LogEntry = AkerMcp.Shared.Abstraction.LogEntry;
 
 namespace AkerMcp.Unity
 {
@@ -22,7 +24,7 @@ namespace AkerMcp.Unity
             Application.logMessageReceived += OnLogMessage;
         }
 
-        public string GetSelectedObjectPath()
+        public string? GetSelectedObjectPath()
         {
             var selected = Selection.activeGameObject;
             if (selected == null) return null;
@@ -37,7 +39,7 @@ namespace AkerMcp.Unity
                 Selection.activeGameObject = node.UnderlyingObject as GameObject;
         }
 
-        public string GetCurrentScenePath()
+        public string? GetCurrentScenePath()
         {
             var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
             return string.IsNullOrEmpty(scene.path) ? null : scene.path;
@@ -100,4 +102,3 @@ namespace AkerMcp.Unity
         }
     }
 }
-#endif
