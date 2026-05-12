@@ -4,9 +4,9 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using MCPSharp.Shared.Protocol;
+using AkerMcp.Shared.Protocol;
 
-namespace MCPSharp.Server
+namespace AkerMcp.Server
 {
     public class StdioTransport : IDisposable
     {
@@ -59,12 +59,12 @@ namespace MCPSharp.Server
 
         public static void LogError(string message)
         {
-            Console.Error.WriteLine($"[MCPSharp] ERROR: {message}");
+            Console.Error.WriteLine($"[AkerMcp] ERROR: {message}");
         }
 
         public static void LogInfo(string message)
         {
-            Console.Error.WriteLine($"[MCPSharp] INFO: {message}");
+            Console.Error.WriteLine($"[AkerMcp] INFO: {message}");
         }
 
         public void Dispose()

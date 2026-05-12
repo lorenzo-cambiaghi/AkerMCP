@@ -5,7 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using MessagePack;
 
-namespace MCPSharp.Shared.Ipc
+namespace AkerMcp.Shared.Ipc
 {
     public class IpcChannel : IDisposable
     {

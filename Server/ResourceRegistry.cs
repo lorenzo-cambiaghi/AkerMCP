@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using MCPSharp.Shared.Protocol;
+using AkerMcp.Shared.Protocol;
 
-namespace MCPSharp.Server
+namespace AkerMcp.Server
 {
     public class ResourceRegistry
     {

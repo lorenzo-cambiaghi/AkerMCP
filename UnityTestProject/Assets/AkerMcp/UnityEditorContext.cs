@@ -5,10 +5,10 @@ using System.Linq;
 using UnityEngine;
 using UnityEditor;
 using UnityEditor.SceneManagement;
-using MCPSharp.Shared.Abstraction;
-using LogLevel = MCPSharp.Shared.Abstraction.LogLevel;
+using AkerMcp.Shared.Abstraction;
+using LogLevel = AkerMcp.Shared.Abstraction.LogLevel;
 
-namespace MCPSharp.Unity
+namespace AkerMcp.Unity
 {
     public class UnityEditorContext : IEditorContext
     {
@@ -67,9 +67,9 @@ namespace MCPSharp.Unity
         {
             switch (level)
             {
-                case LogLevel.Warning: Debug.LogWarning($"[MCPSharp] {message}"); break;
-                case LogLevel.Error: Debug.LogError($"[MCPSharp] {message}"); break;
-                default: Debug.Log($"[MCPSharp] {message}"); break;
+                case LogLevel.Warning: Debug.LogWarning($"[AkerMcp] {message}"); break;
+                case LogLevel.Error: Debug.LogError($"[AkerMcp] {message}"); break;
+                default: Debug.Log($"[AkerMcp] {message}"); break;
             }
         }
 

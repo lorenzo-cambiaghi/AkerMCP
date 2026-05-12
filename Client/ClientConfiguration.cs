@@ -1,4 +1,4 @@
-namespace MCPSharp.Client
+namespace AkerMcp.Client
 {
     public class ClientConfiguration
     {

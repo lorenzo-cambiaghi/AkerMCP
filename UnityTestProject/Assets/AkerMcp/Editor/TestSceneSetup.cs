@@ -2,11 +2,11 @@
 using UnityEngine;
 using UnityEditor;
 
-namespace MCPSharp.Unity.Editor
+namespace AkerMcp.Unity.Editor
 {
     public static class TestSceneSetup
     {
-        [MenuItem("MCPSharp/Setup Test Scene")]
+        [MenuItem("AkerMcp/Setup Test Scene")]
         public static void SetupTestScene()
         {
             // Player with child camera and rigidbody
@@ -65,8 +65,8 @@ namespace MCPSharp.Unity.Editor
             crate.transform.position = new Vector3(5, 0.5f, 0);
             Undo.RegisterCreatedObjectUndo(crate, "Create Crate");
 
-            Debug.Log("[MCPSharp] Test scene setup complete! Objects created: Player, 3 Enemies, Ground, PointLight, Props (Barrel, Crate)");
-            EditorUtility.DisplayDialog("MCPSharp Test Scene",
+            Debug.Log("[AkerMcp] Test scene setup complete! Objects created: Player, 3 Enemies, Ground, PointLight, Props (Barrel, Crate)");
+            EditorUtility.DisplayDialog("AkerMcp Test Scene",
                 "Test scene objects created:\n\n" +
                 "- Player (with PlayerCamera + Rigidbody)\n" +
                 "- Enemy_1, Enemy_2, Enemy_3 (cubes with Rigidbody)\n" +

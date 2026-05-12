@@ -3,10 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using UnityEngine;
-using MCPSharp.Shared.Abstraction;
-using MCPSharp.Shared.Reflection;
+using AkerMcp.Shared.Abstraction;
+using AkerMcp.Shared.Reflection;
 
-namespace MCPSharp.Unity
+namespace AkerMcp.Unity
 {
     public class UnitySceneNode : ISceneNode
     {

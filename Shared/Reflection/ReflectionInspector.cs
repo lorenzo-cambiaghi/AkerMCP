@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
-using MCPSharp.Shared.Abstraction;
+using AkerMcp.Shared.Abstraction;
 
-namespace MCPSharp.Shared.Reflection
+namespace AkerMcp.Shared.Reflection
 {
     public class ReflectionInspector
     {

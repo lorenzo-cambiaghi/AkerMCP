@@ -1,9 +1,9 @@
-namespace MCPSharp.Shared.Ipc
+namespace AkerMcp.Shared.Ipc
 {
     public static class IpcConstants
     {
-        public const string PipePrefix = "mcpsharp-";
-        public const string DiscoveryDirectory = "mcpsharp";
+        public const string PipePrefix = "aker-mcp-";
+        public const string DiscoveryDirectory = "aker-mcp";
 
         public static class Methods
         {

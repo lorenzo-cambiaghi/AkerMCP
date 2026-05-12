@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 
-namespace MCPSharp.Shared.Reflection
+namespace AkerMcp.Shared.Reflection
 {
     public class MethodInvoker
     {

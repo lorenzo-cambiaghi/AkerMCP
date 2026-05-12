@@ -3,11 +3,11 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MCPSharp.Shared", "Shared\MCPSharp.Shared.csproj", "{31CD9891-60BF-4F6E-8FFB-A65874A17EC8}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AkerMcp.Shared", "Shared\AkerMcp.Shared.csproj", "{31CD9891-60BF-4F6E-8FFB-A65874A17EC8}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MCPSharp.Server", "Server\MCPSharp.Server.csproj", "{A9621B84-5769-4262-9233-FAA4459E6062}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AkerMcp.Server", "Server\AkerMcp.Server.csproj", "{A9621B84-5769-4262-9233-FAA4459E6062}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MCPSharp.Client", "Client\MCPSharp.Client.csproj", "{D78F6538-1D5A-498B-99C8-DC122EED39D2}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AkerMcp.Client", "Client\AkerMcp.Client.csproj", "{D78F6538-1D5A-498B-99C8-DC122EED39D2}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

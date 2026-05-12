@@ -2,7 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace MCPSharp.Shared.Abstraction
+namespace AkerMcp.Shared.Abstraction
 {
     public interface IMainThreadDispatcher
     {

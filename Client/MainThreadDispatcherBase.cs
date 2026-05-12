@@ -2,9 +2,9 @@ using System;
 using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
-using MCPSharp.Shared.Abstraction;
+using AkerMcp.Shared.Abstraction;
 
-namespace MCPSharp.Client
+namespace AkerMcp.Client
 {
     public abstract class MainThreadDispatcherBase : IMainThreadDispatcher
     {

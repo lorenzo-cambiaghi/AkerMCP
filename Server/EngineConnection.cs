@@ -5,12 +5,12 @@ using System.IO.Pipes;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using MCPSharp.Shared.Ipc;
-using MCPSharp.Shared.Protocol;
-using MCPSharp.Shared.Serialization;
+using AkerMcp.Shared.Ipc;
+using AkerMcp.Shared.Protocol;
+using AkerMcp.Shared.Serialization;
 using MessagePack;
 
-namespace MCPSharp.Server
+namespace AkerMcp.Server
 {
     public class EngineConnection : IDisposable
     {
