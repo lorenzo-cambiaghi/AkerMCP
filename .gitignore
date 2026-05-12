@@ -39,5 +39,6 @@ sysinfo.txt
 crashlytics-build.properties
 
 # Publish output
+.publish/
 /publish/
 /tmp/
