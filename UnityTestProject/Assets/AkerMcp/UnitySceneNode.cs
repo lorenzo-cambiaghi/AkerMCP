@@ -148,6 +148,26 @@ namespace AkerMcp.Unity
                 $"Method '{methodName}' not found on '{Name}' or any of its components");
         }
 
+        public IEnumerable<ComponentInfo> GetComponents()
+        {
+            foreach (var component in _go.GetComponents<Component>())
+            {
+                if (component == null) continue;
+                var type = component.GetType();
+                bool enabled = true;
+                if (component is Behaviour b) enabled = b.enabled;
+                else if (component is Renderer r) enabled = r.enabled;
+                else if (component is Collider c) enabled = c.enabled;
+
+                yield return new ComponentInfo
+                {
+                    Name = type.Name,
+                    FullTypeName = type.FullName ?? type.Name,
+                    Enabled = enabled
+                };
+            }
+        }
+
         public IEnumerable<PropertyDescriptor> GetProperties()
         {
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

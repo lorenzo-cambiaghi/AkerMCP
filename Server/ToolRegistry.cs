@@ -183,6 +183,26 @@ namespace AkerMcp.Server
                 (args, ct) => _engine.ForwardToolCall("get_console_logs", args, ct),
                 new ToolAnnotations { ReadOnlyHint = true });
 
+            Register("select",
+                "Select a GameObject in the editor hierarchy. This highlights it in the Inspector and Scene view, making it the active selection for manual editing.",
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""object_path"": { ""type"": ""string"", ""description"": ""Scene path to select (e.g. '/Player/PlayerCamera')"" }
+                    },
+                    ""required"": [""object_path""]
+                }"),
+                (args, ct) => _engine.ForwardToolCall("select_object", args, ct));
+
+            Register("get_selection",
+                "Get the currently selected GameObject in the editor, including its path, components, and property summary.",
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {}
+                }"),
+                (args, ct) => _engine.ForwardToolCall("get_selection", args, ct),
+                new ToolAnnotations { ReadOnlyHint = true });
+
             Register("execute",
                 "Execute arbitrary C# code in the engine context (escape hatch)",
                 ParseSchema(@"{
