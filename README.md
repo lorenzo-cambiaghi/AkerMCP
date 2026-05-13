@@ -1,5 +1,9 @@
 # aker-mcp
 
+![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
+![Platform](https://img.shields.io/badge/platform-Unity%20%7C%20Godot-lightgrey.svg)
+![MCP](https://img.shields.io/badge/mcp-compatible-green.svg)
+
 A generic, engine-agnostic [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) bridge for game engines.
 
 ```text
@@ -22,7 +26,7 @@ A generic, engine-agnostic [Model Context Protocol](https://modelcontextprotocol
                                          engine's main thread via IPC.
 ```
 
-aker-mcp lets AI assistants inspect, query, and manipulate game scenes through a small set of reflection-based tools that work across **Unity**, **Godot**, and any .NET-compatible engine — without writing engine-specific tool classes.
+aker-mcp lets AI assistants inspect, query, and manipulate game scenes through a small set of reflection-based tools and **Roslyn-powered dynamic scripting** that work across **Unity**, **Godot**, and any .NET-compatible engine — without writing engine-specific tool classes.
 
 ---
 
@@ -30,7 +34,7 @@ aker-mcp lets AI assistants inspect, query, and manipulate game scenes through a
 
 Traditional MCP integrations for game engines ship 100+ hand-written tools — one per operation, one per component type. Every engine update breaks them.
 
-aker-mcp replaces all of that with **13 generic tools** powered by runtime reflection. A single `set_property` tool can modify *any* property on *any* object in *any* engine. The engine-specific adapter is under 500 lines.
+aker-mcp replaces all of that with **13 generic tools** powered by runtime reflection and **Roslyn**. A single `set_property` tool can modify *any* property on *any* object in *any* engine, while the `execute` tool enables complex procedural generation via C# scripts. The engine-specific adapter provides the necessary layer for interacting directly with the engine's API.
 
 ```
 AI: "Set the player's position to (10, 0, 5)"
@@ -40,6 +44,16 @@ AI: "Set the player's position to (10, 0, 5)"
 ```
 
 No custom tool class needed. No code generation. Just reflection.
+
+---
+
+## Features
+
+- **13 Generic Reflection-Based Tools**: Operate on any object or component without custom tool definitions.
+- **Roslyn-Powered Dynamic Execution**: Send arbitrary C# scripts via the `execute` tool to perform complex procedural tasks or bulk operations directly within the Unity Editor.
+- **MessagePack IPC Protocol**: High-performance, low-latency binary communication between the standalone MCP Server and the engine plugin.
+- **Robust Type System**: Serializes and deserializes Unity-specific structs (`Vector3`, `Color`, `Bounds`) seamlessly.
+- **Engine-Agnostic Core**: Shared .NET Standard 2.1 core makes it easy to port to Godot or other engines by writing a simple adapter.
 
 ---
 
@@ -119,38 +133,30 @@ That's it. The server is ready to run. Now set up the Unity side.
 
 ### Step 1 — Copy DLLs into your Unity project
 
+The easiest way to integrate aker-mcp is by using the provided scripts. These scripts build the project, publish the dependencies, and copy all necessary DLLs (including Roslyn) directly into your Unity project's `Plugins` folder.
+
 If you're using the included test project (`UnityTestProject/`):
 
 ```bash
 # macOS / Linux
+# Set UNITY_EDITOR_PATH to your Unity.app/Contents path to include Roslyn DLLs
+export UNITY_EDITOR_PATH=/Applications/Unity/Hub/Editor/2022.3.0f1/Unity.app/Contents
 ./copy-dlls.sh
 
 # Windows
+# Set UNITY_EDITOR_PATH to your Unity Editor\Data folder to include Roslyn DLLs
+set UNITY_EDITOR_PATH=C:\Program Files\Unity\Hub\Editor\2022.3.0f1\Editor\Data
 copy-dlls.bat
 ```
 
-> If you want to add aker-mcp to your **own** Unity project, copy the DLLs manually:
->
-> ```bash
-> DEST=path/to/YourProject/Assets/Plugins/AkerMcp
-> mkdir -p $DEST
->
-> cp .publish/AkerMcp.Shared.dll                        $DEST/
-> cp Client/bin/Release/netstandard2.1/AkerMcp.Client.dll $DEST/
-> cp .publish/MessagePack.dll                            $DEST/
-> cp .publish/MessagePack.Annotations.dll                $DEST/
-> cp .publish/Microsoft.Bcl.AsyncInterfaces.dll          $DEST/
-> cp .publish/Microsoft.NET.StringTools.dll              $DEST/
-> cp .publish/System.Buffers.dll                         $DEST/
-> cp .publish/System.Collections.Immutable.dll           $DEST/
-> cp .publish/System.Memory.dll                          $DEST/
-> cp .publish/System.Runtime.CompilerServices.Unsafe.dll $DEST/
-> cp .publish/System.Text.Encodings.Web.dll              $DEST/
-> cp .publish/System.Text.Json.dll                       $DEST/
-> cp .publish/System.Threading.Tasks.Extensions.dll      $DEST/
-> ```
->
-> Then copy the adapter scripts from `UnityTestProject/Assets/AkerMcp/` into your project's `Assets/` folder.
+> **Note on Roslyn:** The `execute` tool requires Roslyn DLLs to compile C# at runtime. The scripts attempt to locate these automatically in common Unity installation paths. If they fail, set the `UNITY_EDITOR_PATH` variable manually as shown above.
+
+> **Manual Installation:**
+> If you want to add aker-mcp to your **own** Unity project manually, create a folder like `Assets/Plugins/AkerMcp` and copy the following:
+> 1. All DLLs generated in `.publish/` after running `dotnet publish Shared/AkerMcp.Shared.csproj -c Release -o .publish`.
+> 2. `AkerMcp.Client.dll` from `Client/bin/Release/netstandard2.1/`.
+> 3. The Roslyn DLLs (`Microsoft.CodeAnalysis.dll`, `Microsoft.CodeAnalysis.CSharp.dll`, `Microsoft.CodeAnalysis.Scripting.dll`, `Microsoft.CodeAnalysis.CSharp.Scripting.dll`, and `System.Reflection.Metadata.dll`) from your Unity Editor's `MonoBleedingEdge/lib/mono/4.5/` directory.
+> 4. The adapter C# scripts from `UnityTestProject/Assets/AkerMcp/` into your project's `Assets/` folder.
 
 ### Step 2 — Open the Unity project
 
@@ -259,6 +265,30 @@ Open **Settings → MCP** and add:
   }
 }
 ```
+
+### Google Antigravity
+
+Antigravity reads `mcp_config.json` from its user-data directory:
+
+- Windows: `%USERPROFILE%\.gemini\antigravity\mcp_config.json`
+- macOS: `~/.gemini/antigravity/mcp_config.json`
+- Linux: `~/.gemini/antigravity/mcp_config.json`
+
+Add an entry under `mcpServers`:
+
+```json
+{
+  "mcpServers": {
+    "game-engine": {
+      "command": "dotnet",
+      "args": ["run", "--project", "C:/path/to/aker-mcp/Server"],
+      "type": "stdio"
+    }
+  }
+}
+```
+
+Restart Antigravity. The new tools appear automatically.
 
 ### VS Code + Copilot
 
@@ -549,9 +579,20 @@ aker-mcp/
 │   ├── EnginePluginBase.cs             Abstract base for adapters
 │   ├── IpcRequestHandler.cs            Request routing and execution
 │   ├── PluginDiscovery.cs              Lock-file based auto-discovery
-│   └── MainThreadDispatcherBase.cs     Thread-safe queue with TCS pattern
+│   ├── MainThreadDispatcherBase.cs     Thread-safe queue with TCS pattern
+│   └── ClientConfiguration.cs          Client-side settings
 └── UnityTestProject/                    Unity 6 test project
-    └── Assets/AkerMcp/                  Unity adapter (~500 LOC)
+    └── Assets/AkerMcp/                  Unity adapter implementation
+        ├── UnitySceneGraph.cs           Scene traversal and node creation
+        ├── UnitySceneNode.cs            Reflection wrapper for GameObjects
+        ├── UnityTypeRegistration.cs     MessagePack types and aliases
+        └── Editor/                      Editor-only tooling
+            ├── DynamicEvaluator.cs      Roslyn-powered C# execution engine
+            ├── McpEditorWindow.cs       Unity Editor UI for MCP server
+            ├── UnityCompilationSupport.cs Script compilation tools
+            ├── UnityEditorContext.cs    Active selection and console logs
+            ├── UnityMainThreadDispatcher.cs Unity main thread marshalling
+            └── UnityMcpPlugin.cs        Plugin entry point
 ```
 
 ---
@@ -828,4 +869,4 @@ Domain reload in Unity tears down the plugin. Re-click **Start** in the AkerMcp 
 
 ## License
 
-MIT
+[Apache 2.0](LICENSE)
