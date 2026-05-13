@@ -61,6 +61,7 @@ No custom tool class needed. No code generation. Just reflection.
 - [Example Session](#example-session)
 - [Architecture](#architecture)
 - [Writing an Engine Adapter](#writing-an-engine-adapter)
+- [AI Integration Rules](#ai-integration-rules)
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
 
@@ -121,7 +122,11 @@ That's it. The server is ready to run. Now set up the Unity side.
 If you're using the included test project (`UnityTestProject/`):
 
 ```bash
+# macOS / Linux
 ./copy-dlls.sh
+
+# Windows
+copy-dlls.bat
 ```
 
 > If you want to add aker-mcp to your **own** Unity project, copy the DLLs manually:
@@ -324,7 +329,68 @@ If you see this, everything is working.
 | `refresh_scripts` | Force script recompilation and return errors/warnings immediately |
 | `get_compile_errors` | Retrieve compilation errors with file path, line, and column |
 | `get_console_logs` | Read engine console entries with level and text filtering |
-| `execute` | Run arbitrary C# code in the engine context |
+| `execute` | Run arbitrary C# code in the engine context (Roslyn) |
+
+### Dynamic Code Execution (`execute`)
+
+The `execute` tool runs arbitrary C# code inside the Unity Editor using Roslyn (`Microsoft.CodeAnalysis.CSharp.Scripting`). This is the most powerful tool — it can do anything the Unity Editor API allows.
+
+**What it enables:**
+
+- Procedural scene generation (spawn 100 objects in a grid, create terrain, etc.)
+- Bulk property modifications across many objects
+- Asset manipulation (create materials, import textures, modify prefabs)
+- Complex queries that go beyond what `query` supports
+- Editor automation (menu items, build pipeline, custom importers)
+- Anything you can do in a Unity Editor script
+
+**Built-in globals** available in your code:
+
+| Global | Type | Description |
+|--------|------|-------------|
+| `selectedObject` | `GameObject?` | Currently selected GameObject in the editor |
+| `Find(name)` | `GameObject?` | Shortcut for `GameObject.Find(name)` |
+| `FindAll<T>()` | `T[]` | Find all objects of type T |
+| `Create(name)` | `GameObject` | Create a new empty GameObject |
+| `Log(message)` | `void` | Log to the Unity console |
+
+**Imported namespaces** (no `using` needed): `System`, `System.Collections.Generic`, `System.Linq`, `UnityEngine`, `UnityEditor`
+
+**Examples:**
+
+```csharp
+// Create a grid of cubes
+for (int x = 0; x < 5; x++)
+    for (int z = 0; z < 5; z++) {
+        var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        cube.name = $"Cube_{x}_{z}";
+        cube.transform.position = new Vector3(x * 2, 0, z * 2);
+    }
+```
+
+```csharp
+// Set all enemies to red
+var enemies = FindAll<Renderer>()
+    .Where(r => r.gameObject.name.StartsWith("Enemy"))
+    .ToArray();
+foreach (var r in enemies)
+    r.material.color = Color.red;
+return $"Colored {enemies.Length} enemies";
+```
+
+```csharp
+// Return scene stats
+var objects = FindAll<GameObject>();
+var types = objects
+    .SelectMany(go => go.GetComponents<Component>())
+    .Where(c => c != null)
+    .GroupBy(c => c.GetType().Name)
+    .Select(g => $"{g.Key}: {g.Count()}")
+    .ToArray();
+return string.Join("\n", types);
+```
+
+> **Note:** The script state persists between calls — variables defined in one `execute` call are available in the next. The evaluator runs on Unity's main thread with full Editor API access.
 
 ### How property paths work
 
@@ -530,6 +596,205 @@ TypeRegistry.Instance.RegisterCustomSerializer<Vector3>(
     d => new Vector3(F(d, "x"), F(d, "y"), F(d, "z"))
 );
 ```
+
+---
+
+## AI Integration Rules
+
+To get the best results, give your AI client a rules file that teaches it *how* to use aker-mcp. Copy the template below into your Unity project root — the AI will learn when to use `inspect` vs `execute`, how to format property paths, and when to check for compilation errors.
+
+### Where to put the rules file
+
+| Platform | File | Scope |
+|----------|------|-------|
+| Claude Code | `CLAUDE.md` (project root) | Per-project |
+| Antigravity | `AGENTS.md` (project root) | Per-project |
+| Cursor | `.cursor/rules/aker-mcp.md` | Per-project |
+| Cross-tool | `AGENTS.md` (project root) | Works with most clients |
+
+> **Recommended:** Use `AGENTS.md` in your Unity project root. It's the most widely supported convention.
+
+### Rules template
+
+Copy everything inside the block below into your rules file:
+
+---
+
+<details>
+<summary><strong>Click to expand the full rules template</strong></summary>
+
+#### aker-mcp — AI Integration Rules
+
+You have access to a Unity (or Godot) game engine via the `game-engine` MCP server. This gives you 13 tools to inspect, query, modify, and script the active scene — all from the editor.
+
+#### Available Tools (quick reference)
+
+| Tool | Use when... |
+|------|-------------|
+| `inspect` | You need to see what's on a GameObject — components, properties, children |
+| `get_property` | You know the exact path and want a single value |
+| `set_property` | You want to change one property with undo support |
+| `call_method` | You need to invoke a method (e.g. `SetActive`, `AddForce`) |
+| `query` | You need to find objects by type, name pattern, or tag |
+| `create` | You need to add a new GameObject to the scene |
+| `delete` | You need to remove a GameObject (destructive, has undo) |
+| `select` | You want to highlight an object in Unity's Hierarchy/Inspector |
+| `get_selection` | You want to know what the user currently has selected |
+| `refresh_scripts` | You just wrote or modified a `.cs` file and need to trigger recompilation |
+| `get_compile_errors` | You need to check if scripts compiled successfully |
+| `get_console_logs` | You need to read runtime errors, warnings, or debug output |
+| `execute` | You need to run arbitrary C# code (procedural generation, bulk ops, complex logic) |
+
+#### Core Workflow: Inspect → Modify → Verify
+
+Always follow this pattern:
+
+1. **Inspect first.** Before modifying anything, call `inspect` to see the object's components, properties, and current values. Never guess.
+2. **Modify.** Use `set_property` for single changes, `execute` for complex operations.
+3. **Verify.** Call `get_property` or `inspect` again to confirm the change took effect. Check `get_console_logs` if something seems wrong.
+
+```
+Bad:  set_property "/Player" "mass" 5        ← "mass" might not resolve (it's on Rigidbody)
+Good: inspect "/Player" → see "Rigidbody.mass" exists → set_property "/Player" "Rigidbody.mass" 5
+```
+
+#### Property Path Syntax
+
+Properties use **dot-notation** resolved via reflection:
+
+```
+position                → Transform.position (Transform is searched first)
+position.x              → float
+Rigidbody.mass          → targets the Rigidbody component specifically
+Rigidbody.useGravity    → bool
+MeshRenderer.material.color → Color
+```
+
+**Rules:**
+- Transform properties (`position`, `rotation`, `localScale`, `eulerAngles`) don't need a prefix
+- Other components need the type prefix: `Rigidbody.mass`, `Camera.fieldOfView`, `Light.intensity`
+- Nested properties work: `MeshRenderer.material.color.r`
+- Array indexing works: `mesh.vertices[0]`
+
+**Structs are passed as JSON objects:**
+```json
+{"x": 1.0, "y": 2.0, "z": 3.0}           // Vector3
+{"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0} // Color
+```
+
+#### When to Use `execute` vs Other Tools
+
+| Scenario | Use |
+|----------|-----|
+| Change one property | `set_property` |
+| Read one value | `get_property` |
+| Find objects | `query` |
+| Create one object | `create` |
+| Modify 10+ objects in a loop | `execute` |
+| Generate procedural content | `execute` |
+| Access Editor API (AssetDatabase, Undo groups, etc.) | `execute` |
+| Complex conditional logic | `execute` |
+| Create materials, shaders, ScriptableObjects | `execute` |
+
+#### Writing `execute` Scripts
+
+**Available globals** (no setup needed):
+
+```csharp
+selectedObject              // Currently selected GameObject (or null)
+Find("Player")              // GameObject.Find shortcut
+FindAll<Rigidbody>()        // Find all components of a type
+Create("MyObject")          // Create empty GameObject
+Log("message")              // Debug.Log shortcut
+```
+
+**Pre-imported namespaces**: `System`, `System.Collections.Generic`, `System.Linq`, `UnityEngine`, `UnityEditor`
+
+**State persists between calls.** Variables you define in one `execute` are available in the next:
+
+```csharp
+// Call 1
+var player = Find("Player");
+// Call 2
+return player.transform.position;  // still accessible
+```
+
+**Return values** are sent back to you. Always `return` a meaningful result:
+
+```csharp
+// Good — returns useful info
+var count = FindAll<Rigidbody>().Length;
+return $"Found {count} rigidbodies";
+
+// Bad — no feedback
+FindAll<Rigidbody>();  // returns null, you won't know the result
+```
+
+**Timeout**: Default is 5 seconds. Pass `timeout_ms` for longer operations.
+
+#### After Writing or Modifying C# Scripts
+
+Whenever you create or edit a `.cs` file in the Unity project:
+
+1. Call `refresh_scripts` — this forces Unity to recompile
+2. Call `get_compile_errors` — check for errors
+3. If errors exist, fix them and repeat
+
+```
+→ refresh_scripts {}
+← Recompilation requested. Result: FAILED
+  === ERRORS (1) ===
+  Assets/Scripts/Player.cs(15,9): error CS1002: ; expected
+
+→ (fix the file)
+
+→ refresh_scripts {}
+← Result: SUCCESS. No errors or warnings.
+```
+
+**Never assume a script change compiled successfully.** Always verify.
+
+#### Scene Navigation
+
+**Paths** use forward slashes from the scene root:
+
+```
+/Player
+/Player/PlayerCamera
+/Environment/Trees/Oak_01
+```
+
+**To find objects** when you don't know the path:
+- `query {"name_pattern": "Player*"}` — glob search
+- `query {"type_filter": "Camera"}` — by component type
+- `query {"tag": "Enemy"}` — by tag
+
+**To explore the full scene:**
+- Read the `scene://hierarchy` resource — returns the complete tree with components
+- Or call `inspect` on root objects
+
+#### Anti-Patterns
+
+| Don't | Do instead |
+|-------|------------|
+| Guess property names | `inspect` the object first |
+| Modify without inspecting | Inspect → modify → verify |
+| Use `execute` for one property change | `set_property` (supports undo) |
+| Ignore compile errors after writing scripts | `refresh_scripts` → `get_compile_errors` |
+| Assume paths are case-insensitive | They're case-sensitive on the engine side |
+| Create complex objects one property at a time | Use `execute` with a single script |
+| Forget to `return` values in `execute` | Always return a string describing what happened |
+
+#### Error Recovery
+
+If a tool call fails:
+
+1. **Read the error message** — it usually tells you exactly what's wrong
+2. **Inspect the target** — the object may not exist, or the property name may be different
+3. **Check the console** — `get_console_logs {"level_filter": "error"}` shows runtime errors
+4. **For compile errors** — `get_compile_errors` shows the exact file, line, and column
+
+</details>
 
 ---
 

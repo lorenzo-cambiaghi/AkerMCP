@@ -31,7 +31,7 @@ namespace AkerMcp.Unity
 
         public IEnumerable<ISceneNode> Query(QueryFilter filter)
         {
-            var allObjects = Object.FindObjectsByType<GameObject>(FindObjectsInactive.Exclude);
+            var allObjects = Object.FindObjectsByType<GameObject>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             int count = 0;
 
             foreach (var go in allObjects)
@@ -109,7 +109,7 @@ namespace AkerMcp.Unity
 
         public int GetTotalNodeCount()
         {
-            return Object.FindObjectsByType<GameObject>(FindObjectsInactive.Exclude).Length;
+            return Object.FindObjectsByType<GameObject>(FindObjectsInactive.Exclude, FindObjectsSortMode.None).Length;
         }
 
         private static GameObject? FindByPath(string? path)

@@ -25,6 +25,7 @@ namespace AkerMcp.Client
         protected virtual IAssetManager? CreateAssetManager() => null;
         protected virtual IEditorContext? CreateEditorContext() => null;
         protected virtual ICompilationSupport? CreateCompilationSupport() => null;
+        protected virtual ICodeExecutor? CreateCodeExecutor() => null;
 
         protected abstract void Log(string message);
         protected abstract void LogError(string message);
@@ -45,7 +46,8 @@ namespace AkerMcp.Client
                 Config,
                 CreateAssetManager(),
                 CreateEditorContext(),
-                CreateCompilationSupport());
+                CreateCompilationSupport(),
+                CreateCodeExecutor());
 
             _cts = new CancellationTokenSource();
 
