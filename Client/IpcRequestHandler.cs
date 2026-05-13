@@ -18,6 +18,7 @@ namespace AkerMcp.Client
         private readonly IAssetManager? _assetManager;
         private readonly IEditorContext? _editorContext;
         private readonly ICompilationSupport? _compilationSupport;
+        private readonly ICodeExecutor? _codeExecutor;
         private readonly IEngineCapabilities _capabilities;
         private readonly IMainThreadDispatcher _dispatcher;
         private readonly PropertyPathResolver _pathResolver;
@@ -39,7 +40,8 @@ namespace AkerMcp.Client
             ClientConfiguration config,
             IAssetManager? assetManager = null,
             IEditorContext? editorContext = null,
-            ICompilationSupport? compilationSupport = null)
+            ICompilationSupport? compilationSupport = null,
+            ICodeExecutor? codeExecutor = null)
         {
             _sceneGraph = sceneGraph;
             _capabilities = capabilities;
@@ -48,6 +50,7 @@ namespace AkerMcp.Client
             _assetManager = assetManager;
             _editorContext = editorContext;
             _compilationSupport = compilationSupport;
+            _codeExecutor = codeExecutor;
             _pathResolver = new PropertyPathResolver();
             _inspector = new ReflectionInspector();
             _methodInvoker = new MethodInvoker();
@@ -550,20 +553,23 @@ namespace AkerMcp.Client
 
         private async Task<string> HandleExecute(IpcRequest request, CancellationToken ct)
         {
+            if (_codeExecutor == null)
+                return JsonSerializer.Serialize(new { success = false, error = "Code execution not available. Engine plugin does not provide an ICodeExecutor." }, _jsonOptions);
+
             var args = ParseArgs(request);
             var code = args.GetProperty("code").GetString()!;
-            
-            // Simple execution for known patterns
-            if (code.StartsWith("GameObject.Find("))
-            {
-                return await _dispatcher.RunOnMainThread(() => {
-                    // This is a placeholder for a real evaluator. 
-                    // For now, we return that we received it.
-                    return "{\"success\": true, \"message\": \"Execution received but full C# evaluation requires a compiler service. Use set_property for transform changes.\"}";
-                }, ct);
-            }
+            var timeoutMs = args.TryGetProperty("timeout_ms", out var t) ? t.GetInt32() : 5000;
 
-            return "{\"success\": false, \"error\": \"C# evaluation not yet implemented in the engine plugin.\"}";
+            var result = await _codeExecutor.Execute(code, timeoutMs, ct);
+
+            return JsonSerializer.Serialize(new
+            {
+                success = result.Success,
+                returnValue = result.ReturnValue,
+                output = result.Output,
+                error = result.Error,
+                elapsedMs = Math.Round(result.ElapsedMs, 1)
+            }, _jsonOptions);
         }
 
         private static JsonElement ParseArgs(IpcRequest request)
