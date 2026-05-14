@@ -1,7 +1,7 @@
 # AkerMCP
 
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
-![Platform](https://img.shields.io/badge/platform-Unity%20%7C%20Godot-lightgrey.svg)
+![Platform](https://img.shields.io/badge/platform-Unity%20%7C%20Godot%20%7C%20Stride-lightgrey.svg)
 ![MCP](https://img.shields.io/badge/mcp-compatible-green.svg)
 
 ```text
@@ -77,7 +77,7 @@ No custom tool class needed. No code generation. Just reflection.
 - **Roslyn-Powered Dynamic Execution**: Send arbitrary C# scripts via the `execute` tool to perform complex procedural tasks or bulk operations directly within the Unity Editor.
 - **MessagePack IPC Protocol**: High-performance, low-latency binary communication between the standalone MCP Server and the engine plugin.
 - **Robust Type System**: Serializes and deserializes Unity-specific structs (`Vector3`, `Color`, `Bounds`) seamlessly.
-- **Engine-Agnostic Core**: Shared .NET Standard 2.1 core makes it easy to port to Godot or other engines by writing a simple adapter.
+- **Engine-Agnostic Core**: Shared .NET Standard 2.1 core makes it easy to port to Godot, Stride, or other C# engines by writing a simple adapter.
 
 ---
 
@@ -127,7 +127,7 @@ You need two things installed before starting:
 | **.NET SDK** | 8.0+ | `dotnet --version` | [dotnet.microsoft.com/download](https://dotnet.microsoft.com/download) |
 | **Unity** | 2021.3+ | Unity Hub | [unity.com/download](https://unity.com/download) |
 
-> **Note:** AkerMCP also works with Godot 4.x (.NET), but this guide focuses on Unity. See [Writing an Engine Adapter](#writing-an-engine-adapter) for Godot.
+> **Note:** AkerMCP also works with Godot 4.x (.NET) and Stride Engine, but this guide focuses on Unity. See [Writing an Engine Adapter](#writing-an-engine-adapter) for details.
 
 ---
 
