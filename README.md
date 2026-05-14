@@ -1,7 +1,7 @@
 # AkerMCP
 
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
-![Platform](https://img.shields.io/badge/platform-Unity%20%7C%20Godot%20%7C%20Stride-lightgrey.svg)
+![Platform](https://img.shields.io/badge/platform-Any%20C%23%20Engine-lightgrey.svg)
 ![MCP](https://img.shields.io/badge/mcp-compatible-green.svg)
 
 ```text
@@ -24,9 +24,9 @@
                                          engine's main thread via IPC.
 ```
 
-> **Give your AI Assistant (Claude, Cursor, Copilot, Antigravity) the power to directly manipulate your Game Engine.**
+> **Give your AI Assistant (Claude, Cursor, Copilot, Antigravity) the power to directly manipulate any C# Game Engine.**
 
-Traditionally, AI coding assistants can only suggest code for you to copy-paste. With **AkerMCP**, you grant your AI the ability to actually *see* and *touch* your Unity or Godot project in real-time.
+Traditionally, AI coding assistants can only suggest code for you to copy-paste. With **AkerMCP**, you grant your AI the ability to actually *see* and *touch* your game project in real-time. **AkerMCP is 100% C# engine-agnostic**—it works seamlessly with Unity, Godot, Stride, Flax Engine, or any custom C# engine simply by dropping in a lightweight adapter.
 
 ### 🪄 The "Wow" Factor: Talk to your Engine
 
@@ -77,7 +77,7 @@ No custom tool class needed. No code generation. Just reflection.
 - **Roslyn-Powered Dynamic Execution**: Send arbitrary C# scripts via the `execute` tool to perform complex procedural tasks or bulk operations directly within the Unity Editor.
 - **MessagePack IPC Protocol**: High-performance, low-latency binary communication between the standalone MCP Server and the engine plugin.
 - **Robust Type System**: Serializes and deserializes Unity-specific structs (`Vector3`, `Color`, `Bounds`) seamlessly.
-- **Engine-Agnostic Core**: Shared .NET Standard 2.1 core makes it easy to port to Godot, Stride, or other C# engines by writing a simple adapter.
+- **Engine-Agnostic Core**: Shared .NET Standard 2.1 core makes it easy to port to Godot, Stride, Flax Engine, or other C# engines by writing a simple adapter.
 
 ---
 
@@ -127,7 +127,7 @@ You need two things installed before starting:
 | **.NET SDK** | 8.0+ | `dotnet --version` | [dotnet.microsoft.com/download](https://dotnet.microsoft.com/download) |
 | **Unity** | 2021.3+ | Unity Hub | [unity.com/download](https://unity.com/download) |
 
-> **Note:** AkerMCP also works with Godot 4.x (.NET) and Stride Engine, but this guide focuses on Unity. See [Writing an Engine Adapter](#writing-an-engine-adapter) for details.
+> **Note:** AkerMCP also works with Godot 4.x (.NET), Stride, and Flax Engine, but this guide focuses on Unity. See [Writing an Engine Adapter](#writing-an-engine-adapter) for details.
 
 ---
 
@@ -578,7 +578,7 @@ JSON examples:
                   └──────────┬───────────┘
                              │ Named Pipe + MessagePack
                   ┌──────────▼───────────┐
-                  │   Engine Plugin      │   runs inside Unity / Godot
+                  │   Engine Plugin      │   runs inside Unity / Godot / Stride / Flax
                   │   ISceneGraph impl   │
                   └──────────────────────┘
 ```
@@ -639,7 +639,7 @@ AkerMCP/
 
 ## Writing an Engine Adapter
 
-To support a new engine (e.g. Godot), subclass `EnginePluginBase` and implement the required interfaces:
+To support a new engine (e.g. Godot, Stride, Flax), subclass `EnginePluginBase` and implement the required interfaces:
 
 ```csharp
 public class MyEnginePlugin : EnginePluginBase
@@ -706,7 +706,7 @@ Copy everything inside the block below into your rules file:
 
 #### AkerMCP — AI Integration Rules
 
-You have access to a Unity (or Godot) game engine via the `game-engine` MCP server. This gives you 13 tools to inspect, query, modify, and script the active scene — all from the editor.
+You have access to a Unity (or Godot, Stride, Flax) game engine via the `game-engine` MCP server. This gives you 13 tools to inspect, query, modify, and script the active scene — all from the editor.
 
 #### Available Tools (quick reference)
 
