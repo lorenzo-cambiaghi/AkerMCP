@@ -532,7 +532,7 @@ JSON examples:
                   └──────────┬───────────┘
                              │ JSON-RPC 2.0 / stdio
                   ┌──────────▼───────────┐
-                  │    aker-mcp Server   │   .NET 8 console process
+                  │    AkerMCP Server    │   .NET 8 console process
                   │   13 MCP tools       │
                   │    5 MCP resources   │
                   └──────────┬───────────┘
