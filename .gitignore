@@ -41,6 +41,7 @@ crashlytics-build.properties
 # Publish output
 .publish/
 .publish_debug/
+.publish_full/
 /publish/
 /tmp/
 
