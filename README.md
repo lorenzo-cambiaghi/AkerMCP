@@ -90,7 +90,7 @@ You need two things installed before starting:
 | **.NET SDK** | 8.0+ | `dotnet --version` | [dotnet.microsoft.com/download](https://dotnet.microsoft.com/download) |
 | **Unity** | 2021.3+ | Unity Hub | [unity.com/download](https://unity.com/download) |
 
-> **Note:** aker-mcp also works with Godot 4.x (.NET), but this guide focuses on Unity. See [Writing an Engine Adapter](#writing-an-engine-adapter) for Godot.
+> **Note:** AkerMCP also works with Godot 4.x (.NET), but this guide focuses on Unity. See [Writing an Engine Adapter](#writing-an-engine-adapter) for Godot.
 
 ---
 
@@ -99,8 +99,8 @@ You need two things installed before starting:
 ### Step 1 — Clone the repository
 
 ```bash
-git clone https://github.com/lorenzo-cambiaghi/aker-mcp.git
-cd aker-mcp
+git clone https://github.com/lorenzo-cambiaghi/AkerMCP.git
+cd AkerMCP
 ```
 
 ### Step 2 — Build
@@ -133,7 +133,7 @@ That's it. The server is ready to run. Now set up the Unity side.
 
 ### Step 1 — Copy DLLs into your Unity project
 
-The easiest way to integrate aker-mcp is by using the provided scripts. These scripts build the project, publish the dependencies, and copy all necessary DLLs (including Roslyn) directly into your Unity project's `Plugins` folder.
+The easiest way to integrate AkerMCP is by using the provided scripts. These scripts build the project, publish the dependencies, and copy all necessary DLLs (including Roslyn) directly into your Unity project's `Plugins` folder.
 
 If you're using the included test project (`UnityTestProject/`):
 
@@ -152,7 +152,7 @@ copy-dlls.bat
 > **Note on Roslyn:** The `execute` tool requires Roslyn DLLs to compile C# at runtime. The scripts attempt to locate these automatically in common Unity installation paths. If they fail, set the `UNITY_EDITOR_PATH` variable manually as shown above.
 
 > **Manual Installation:**
-> If you want to add aker-mcp to your **own** Unity project manually, create a folder like `Assets/Plugins/AkerMcp` and copy the following:
+> If you want to add AkerMCP to your **own** Unity project manually, create a folder like `Assets/Plugins/AkerMcp` and copy the following:
 > 1. All DLLs generated in `.publish/` after running `dotnet publish Shared/AkerMcp.Shared.csproj -c Release -o .publish`.
 > 2. `AkerMcp.Client.dll` from `Client/bin/Release/netstandard2.1/`.
 > 3. The Roslyn DLLs (`Microsoft.CodeAnalysis.dll`, `Microsoft.CodeAnalysis.CSharp.dll`, `Microsoft.CodeAnalysis.Scripting.dll`, `Microsoft.CodeAnalysis.CSharp.Scripting.dll`, and `System.Reflection.Metadata.dll`) from your Unity Editor's `MonoBleedingEdge/lib/mono/4.5/` directory.
@@ -191,7 +191,7 @@ The MCP server is a standalone .NET process that the AI client launches. You con
 Run this once to add the server to your Claude Code configuration:
 
 ```bash
-claude mcp add game-engine -- dotnet run --project /absolute/path/to/aker-mcp/Server
+claude mcp add game-engine -- dotnet run --project /absolute/path/to/AkerMCP/Server
 ```
 
 Or add it manually to your project's `.claude/settings.json`:
@@ -201,7 +201,7 @@ Or add it manually to your project's `.claude/settings.json`:
   "mcpServers": {
     "game-engine": {
       "command": "dotnet",
-      "args": ["run", "--project", "/absolute/path/to/aker-mcp/Server"]
+      "args": ["run", "--project", "/absolute/path/to/AkerMCP/Server"]
     }
   }
 }
@@ -222,7 +222,7 @@ Open **Settings → Developer → Edit Config** and add:
   "mcpServers": {
     "game-engine": {
       "command": "dotnet",
-      "args": ["run", "--project", "/absolute/path/to/aker-mcp/Server"]
+      "args": ["run", "--project", "/absolute/path/to/AkerMCP/Server"]
     }
   }
 }
@@ -243,7 +243,7 @@ Open **Settings → MCP** and click **+ Add new MCP server**, then choose **comm
   "mcpServers": {
     "game-engine": {
       "command": "dotnet",
-      "args": ["run", "--project", "/absolute/path/to/aker-mcp/Server"]
+      "args": ["run", "--project", "/absolute/path/to/AkerMCP/Server"]
     }
   }
 }
@@ -260,7 +260,7 @@ Open **Settings → MCP** and add:
   "mcpServers": {
     "game-engine": {
       "command": "dotnet",
-      "args": ["run", "--project", "/absolute/path/to/aker-mcp/Server"]
+      "args": ["run", "--project", "/absolute/path/to/AkerMCP/Server"]
     }
   }
 }
@@ -281,7 +281,7 @@ Add an entry under `mcpServers`:
   "mcpServers": {
     "game-engine": {
       "command": "dotnet",
-      "args": ["run", "--project", "C:/path/to/aker-mcp/Server"],
+      "args": ["run", "--project", "C:/path/to/AkerMCP/Server"],
       "type": "stdio"
     }
   }
@@ -300,14 +300,14 @@ Add to your `.vscode/settings.json` or use the **MCP: Add Server** command:
     "servers": {
       "game-engine": {
         "command": "dotnet",
-        "args": ["run", "--project", "/absolute/path/to/aker-mcp/Server"]
+        "args": ["run", "--project", "/absolute/path/to/AkerMCP/Server"]
       }
     }
   }
 }
 ```
 
-> **Windows users:** Replace `/absolute/path/to/aker-mcp/Server` with the full Windows path, e.g. `C:\\Users\\you\\aker-mcp\\Server`. Use double backslashes in JSON.
+> **Windows users:** Replace `/absolute/path/to/AkerMCP/Server` with the full Windows path, e.g. `C:\\Users\\you\\AkerMCP\\Server`. Use double backslashes in JSON.
 
 ---
 
@@ -561,7 +561,7 @@ Property paths like `transform.position.x` are resolved at runtime by `PropertyP
 ### Project structure
 
 ```
-aker-mcp/
+AkerMCP/
 ├── AkerMcp.sln
 ├── Shared/                              AkerMcp.Shared (netstandard2.1)
 │   ├── Protocol/                        JSON-RPC and MCP message models
@@ -642,7 +642,7 @@ TypeRegistry.Instance.RegisterCustomSerializer<Vector3>(
 
 ## AI Integration Rules
 
-To get the best results, give your AI client a rules file that teaches it *how* to use aker-mcp. Copy the template below into your Unity project root — the AI will learn when to use `inspect` vs `execute`, how to format property paths, and when to check for compilation errors.
+To get the best results, give your AI client a rules file that teaches it *how* to use AkerMCP. Copy the template below into your Unity project root — the AI will learn when to use `inspect` vs `execute`, how to format property paths, and when to check for compilation errors.
 
 ### Where to put the rules file
 
@@ -650,7 +650,7 @@ To get the best results, give your AI client a rules file that teaches it *how* 
 |----------|------|-------|
 | Claude Code | `CLAUDE.md` (project root) | Per-project |
 | Antigravity | `AGENTS.md` (project root) | Per-project |
-| Cursor | `.cursor/rules/aker-mcp.md` | Per-project |
+| Cursor | `.cursor/rules/AkerMCP.md` | Per-project |
 | Cross-tool | `AGENTS.md` (project root) | Works with most clients |
 
 > **Recommended:** Use `AGENTS.md` in your Unity project root. It's the most widely supported convention.
@@ -664,7 +664,7 @@ Copy everything inside the block below into your rules file:
 <details>
 <summary><strong>Click to expand the full rules template</strong></summary>
 
-#### aker-mcp — AI Integration Rules
+#### AkerMCP — AI Integration Rules
 
 You have access to a Unity (or Godot) game engine via the `game-engine` MCP server. This gives you 13 tools to inspect, query, modify, and script the active scene — all from the editor.
 
