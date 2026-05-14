@@ -682,9 +682,11 @@ TypeRegistry.Instance.RegisterCustomSerializer<Vector3>(
 
 ## AI Integration Rules
 
-To get the best results, give your AI client a rules file that teaches it *how* to use AkerMCP. Copy the template below into your Unity project root — the AI will learn when to use `inspect` vs `execute`, how to format property paths, and when to check for compilation errors.
+AkerMCP embeds comprehensive usage instructions **directly into each tool's description** served via the MCP protocol. This means any AI client (Claude, Cursor, Copilot, Antigravity) automatically learns how to use all 13 tools correctly — including property path syntax, the Inspect → Modify → Verify workflow, Roslyn execution globals, and compilation verification — **with zero configuration**.
 
-### Where to put the rules file
+### Optional: Boost with a rules file
+
+For even better results, you can add a rules file to your project root. This reinforces the built-in instructions and gives the AI additional context about common workflows and anti-patterns.
 
 | Platform | File | Scope |
 |----------|------|-------|
@@ -693,7 +695,7 @@ To get the best results, give your AI client a rules file that teaches it *how* 
 | Cursor | `.cursor/rules/AkerMCP.md` | Per-project |
 | Cross-tool | `AGENTS.md` (project root) | Works with most clients |
 
-> **Recommended:** Use `AGENTS.md` in your Unity project root. It's the most widely supported convention.
+> **Recommended:** Use `AGENTS.md` in your project root. It's the most widely supported convention.
 
 ### Rules template
 
@@ -703,6 +705,9 @@ Copy everything inside the block below into your rules file:
 
 <details>
 <summary><strong>Click to expand the full rules template</strong></summary>
+
+```markdown
+<agent_instructions>
 
 #### AkerMCP — AI Integration Rules
 
@@ -874,6 +879,9 @@ If a tool call fails:
 2. **Inspect the target** — the object may not exist, or the property name may be different
 3. **Check the console** — `get_console_logs {"level_filter": "error"}` shows runtime errors
 4. **For compile errors** — `get_compile_errors` shows the exact file, line, and column
+
+</agent_instructions>
+```
 
 </details>
 
