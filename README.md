@@ -1,4 +1,4 @@
-# aker-mcp
+# AkerMCP
 
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Unity%20%7C%20Godot-lightgrey.svg)
@@ -26,7 +26,7 @@ A generic, engine-agnostic [Model Context Protocol](https://modelcontextprotocol
                                          engine's main thread via IPC.
 ```
 
-aker-mcp lets AI assistants inspect, query, and manipulate game scenes through a small set of reflection-based tools and **Roslyn-powered dynamic scripting** that work across **Unity**, **Godot**, and any .NET-compatible engine — without writing engine-specific tool classes.
+AkerMCP lets AI assistants inspect, query, and manipulate game scenes through a small set of reflection-based tools and **Roslyn-powered dynamic scripting** that work across **Unity**, **Godot**, and any .NET-compatible engine — without writing engine-specific tool classes.
 
 ---
 
@@ -34,7 +34,7 @@ aker-mcp lets AI assistants inspect, query, and manipulate game scenes through a
 
 Traditional MCP integrations for game engines ship 100+ hand-written tools — one per operation, one per component type. Every engine update breaks them.
 
-aker-mcp replaces all of that with **13 generic tools** powered by runtime reflection and **Roslyn**. A single `set_property` tool can modify *any* property on *any* object in *any* engine, while the `execute` tool enables complex procedural generation via C# scripts. The engine-specific adapter provides the necessary layer for interacting directly with the engine's API.
+AkerMCP replaces all of that with **13 generic tools** powered by runtime reflection and **Roslyn**. A single `set_property` tool can modify *any* property on *any* object in *any* engine, while the `execute` tool enables complex procedural generation via C# scripts. The engine-specific adapter provides the necessary layer for interacting directly with the engine's API.
 
 ```
 AI: "Set the player's position to (10, 0, 5)"
