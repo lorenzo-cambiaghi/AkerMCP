@@ -4,8 +4,6 @@
 ![Platform](https://img.shields.io/badge/platform-Unity%20%7C%20Godot-lightgrey.svg)
 ![MCP](https://img.shields.io/badge/mcp-compatible-green.svg)
 
-A generic, engine-agnostic [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) bridge for game engines.
-
 ```text
                                          Aker (Egyptian: ꜣkr) was an
                                          ancient Egyptian earth god,
@@ -26,11 +24,25 @@ A generic, engine-agnostic [Model Context Protocol](https://modelcontextprotocol
                                          engine's main thread via IPC.
 ```
 
-AkerMCP lets AI assistants inspect, query, and manipulate game scenes through a small set of reflection-based tools and **Roslyn-powered dynamic scripting** that work across **Unity**, **Godot**, and any .NET-compatible engine — without writing engine-specific tool classes.
+> **Give your AI Assistant (Claude, Cursor, Copilot, Antigravity) the power to directly manipulate your Game Engine.**
+
+Traditionally, AI coding assistants can only suggest code for you to copy-paste. With **AkerMCP**, you grant your AI the ability to actually *see* and *touch* your Unity or Godot project in real-time.
+
+### 🪄 The "Wow" Factor: Talk to your Engine
+
+Imagine asking your AI:
+> *"Hey, make the Player character 20% bigger, turn all enemy materials red, and spawn 50 trees scattered across the ground plane."*
+
+- **Without AkerMCP:** The AI writes a custom script, explains where to put it, you switch to Unity, attach it, press play, and hope it works.
+- **With AkerMCP:** The AI just does it. Instantly. Right inside your Unity Editor. You watch the scene change before your eyes.
+
+AkerMCP acts as a seamless bridge. It allows AI agents to inspect your scene hierarchy, modify GameObjects, and even execute complex procedural C# scripts on the fly. No more manual repetitive clicking in the inspector—just tell your AI what you want to achieve.
+
+*(Curious about the internal technical details? Jump to the [Architecture](#architecture) section).*
 
 ---
 
-## In 30 Seconds
+## 🦁 How it Works (Under the Hood)
 
 Traditional MCP integrations for game engines ship 100+ hand-written tools — one per operation, one per component type. Every engine update breaks them.
 
@@ -57,8 +69,21 @@ No custom tool class needed. No code generation. Just reflection.
 
 ---
 
+## The Perfect Combo: AkerMCP + LynxMCP
+
+AkerMCP gives your AI agent the hands to **manipulate the active scene** and execute runtime code. But to be truly effective, the AI also needs the brain to understand your entire project architecture and dependencies.
+
+We highly recommend running AkerMCP alongside [**LynxMCP**](https://github.com/lorenzo-cambiaghi/LynxMCP), our local RAG (Retrieval-Augmented Generation) server designed for codebases. 
+
+When combined, your AI gets a **complete global vision**:
+- **LynxMCP** provides deep, semantic search over your custom C# scripts and up-to-date Unity/library documentation (feeding the AI with exact APIs and patterns it wouldn't otherwise know from its standard training data).
+- **AkerMCP** uses that exact context to write and execute flawless Roslyn scripts directly in your Editor.
+
+---
+
 ## Table of Contents
 
+- [The Perfect Combo: AkerMCP + LynxMCP](#the-perfect-combo-akermcp--lynxmcp)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Unity Plugin Setup](#unity-plugin-setup)
