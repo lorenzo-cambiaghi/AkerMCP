@@ -90,7 +90,7 @@ namespace AkerMcp.Client
             }
             catch (Exception ex)
             {
-                return IpcResponse.Fail(request.Id, ex.Message);
+                return IpcResponse.Fail(request.Id, $"{ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
             }
         }
 

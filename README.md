@@ -38,6 +38,18 @@ Imagine asking your AI:
 
 AkerMCP acts as a seamless bridge. It allows AI agents to inspect your scene hierarchy, modify GameObjects, and even execute complex procedural C# scripts on the fly. No more manual repetitive clicking in the inspector—just tell your AI what you want to achieve.
 
+**Example:** *"Spawn 10 spheres in a circle with a radius of 10"*
+```csharp
+for (int i = 0; i < 10; i++) {
+    float angle = i * Mathf.PI * 2 / 10f;
+    Vector3 pos = new Vector3(Mathf.Cos(angle) * 10f, 0, Mathf.Sin(angle) * 10f);
+    GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+    sphere.transform.position = pos;
+    sphere.name = $"Aker_Sphere_{i}";
+}
+```
+![AkerMCP in Action](docs/images/unity-execution-demo.png)
+
 *(Curious about the internal technical details? Jump to the [Architecture](#architecture) section).*
 
 ---
@@ -168,10 +180,13 @@ If you're using the included test project (`UnityTestProject/`):
 export UNITY_EDITOR_PATH=/Applications/Unity/Hub/Editor/2022.3.0f1/Unity.app/Contents
 ./copy-dlls.sh
 
-# Windows
+# Windows (PowerShell)
 # Set UNITY_EDITOR_PATH to your Unity Editor\Data folder to include Roslyn DLLs
-set UNITY_EDITOR_PATH=C:\Program Files\Unity\Hub\Editor\2022.3.0f1\Editor\Data
-copy-dlls.bat
+$env:UNITY_EDITOR_PATH="C:\Program Files\Unity\Hub\Editor\2022.3.0f1\Editor\Data"
+.\copy-dlls.bat
+
+# Note: If you are using the classic Command Prompt (cmd.exe), use:
+# set UNITY_EDITOR_PATH=... and run copy-dlls.bat (without .\)
 ```
 
 > **Note on Roslyn:** The `execute` tool requires Roslyn DLLs to compile C# at runtime. The scripts attempt to locate these automatically in common Unity installation paths. If they fail, set the `UNITY_EDITOR_PATH` variable manually as shown above.
@@ -889,6 +904,14 @@ Prefix the property with the component type name: `Rigidbody.mass` instead of ju
 **Connection drops after Unity recompiles scripts**
 
 Domain reload in Unity tears down the plugin. Re-click **Start** in the AkerMcp window after a recompile, then restart the server.
+
+**Unity says "Opening file failed: Access is denied"**
+
+If you downloaded the repository as a ZIP or cloned it on Windows, Unity might complain about `.asset` or `.meta` files being read-only. To fix this:
+1. Right-click the `UnityTestProject` folder in Windows Explorer.
+2. Go to **Properties**.
+3. Uncheck the **Read-only** box and click Apply (apply to all folders, subfolders, and files).
+Alternatively, open Command Prompt and run: `attrib -R "UnityTestProject\*.*" /S /D`
 
 ---
 

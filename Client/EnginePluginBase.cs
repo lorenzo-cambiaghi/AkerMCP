@@ -61,6 +61,10 @@ namespace AkerMcp.Client
             _running = false;
 
             _cts?.Cancel();
+            
+            // Close the pipe server first to unblock any waiting threads immediately
+            try { _pipeServer?.Close(); } catch { }
+
             _channel?.Dispose();
             _pipeServer?.Dispose();
             _discovery?.Dispose();
@@ -94,6 +98,7 @@ namespace AkerMcp.Client
                 }
                 catch (Exception ex)
                 {
+                    if (!_running || ct.IsCancellationRequested) break;
                     LogError($"Pipe server error: {ex.Message}");
                     await Task.Delay(1000, ct).ConfigureAwait(false);
                 }

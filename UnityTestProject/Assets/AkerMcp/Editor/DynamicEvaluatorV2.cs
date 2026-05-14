@@ -33,14 +33,14 @@ namespace AkerMcp.Unity
         public void Log(object? message) => Debug.Log(message);
     }
 
-    public class DynamicEvaluator : ICodeExecutor
+    public class DynamicEvaluatorV2 : ICodeExecutor
     {
         private ScriptState<object>? _state;
         private readonly ScriptOptions _options;
         private readonly IMainThreadDispatcher _dispatcher;
         private readonly StringBuilder _outputCapture = new StringBuilder();
 
-        public DynamicEvaluator(IMainThreadDispatcher dispatcher)
+        public DynamicEvaluatorV2(IMainThreadDispatcher dispatcher)
         {
             _dispatcher = dispatcher;
             _options = BuildScriptOptions();
@@ -81,7 +81,7 @@ namespace AkerMcp.Unity
                 return new CodeExecutionResult
                 {
                     Success = false,
-                    Error = ex.Message,
+                    Error = $"{ex.GetType().Name}: {ex.Message}\nStack Trace:\n{ex.StackTrace}",
                     ElapsedMs = sw.Elapsed.TotalMilliseconds
                 };
             }
@@ -91,46 +91,60 @@ namespace AkerMcp.Unity
         {
             try
             {
-                var globals = new ScriptGlobals();
+                var assemblyName = "AkerDynamic_" + Guid.NewGuid().ToString("N");
+                var syntaxTree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText($@"
+                    using System;
+                    using System.Collections.Generic;
+                    using System.Linq;
+                    using System.Text;
+                    using UnityEngine;
+                    using UnityEditor;
+                    using AkerMcp.Unity;
 
-                if (_state != null)
+                    public class DynamicScript 
+                    {{
+                        public object Execute(ScriptGlobals globals) 
+                        {{
+                            {code}
+                            return null;
+                        }}
+                    }}");
+
+                var references = _options.MetadataReferences;
+                var compilation = Microsoft.CodeAnalysis.CSharp.CSharpCompilation.Create(
+                    assemblyName,
+                    new[] { syntaxTree },
+                    references,
+                    new Microsoft.CodeAnalysis.CSharp.CSharpCompilationOptions(Microsoft.CodeAnalysis.OutputKind.DynamicallyLinkedLibrary));
+
+                using (var ms = new MemoryStream())
                 {
-                    _state = _state.ContinueWithAsync<object>(code).GetAwaiter().GetResult();
+                    var emitResult = compilation.Emit(ms);
+                    if (!emitResult.Success)
+                    {
+                        var errors = string.Join("\n", emitResult.Diagnostics
+                            .Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error)
+                            .Select(d => d.ToString()));
+                        return new CodeExecutionResult { Success = false, Error = "Compilation error:\n" + errors };
+                    }
+
+                    var assembly = Assembly.Load(ms.ToArray());
+                    var type = assembly.GetType("DynamicScript");
+                    if (type == null) return new CodeExecutionResult { Success = false, Error = "Failed to find DynamicScript class" };
+
+                    var instance = Activator.CreateInstance(type);
+                    var method = type.GetMethod("Execute");
+                    if (method == null) return new CodeExecutionResult { Success = false, Error = "Failed to find Execute method" };
+
+                    var globals = new ScriptGlobals();
+                    var returnValue = method.Invoke(instance, new object[] { globals });
+
+                    return new CodeExecutionResult
+                    {
+                        Success = true,
+                        ReturnValue = returnValue != null ? FormatReturnValue(returnValue) : null
+                    };
                 }
-                else
-                {
-                    _state = CSharpScript.RunAsync<object>(
-                        code,
-                        _options,
-                        globals,
-                        typeof(ScriptGlobals)
-                    ).GetAwaiter().GetResult();
-                }
-
-                var returnValue = _state.ReturnValue;
-                string? returnStr = null;
-
-                if (returnValue != null)
-                {
-                    returnStr = FormatReturnValue(returnValue);
-                }
-
-                return new CodeExecutionResult
-                {
-                    Success = true,
-                    ReturnValue = returnStr,
-                    Output = _outputCapture.Length > 0 ? _outputCapture.ToString() : null
-                };
-            }
-            catch (CompilationErrorException ex)
-            {
-                _state = null;
-                var errors = string.Join("\n", ex.Diagnostics.Select(d => d.ToString()));
-                return new CodeExecutionResult
-                {
-                    Success = false,
-                    Error = $"Compilation error:\n{errors}"
-                };
             }
             catch (Exception ex)
             {
@@ -138,7 +152,7 @@ namespace AkerMcp.Unity
                 return new CodeExecutionResult
                 {
                     Success = false,
-                    Error = $"{inner.GetType().Name}: {inner.Message}"
+                    Error = $"{inner.GetType().Name}: {inner.Message}\n{inner.StackTrace}"
                 };
             }
         }
@@ -160,6 +174,11 @@ namespace AkerMcp.Unity
             assemblies.Add(typeof(object).Assembly);
             assemblies.Add(typeof(Enumerable).Assembly);
 
+            // Try to find netstandard for type redirections (common in Unity)
+            var netstandard = AppDomain.CurrentDomain.GetAssemblies()
+                .FirstOrDefault(a => a.GetName().Name == "netstandard");
+            if (netstandard != null) assemblies.Add(netstandard);
+
             // Unity assemblies
             AddAssemblySafe(assemblies, typeof(GameObject));      // UnityEngine.CoreModule
             AddAssemblySafe(assemblies, typeof(Transform));
@@ -175,6 +194,10 @@ namespace AkerMcp.Unity
             AddAssemblySafe(assemblies, typeof(AssetDatabase));
             AddAssemblySafe(assemblies, typeof(EditorApplication));
             AddAssemblySafe(assemblies, typeof(Undo));
+
+            // AkerMcp assemblies
+            AddAssemblySafe(assemblies, typeof(DynamicEvaluatorV2));
+            AddAssemblySafe(assemblies, typeof(ScriptGlobals));
 
             // User assemblies (project scripts)
             foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
