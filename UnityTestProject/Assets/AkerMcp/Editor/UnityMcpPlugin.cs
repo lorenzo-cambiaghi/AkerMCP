@@ -12,7 +12,7 @@ namespace AkerMcp.Unity
         private static UnityMcpPlugin? _instance;
         private UnityMainThreadDispatcher? _dispatcher;
         private UnityCompilationSupport? _compilationSupport;
-        private DynamicEvaluator? _codeExecutor;
+        private DynamicEvaluatorV2? _codeExecutor;
 
         public static UnityMcpPlugin Instance
         {
@@ -47,7 +47,7 @@ namespace AkerMcp.Unity
         }
         protected override ICodeExecutor? CreateCodeExecutor()
         {
-            _codeExecutor = new DynamicEvaluator(_dispatcher!);
+            _codeExecutor = new DynamicEvaluatorV2(_dispatcher!);
             return _codeExecutor;
         }
 
@@ -59,6 +59,7 @@ namespace AkerMcp.Unity
             _dispatcher?.Unregister();
             _compilationSupport?.Unhook();
             base.Stop();
+            _instance = null;
         }
     }
 }

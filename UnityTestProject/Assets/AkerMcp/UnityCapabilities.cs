@@ -16,7 +16,7 @@ namespace AkerMcp.Unity
         public string EngineName => "Unity";
         public string EngineVersion => Application.unityVersion;
         public bool SupportsHotReload => true;
-        public bool SupportsCodeExecution => false;
+        public bool SupportsCodeExecution => true;
 
         public UnityCapabilities()
         {
