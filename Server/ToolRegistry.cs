@@ -54,7 +54,16 @@ namespace AkerMcp.Server
         private void RegisterBuiltinTools()
         {
             Register("inspect",
-                "Inspect all properties, methods, and children of a scene object or type",
+                @"Inspect all properties, methods, and children of a scene object or type.
+ALWAYS call this BEFORE modifying any object. Never guess property names or component types.
+Follow the pattern: Inspect → Modify → Verify.
+
+Usage:
+- Pass a scene path (e.g. '/Player') to inspect a specific object.
+- Pass a type name (e.g. 'Rigidbody') to inspect a type's API.
+- Use 'depth: 2' to also inspect children's properties.
+- Use 'include_methods: true' to discover callable methods.
+- Use 'filter' (regex) to narrow results on large objects.",
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -69,7 +78,13 @@ namespace AkerMcp.Server
                 new ToolAnnotations { ReadOnlyHint = true });
 
             Register("get_property",
-                "Get the value of a property using dot-notation path",
+                @"Get the value of a property using dot-notation path. Use this to verify changes after set_property.
+
+Property path syntax:
+- Transform props need no prefix: 'position', 'rotation', 'localScale', 'eulerAngles'
+- Other components require a type prefix: 'Rigidbody.mass', 'Camera.fieldOfView', 'Light.intensity'
+- Nested access works: 'MeshRenderer.material.color.r'
+- Structs are returned as JSON objects: {""x"": 1.0, ""y"": 2.0, ""z"": 3.0}",
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -82,7 +97,21 @@ namespace AkerMcp.Server
                 new ToolAnnotations { ReadOnlyHint = true });
 
             Register("set_property",
-                "Set the value of a property on a scene object",
+                @"Set the value of a property on a scene object. Supports undo. Use for single property changes.
+For bulk modifications (10+ objects), use the 'execute' tool instead.
+
+Property path syntax:
+- Transform props: 'position', 'localScale', 'eulerAngles' (no prefix needed)
+- Component props: 'Rigidbody.mass', 'Light.intensity', 'Camera.fieldOfView'
+- Nested: 'MeshRenderer.material.color'
+
+Value formats:
+- Primitives: 5, 3.14, true, ""hello""
+- Vector3: {""x"": 1, ""y"": 2, ""z"": 3}
+- Color: {""r"": 1.0, ""g"": 0.0, ""b"": 0.0, ""a"": 1.0}
+- Quaternion: {""x"": 0, ""y"": 0, ""z"": 0, ""w"": 1}
+
+Always verify after setting: call get_property or inspect to confirm the change.",
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -95,7 +124,13 @@ namespace AkerMcp.Server
                 (args, ct) => _engine.ForwardToolCall("set_property", args, ct));
 
             Register("call_method",
-                "Invoke a method on a scene object or static class",
+                @"Invoke a method on a scene object or static class.
+Use for actions like SetActive, AddForce, AddComponent, or any static utility method.
+
+Examples:
+- target: '/Player', method: 'SetActive', args: ['false']
+- target: 'UnityEngine.Application', method: 'get_dataPath' (static)
+- All args are passed as strings and converted automatically.",
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -108,7 +143,17 @@ namespace AkerMcp.Server
                 (args, ct) => _engine.ForwardToolCall("call_method", args, ct));
 
             Register("query",
-                "Find objects in the scene by type, name, property value, or tag",
+                @"Find objects in the scene by type, name pattern, property value, or tag.
+Use this when you don't know the exact path of an object.
+
+Examples:
+- Find all cameras: {""type_filter"": ""Camera""}
+- Find by name glob: {""name_pattern"": ""Enemy*""}
+- Find by tag: {""tag"": ""Player""}
+- Combine filters: {""type_filter"": ""Rigidbody"", ""name_pattern"": ""*Boss*""}
+- Limit results: {""max_results"": 10}
+
+Paths are case-sensitive. Returns an array of matching objects with their scene paths.",
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -123,7 +168,13 @@ namespace AkerMcp.Server
                 new ToolAnnotations { ReadOnlyHint = true });
 
             Register("create",
-                "Create a new object/node in the scene",
+                @"Create a new object/node in the scene. Supports undo.
+For creating a single object with initial properties, use this tool. For spawning many objects or procedural generation, use 'execute' instead.
+
+Examples:
+- Empty object: {""type"": ""GameObject"", ""name"": ""Waypoint""}
+- Under a parent: {""type"": ""GameObject"", ""name"": ""Child"", ""parent_path"": ""/Parent""}
+- With properties: {""type"": ""GameObject"", ""name"": ""Light"", ""properties"": {""position"": {""x"": 0, ""y"": 5, ""z"": 0}}}",
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -137,7 +188,8 @@ namespace AkerMcp.Server
                 (args, ct) => _engine.ForwardToolCall("create", args, ct));
 
             Register("delete",
-                "Remove an object/node from the scene",
+                @"Remove an object/node from the scene. This action supports undo.
+Use 'recursive: true' to also delete all children. Paths are case-sensitive.",
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -150,7 +202,11 @@ namespace AkerMcp.Server
                 new ToolAnnotations { DestructiveHint = true });
 
             Register("refresh_scripts",
-                "Force recompilation of all scripts in the project. Use after modifying script files to get immediate compilation feedback. Returns compilation status with any errors or warnings.",
+                @"Force recompilation of all scripts in the project.
+ALWAYS call this after creating or modifying any .cs file. Then call get_compile_errors to verify.
+Never assume a script change compiled successfully — always verify.
+
+Workflow: edit .cs file → refresh_scripts → get_compile_errors → fix if needed → repeat.",
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -160,7 +216,9 @@ namespace AkerMcp.Server
                 (args, ct) => _engine.ForwardToolCall("refresh_scripts", args, ct));
 
             Register("get_compile_errors",
-                "Get current script compilation errors and warnings. Use after refresh_scripts or when you suspect compilation issues.",
+                @"Get current script compilation errors and warnings.
+Always call this after refresh_scripts. Returns file path, line number, column, and error message.
+Use 'errors_only: true' to skip warnings and focus on blockers.",
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -171,7 +229,10 @@ namespace AkerMcp.Server
                 new ToolAnnotations { ReadOnlyHint = true });
 
             Register("get_console_logs",
-                "Get recent Unity console log entries (errors, warnings, info messages). Useful for debugging runtime issues.",
+                @"Get recent engine console log entries (errors, warnings, info messages).
+Use this for debugging: check after execute calls, after runtime errors, or when something seems wrong.
+Filter by level to focus: 'error', 'warning', 'info', or 'all'.
+Use 'search' to find specific messages.",
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -184,7 +245,9 @@ namespace AkerMcp.Server
                 new ToolAnnotations { ReadOnlyHint = true });
 
             Register("select",
-                "Select a GameObject in the editor hierarchy. This highlights it in the Inspector and Scene view, making it the active selection for manual editing.",
+                @"Select a GameObject in the editor hierarchy.
+Highlights it in the Inspector and Scene view. The selected object becomes available as 'selectedObject' in execute scripts.
+Useful to direct the user's attention to a specific object.",
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -195,7 +258,8 @@ namespace AkerMcp.Server
                 (args, ct) => _engine.ForwardToolCall("select_object", args, ct));
 
             Register("get_selection",
-                "Get the currently selected GameObject in the editor, including its path, components, and property summary.",
+                @"Get the currently selected GameObject in the editor, including its path, components, and property summary.
+Use this to understand what the user is looking at before making contextual modifications.",
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {}
@@ -204,7 +268,22 @@ namespace AkerMcp.Server
                 new ToolAnnotations { ReadOnlyHint = true });
 
             Register("execute",
-                "Execute arbitrary C# code in the engine context (escape hatch)",
+                @"Execute arbitrary C# code directly in the engine's main thread (powered by Roslyn).
+This is your most powerful tool. Use it for procedural generation, bulk modifications, complex logic, or accessing Editor APIs.
+
+Available globals (no initialization needed):
+- `GameObject? selectedObject`: Currently selected object.
+- `GameObject? Find(string name)`: Shortcut for GameObject.Find.
+- `T[] FindAll<T>()`: Find all components of type T in the scene.
+- `GameObject Create(string name)`: Create a new empty GameObject.
+- `void Log(object message)`: Log to the engine console.
+
+Pre-imported namespaces: System, System.Collections.Generic, System.Linq, UnityEngine, UnityEditor.
+
+Important rules:
+1. State persists between calls! Variables defined in one execute call remain in memory for the next one.
+2. ALWAYS return a meaningful value at the end of your script (e.g. `return ""Spawned 10 items"";`).
+3. If you need to modify many objects, use this tool instead of calling `set_property` in a loop.",
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
