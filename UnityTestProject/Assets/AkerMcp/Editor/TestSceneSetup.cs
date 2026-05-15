@@ -1,4 +1,3 @@
-#if UNITY_EDITOR
 using UnityEngine;
 using UnityEditor;
 
@@ -78,4 +77,3 @@ namespace AkerMcp.Unity.Editor
         }
     }
 }
-#endif

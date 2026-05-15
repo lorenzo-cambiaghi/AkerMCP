@@ -1,4 +1,3 @@
-#if UNITY_EDITOR
 using UnityEditor;
 
 namespace AkerMcp.Unity.Editor
@@ -19,4 +18,3 @@ namespace AkerMcp.Unity.Editor
         }
     }
 }
-#endif
