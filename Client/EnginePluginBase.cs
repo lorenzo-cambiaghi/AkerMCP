@@ -14,6 +14,7 @@ namespace AkerMcp.Client
         private IpcRequestHandler? _handler;
         private PluginDiscovery? _discovery;
         private CancellationTokenSource? _cts;
+        private Task? _pipeServerTask;
         private bool _disposed;
         private bool _running;
 
@@ -53,7 +54,7 @@ namespace AkerMcp.Client
 
             _cts = new CancellationTokenSource();
 
-            _ = Task.Run(() => RunPipeServer(_cts.Token));
+            _pipeServerTask = Task.Run(() => RunPipeServer(_cts.Token));
             Log($"AkerMcp Client v{AkerMcp.Shared.Ipc.IpcConstants.ProtocolVersion} started. Pipe: {_discovery.PipeName}");
         }
 
@@ -62,14 +63,20 @@ namespace AkerMcp.Client
             if (!_running) return;
             _running = false;
 
-            _cts?.Cancel();
-            
-            // Close the pipe server first to unblock any waiting threads immediately
+            try { _cts?.Cancel(); } catch { }
+            // Close the pipe server first so any blocking WaitForConnectionAsync unblocks.
             try { _pipeServer?.Close(); } catch { }
 
-            _channel?.Dispose();
-            _pipeServer?.Dispose();
-            _discovery?.Dispose();
+            // Wait for RunPipeServer to fully exit (incl. its finally) BEFORE a
+            // possible subsequent Start(). Otherwise the old task's finally could
+            // dispose the new pipe instance created by the new Start() call.
+            try { _pipeServerTask?.Wait(TimeSpan.FromSeconds(2)); } catch { }
+            _pipeServerTask = null;
+
+            try { _channel?.Dispose(); } catch { }
+            try { _pipeServer?.Dispose(); } catch { }
+            // Lock file removal must always run, even if pipe disposal threw above.
+            try { _discovery?.Dispose(); } catch { }
 
             Log("AkerMcp plugin stopped.");
         }
@@ -78,38 +85,53 @@ namespace AkerMcp.Client
         {
             while (!ct.IsCancellationRequested)
             {
+                NamedPipeServerStream? pipeServer = null;
+                IpcChannel? channel = null;
                 try
                 {
-                    _pipeServer = new NamedPipeServerStream(
+                    pipeServer = new NamedPipeServerStream(
                         Config.PipeName!,
                         PipeDirection.InOut,
                         1,
                         PipeTransmissionMode.Byte,
                         PipeOptions.Asynchronous);
+                    // Expose to Stop() so it can Close() to unblock WaitForConnectionAsync.
+                    _pipeServer = pipeServer;
 
                     Log("Waiting for MCP server connection...");
-                    await _pipeServer.WaitForConnectionAsync(ct).ConfigureAwait(false);
+                    await pipeServer.WaitForConnectionAsync(ct).ConfigureAwait(false);
                     Log("MCP server connected.");
 
-                    _channel = new IpcChannel(_pipeServer);
-                    await HandleConnection(_channel, ct).ConfigureAwait(false);
+                    channel = new IpcChannel(pipeServer);
+                    _channel = channel;
+                    await HandleConnection(channel, ct).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
                     break;
                 }
+                catch (ObjectDisposedException)
+                {
+                    // Pipe was disposed by Stop() on another thread.
+                    if (!_running || ct.IsCancellationRequested) break;
+                }
                 catch (Exception ex)
                 {
                     if (!_running || ct.IsCancellationRequested) break;
                     LogError($"Pipe server error: {ex.Message}");
-                    await Task.Delay(1000, ct).ConfigureAwait(false);
+                    try { await Task.Delay(1000, ct).ConfigureAwait(false); }
+                    catch (OperationCanceledException) { break; }
                 }
                 finally
                 {
-                    _channel?.Dispose();
-                    _channel = null;
-                    _pipeServer?.Dispose();
-                    _pipeServer = null;
+                    // Dispose only THIS iteration's instances (locals). NEVER touch
+                    // the fields directly: if Stop() timed out and a subsequent
+                    // Start() already replaced them, we'd dispose the new instance.
+                    try { channel?.Dispose(); } catch { }
+                    try { pipeServer?.Dispose(); } catch { }
+                    // Clear the fields only if they still point to ours.
+                    Interlocked.CompareExchange(ref _channel, null, channel);
+                    Interlocked.CompareExchange(ref _pipeServer, null, pipeServer);
                 }
             }
         }

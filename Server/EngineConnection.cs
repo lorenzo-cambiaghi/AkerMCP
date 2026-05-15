@@ -22,29 +22,48 @@ namespace AkerMcp.Server
         private CancellationTokenSource? _listenerCts;
         private bool _disposed;
 
+        // Heartbeat: catches "zombie" connections where the pipe is technically open
+        // but the engine main thread is frozen (no responses ever come back).
+        private const int HeartbeatIntervalMs = 10_000;
+        private const int HeartbeatTimeoutMs = 5_000;
+
         public bool IsConnected => _channel != null;
 
         public async Task<bool> TryConnect(string pipeName, int timeoutMs = 5000, CancellationToken ct = default)
         {
+            NamedPipeClientStream? client = null;
             try
             {
-                var client = new NamedPipeClientStream(".", pipeName,
+                client = new NamedPipeClientStream(".", pipeName,
                     PipeDirection.InOut, PipeOptions.Asynchronous);
 
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 cts.CancelAfter(timeoutMs);
 
                 await client.ConnectAsync(cts.Token).ConfigureAwait(false);
-                _channel = new IpcChannel(client);
 
-                _listenerCts = new CancellationTokenSource();
-                _ = Task.Run(() => ListenForResponses(_listenerCts.Token));
+                // Disconnect() uses Interlocked.Exchange and nulls these fields, so
+                // a previous connection's cleanup never races with this assignment.
+                var newCts = new CancellationTokenSource();
+                var newChannel = new IpcChannel(client);
+                client = null; // ownership transferred to IpcChannel; do not dispose in catch
+                _listenerCts = newCts;
+                _channel = newChannel;
+
+                // Pass the channel by value so each task is bound to ITS connection.
+                // Even if the field is later swapped to a new channel, an old task
+                // can never accidentally read from / write to it.
+                var listenerToken = newCts.Token;
+                _ = Task.Run(() => ListenForResponses(newChannel, listenerToken));
+                _ = Task.Run(() => RunHeartbeat(newChannel, listenerToken));
 
                 StdioTransport.LogInfo($"Connected to engine plugin via pipe: {pipeName}");
                 return true;
             }
             catch (Exception ex)
             {
+                // Avoid leaking the pipe handle on failed ConnectAsync.
+                try { client?.Dispose(); } catch { }
                 StdioTransport.LogError($"Failed to connect to engine: {ex.Message}");
                 return false;
             }
@@ -111,14 +130,10 @@ namespace AkerMcp.Server
                     var content = File.ReadAllText(lockFile);
                     var info = JsonSerializer.Deserialize<JsonElement>(content);
 
-                    if (info.TryGetProperty("pid", out var pidElement))
+                    if (!IsLockOwnerAlive(info, out var reason))
                     {
-                        var pid = pidElement.GetInt32();
-                        if (!IsProcessAlive(pid))
-                        {
-                            StdioTransport.LogInfo($"Removing stale lock file: {Path.GetFileName(lockFile)} (PID {pid} is dead)");
-                            File.Delete(lockFile);
-                        }
+                        StdioTransport.LogInfo($"Removing stale lock file: {Path.GetFileName(lockFile)} ({reason})");
+                        File.Delete(lockFile);
                     }
                 }
                 catch
@@ -129,22 +144,57 @@ namespace AkerMcp.Server
             }
         }
 
-        private static bool IsProcessAlive(int pid)
+        private static bool IsLockOwnerAlive(JsonElement info, out string reason)
         {
-            try
+            reason = "unknown";
+            if (!info.TryGetProperty("pid", out var pidElement))
             {
-                var process = System.Diagnostics.Process.GetProcessById(pid);
-                return !process.HasExited;
+                reason = "missing pid field";
+                return false;
             }
+
+            var pid = pidElement.GetInt32();
+            System.Diagnostics.Process process;
+            try { process = System.Diagnostics.Process.GetProcessById(pid); }
             catch
             {
+                reason = $"PID {pid} is dead";
                 return false;
+            }
+
+            try
+            {
+                if (process.HasExited)
+                {
+                    reason = $"PID {pid} has exited";
+                    return false;
+                }
+
+                // Guard against PID recycling: compare process start time with the one
+                // recorded in the lock file. Tolerate small clock-skew (2s).
+                if (info.TryGetProperty("startTime", out var startElement) &&
+                    DateTime.TryParse(startElement.GetString(), null,
+                        System.Globalization.DateTimeStyles.RoundtripKind, out var lockStart))
+                {
+                    var processStart = process.StartTime.ToUniversalTime();
+                    if (System.Math.Abs((lockStart - processStart).TotalSeconds) > 2)
+                    {
+                        reason = $"PID {pid} was recycled (start time mismatch)";
+                        return false;
+                    }
+                }
+                return true;
+            }
+            finally
+            {
+                process.Dispose();
             }
         }
 
         public async Task<ToolResult> ForwardToolCall(string method, JsonElement? arguments, CancellationToken ct)
         {
-            if (_channel == null)
+            var channel = _channel;
+            if (channel == null)
                 return ToolResult.Error("No engine connected. Start the engine plugin first.");
 
             var payload = arguments.HasValue
@@ -164,7 +214,7 @@ namespace AkerMcp.Server
 
             try
             {
-                await _channel.SendRequest(request, ct).ConfigureAwait(false);
+                await channel.SendRequest(request, ct).ConfigureAwait(false);
 
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 cts.CancelAfter(30000);
@@ -190,7 +240,8 @@ namespace AkerMcp.Server
         public async Task<BinaryToolCallResult> ForwardBinaryToolCall(
             string method, JsonElement? arguments, CancellationToken ct)
         {
-            if (_channel == null)
+            var channel = _channel;
+            if (channel == null)
                 return new BinaryToolCallResult { Error = "No engine connected." };
 
             var payload = arguments.HasValue
@@ -210,7 +261,7 @@ namespace AkerMcp.Server
 
             try
             {
-                await _channel.SendRequest(request, ct).ConfigureAwait(false);
+                await channel.SendRequest(request, ct).ConfigureAwait(false);
 
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 cts.CancelAfter(30000);
@@ -241,7 +292,8 @@ namespace AkerMcp.Server
 
         public async Task<string> ForwardResourceRead(string method, CancellationToken ct)
         {
-            if (_channel == null)
+            var channel = _channel;
+            if (channel == null)
                 return "(No engine connected)";
 
             var requestId = Interlocked.Increment(ref _nextRequestId);
@@ -256,7 +308,7 @@ namespace AkerMcp.Server
 
             try
             {
-                await _channel.SendRequest(request, ct).ConfigureAwait(false);
+                await channel.SendRequest(request, ct).ConfigureAwait(false);
 
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 cts.CancelAfter(10000);
@@ -277,13 +329,13 @@ namespace AkerMcp.Server
             }
         }
 
-        private async Task ListenForResponses(CancellationToken ct)
+        private async Task ListenForResponses(IpcChannel channel, CancellationToken ct)
         {
             try
             {
-                while (!ct.IsCancellationRequested && _channel != null)
+                while (!ct.IsCancellationRequested)
                 {
-                    var response = await _channel.ReceiveResponse(ct).ConfigureAwait(false);
+                    var response = await channel.ReceiveResponse(ct).ConfigureAwait(false);
                     if (_pendingRequests.TryGetValue(response.Id, out var tcs))
                     {
                         tcs.TrySetResult(response);
@@ -294,16 +346,59 @@ namespace AkerMcp.Server
             catch (EndOfStreamException)
             {
                 StdioTransport.LogInfo("Engine plugin disconnected gracefully.");
-                CancelPendingRequests();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Channel was disposed by Disconnect() racing on another thread.
             }
             catch (Exception ex)
             {
                 StdioTransport.LogInfo($"Engine connection lost: {ex.Message}");
-                CancelPendingRequests();
             }
             finally
             {
                 Disconnect();
+            }
+        }
+
+        private async Task RunHeartbeat(IpcChannel channel, CancellationToken ct)
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                try { await Task.Delay(HeartbeatIntervalMs, ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) { return; }
+
+                var pingId = Interlocked.Increment(ref _nextRequestId);
+                var tcs = new TaskCompletionSource<IpcResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+                _pendingRequests[pingId] = tcs;
+
+                try
+                {
+                    await channel.SendRequest(new IpcRequest
+                    {
+                        Id = pingId,
+                        Method = IpcConstants.Methods.Ping
+                    }, ct).ConfigureAwait(false);
+
+                    using var pingCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    pingCts.CancelAfter(HeartbeatTimeoutMs);
+                    using var reg = pingCts.Token.Register(() => tcs.TrySetCanceled());
+                    await tcs.Task.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    StdioTransport.LogInfo($"Heartbeat failed — dropping zombie connection: {ex.GetType().Name}: {ex.Message}");
+                    Disconnect();
+                    return;
+                }
+                finally
+                {
+                    _pendingRequests.TryRemove(pingId, out _);
+                }
             }
         }
 
@@ -316,8 +411,17 @@ namespace AkerMcp.Server
 
         private void Disconnect()
         {
-            _channel?.Dispose();
-            _channel = null; // This allows IsConnected to become false, triggering the retry loop
+            // Atomic claim: exactly one caller wins each pair, so a stale Disconnect
+            // (e.g. listener finally running after heartbeat already tore down)
+            // cannot accidentally cancel a freshly-created next connection.
+            var oldCts = Interlocked.Exchange(ref _listenerCts, null);
+            var oldChannel = Interlocked.Exchange(ref _channel, null);
+
+            try { oldCts?.Cancel(); } catch { }
+            try { oldChannel?.Dispose(); } catch { }
+            try { oldCts?.Dispose(); } catch { }
+
+            CancelPendingRequests();
         }
 
         public class BinaryToolCallResult
@@ -332,9 +436,7 @@ namespace AkerMcp.Server
         {
             if (_disposed) return;
             _disposed = true;
-            _listenerCts?.Cancel();
-            _listenerCts?.Dispose();
-            _channel?.Dispose();
+            Disconnect();
         }
     }
 }

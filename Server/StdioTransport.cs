@@ -30,7 +30,16 @@ namespace AkerMcp.Server
 
         public async Task<JsonElement?> ReadMessage(CancellationToken ct)
         {
-            var line = await _reader.ReadLineAsync().ConfigureAwait(false);
+            string? line;
+            try
+            {
+                line = await _reader.ReadLineAsync(ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return null;
+            }
+
             if (line == null) return null;
             if (string.IsNullOrWhiteSpace(line)) return await ReadMessage(ct).ConfigureAwait(false);
 
