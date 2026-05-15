@@ -12,6 +12,24 @@ namespace AkerMcp.Unity.Editor
             GetWindow<McpEditorWindow>("AkerMcp");
         }
 
+        private void OnEnable()
+        {
+            AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
+        }
+
+        private void OnDisable()
+        {
+            AssemblyReloadEvents.beforeAssemblyReload -= OnBeforeAssemblyReload;
+            if (UnityMcpPlugin.IsRunning)
+                UnityMcpPlugin.Instance.Stop();
+        }
+
+        private void OnBeforeAssemblyReload()
+        {
+            if (UnityMcpPlugin.IsRunning)
+                UnityMcpPlugin.Instance.Stop();
+        }
+
         private void OnGUI()
         {
             GUILayout.Label("AkerMcp — Game Engine MCP Bridge", EditorStyles.boldLabel);
