@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using AkerMcp.Shared.Ipc;
 using AkerMcp.Shared.Protocol;
 
 namespace AkerMcp.Server
@@ -294,6 +295,123 @@ Important rules:
                 }"),
                 (args, ct) => _engine.ForwardToolCall("execute", args, ct),
                 new ToolAnnotations { DestructiveHint = true });
+
+            Register("take_screenshot",
+                @"Capture a screenshot of the engine editor and return the image (JPEG).
+Use to visually verify scene changes when property values alone aren't enough.
+
+Views:
+- 'game' (default): the Game View — what the player sees, no gizmos.
+- 'scene': the Scene View — full editor view with gizmos, useful for inspecting placement.
+
+WHEN TO USE:
+- After creating/moving/deleting objects — confirm placement looks right.
+- After material/color/texture changes — colors can fail silently (pink fallback shaders).
+- After lighting changes — intensity is hard to predict numerically.
+- After spawning procedural content — verify distribution, density, scale.
+- After UI layout changes — anchoring/scaling bugs are visual-only.
+- When the user asks 'how does it look?', 'show me', 'did it work?'.
+
+WHEN NOT TO USE:
+- After changing non-visual properties (mass, tag, name, layer) — use get_property instead.
+- After every micro-change in a sequence — batch the edits, screenshot once at the end.
+- To verify a script compiled — use get_compile_errors instead.
+
+Output: auto-resized to max 1920px (long side) and JPEG-encoded at quality 85.
+Typical size 150-400 KB, well under model image limits.",
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""view"": {
+                            ""type"": ""string"",
+                            ""enum"": [""game"", ""scene""],
+                            ""description"": ""View to capture (default: 'game')""
+                        }
+                    }
+                }"),
+                HandleTakeScreenshot,
+                new ToolAnnotations { ReadOnlyHint = true });
+        }
+
+        private async Task<ToolResult> HandleTakeScreenshot(JsonElement? args, CancellationToken ct)
+        {
+            // Strategy 1: engine-internal capture (highest quality)
+            var engineResult = await _engine.ForwardBinaryToolCall(
+                IpcConstants.Methods.TakeScreenshot, args, ct);
+
+            byte[]? rawImage = engineResult.Bytes;
+            string sourceContentType = engineResult.ContentType ?? "image/png";
+
+            if (rawImage == null)
+            {
+                // If real failure (not NOT_SUPPORTED), propagate
+                if (engineResult.ErrorCode != IpcConstants.ErrorCodes.NotSupported)
+                    return ToolResult.Error($"Screenshot failed: {engineResult.Error ?? "unknown error"}");
+
+                // Strategy 2: OS-level fallback
+                if (!OperatingSystem.IsWindows())
+                    return ToolResult.Error(
+                        "Engine does not implement IScreenCapture, and OS-level capture is " +
+                        "currently Windows-only. Implement IScreenCapture in your engine adapter.");
+
+                StdioTransport.LogInfo("Engine has no IScreenCapture; using OS-level fallback.");
+
+                var windowText = await _engine.ForwardResourceRead(
+                    IpcConstants.Methods.GetWindowInfo, ct);
+                if (string.IsNullOrEmpty(windowText) || windowText.StartsWith("Error:"))
+                    return ToolResult.Error("Cannot capture: engine window info unavailable.");
+
+                JsonElement windowInfo;
+                try
+                {
+                    windowInfo = JsonSerializer.Deserialize<JsonElement>(windowText);
+                }
+                catch (Exception ex)
+                {
+                    return ToolResult.Error($"Failed to parse window info: {ex.Message}");
+                }
+
+                if (!windowInfo.TryGetProperty("windowHandle", out var hElement))
+                    return ToolResult.Error("Window info missing 'windowHandle'.");
+
+                var handle = hElement.GetInt64();
+                if (handle == 0)
+                    return ToolResult.Error("Engine reports no main window handle.");
+
+                rawImage = ScreenCaptureService.CaptureWindow(handle);
+                if (rawImage == null || rawImage.Length == 0)
+                    return ToolResult.Error(
+                        "OS-level capture failed. Window may be minimized or DWM-incompatible.");
+
+                sourceContentType = "image/png";
+            }
+
+            // Normalize: resize + JPEG (Windows only; pass-through elsewhere)
+            byte[] outBytes;
+            string outMime;
+            if (OperatingSystem.IsWindows())
+            {
+                try
+                {
+                    outBytes = ImageProcessor.NormalizeToJpeg(rawImage);
+                    outMime = "image/jpeg";
+                }
+                catch (Exception ex)
+                {
+                    return ToolResult.Error($"Image processing failed: {ex.Message}");
+                }
+            }
+            else
+            {
+                outBytes = rawImage;
+                outMime = sourceContentType;
+            }
+
+            var base64 = Convert.ToBase64String(outBytes);
+            return new ToolResult
+            {
+                Content = new List<ContentItem> { ContentItem.FromImage(base64, outMime) }
+            };
         }
 
         private void Register(string name, string description, JsonElement inputSchema,

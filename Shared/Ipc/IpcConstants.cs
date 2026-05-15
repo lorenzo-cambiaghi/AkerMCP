@@ -28,6 +28,13 @@ namespace AkerMcp.Shared.Ipc
             public const string ClearConsole = "clear_console";
             public const string SelectObject = "select_object";
             public const string GetSelection = "get_selection";
+            public const string TakeScreenshot = "take_screenshot";
+            public const string GetWindowInfo = "get_window_info";
+        }
+
+        public static class ErrorCodes
+        {
+            public const string NotSupported = "NOT_SUPPORTED";
         }
     }
 }

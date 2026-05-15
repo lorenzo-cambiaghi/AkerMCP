@@ -15,6 +15,9 @@ namespace AkerMcp.Server
                 cts.Cancel();
             };
 
+            if (OperatingSystem.IsWindows())
+                ScreenCaptureService.EnsureDpiAwareness();
+
             using var transport = new StdioTransport();
             using var engine = new EngineConnection();
 

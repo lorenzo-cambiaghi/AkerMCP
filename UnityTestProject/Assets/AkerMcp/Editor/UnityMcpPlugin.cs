@@ -50,6 +50,7 @@ namespace AkerMcp.Unity
             _codeExecutor = new DynamicEvaluatorV2(_dispatcher!);
             return _codeExecutor;
         }
+        protected override IScreenCapture? CreateScreenCapture() => new UnityScreenCapture();
 
         protected override void Log(string message) => Debug.Log($"[AkerMcp] {message}");
         protected override void LogError(string message) => Debug.LogError($"[AkerMcp] {message}");

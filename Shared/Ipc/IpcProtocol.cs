@@ -30,6 +30,12 @@ namespace AkerMcp.Shared.Ipc
         [Key(3)]
         public string? Error { get; set; }
 
+        [Key(4)]
+        public string? ContentType { get; set; }
+
+        [Key(5)]
+        public string? ErrorCode { get; set; }
+
         public static IpcResponse Ok(int id, byte[]? payload = null) => new IpcResponse
         {
             Id = id,
@@ -42,6 +48,22 @@ namespace AkerMcp.Shared.Ipc
             Id = id,
             Success = false,
             Error = error
+        };
+
+        public static IpcResponse FailWithCode(int id, string code, string error) => new IpcResponse
+        {
+            Id = id,
+            Success = false,
+            ErrorCode = code,
+            Error = error
+        };
+
+        public static IpcResponse Binary(int id, byte[] payload, string contentType) => new IpcResponse
+        {
+            Id = id,
+            Success = true,
+            Payload = payload,
+            ContentType = contentType
         };
     }
 }
