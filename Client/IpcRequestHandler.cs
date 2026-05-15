@@ -136,7 +136,10 @@ namespace AkerMcp.Client
             {
                 pid = process.Id,
                 windowHandle = handle,
-                windowTitle = process.MainWindowTitle
+                windowTitle = process.MainWindowTitle,
+                // Used by the macOS OS-level fallback to disambiguate the engine's
+                // main window from its other windows (e.g. inspector palettes).
+                windowTitlePrefix = _capabilities.EngineName
             }, _jsonOptions);
         }
 

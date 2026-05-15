@@ -75,7 +75,7 @@ No custom tool class needed. No code generation. Just reflection.
 
 - **14 Generic Reflection-Based Tools**: Operate on any object or component without custom tool definitions.
 - **Roslyn-Powered Dynamic Execution**: Send arbitrary C# scripts via the `execute` tool to perform complex procedural tasks or bulk operations directly within the Unity Editor.
-- **Visual Verification (`take_screenshot`)**: Hybrid capture pipeline — engine-internal render-buffer capture when available (highest quality, works occluded), OS-level window capture (`PrintWindow`) as universal fallback. Output is auto-resized and JPEG-encoded to fit AI image limits.
+- **Visual Verification (`take_screenshot`)**: Hybrid capture pipeline — engine-internal render-buffer capture when available (highest quality, works occluded), with **cross-platform OS-level fallback** (`PrintWindow` on Windows, Quartz `CGWindowListCreateImage` on macOS). Output is auto-resized and JPEG-encoded via ImageSharp to fit AI image limits.
 - **MessagePack IPC Protocol**: High-performance, low-latency binary communication between the standalone MCP Server and the engine plugin.
 - **Robust Type System**: Serializes and deserializes Unity-specific structs (`Vector3`, `Color`, `Bounds`) seamlessly.
 - **Engine-Agnostic Core**: Shared .NET Standard 2.1 core makes it easy to port to Godot, Stride, Flax Engine, or other C# engines by writing a simple adapter.
@@ -413,9 +413,12 @@ If you see this, everything is working.
 The tool follows a **hybrid capture strategy** that prefers quality but always succeeds:
 
 1. **Engine-internal path** *(if the adapter implements `IScreenCapture`)* — captures directly from the render buffer. Works even when the editor window is occluded or partially off-screen. Highest quality.
-2. **OS-level fallback** *(Windows only, automatic)* — uses Win32 `PrintWindow(PW_RENDERFULLCONTENT)` to grab the engine's main window. Works for any C# engine without requiring adapter code. Captures occluded windows without stealing foreground focus.
+2. **OS-level fallback** *(automatic, cross-platform on Windows + macOS)* — captures the engine's main window without stealing foreground focus. Works for any C# engine without requiring adapter code. Per-OS implementation is selected at runtime:
+   - **Windows** — Win32 `PrintWindow(PW_RENDERFULLCONTENT)` via `user32.dll`
+   - **macOS** — Quartz `CGWindowListCreateImage` via `CoreGraphics.framework` + `ImageIO.framework`. Window discovery: enumerates on-screen windows owned by the engine PID, picks the one whose title starts with the engine name (e.g. "Unity") and largest area
+   - **Linux** — not implemented; the engine adapter must implement `IScreenCapture`
 
-Output is automatically:
+Output is automatically (cross-platform via ImageSharp):
 - **Resized** to a maximum of 1920px on the longest side
 - **Re-encoded as JPEG** (quality 85)
 
@@ -438,7 +441,28 @@ Typical output size: **~150-400 KB**, comfortably under Claude API image limits 
 ← [JPEG image, 1920×1080, 287 KB]   // AI now sees the red light
 ```
 
-> **Platform note:** The OS-level fallback is currently Windows-only (uses `System.Drawing.Common`). On macOS/Linux, the engine adapter must implement `IScreenCapture` (the Unity adapter does). Future work may add SkiaSharp-based fallback for cross-platform OS capture.
+#### macOS: Screen Recording permission
+
+On macOS 10.15+, capturing windows from another process requires **Screen Recording permission** for the binary running the AkerMcp server. This affects only the OS-level fallback path — adapters implementing `IScreenCapture` (like the Unity adapter) work without any permission grant.
+
+**First-time setup:**
+
+1. The first time the OS-level fallback is invoked, macOS shows a permission prompt for the binary running the server (typically `dotnet`).
+2. If you miss the prompt or denied it, open: **System Settings → Privacy & Security → Screen Recording**
+3. Add (or enable the toggle for) the binary running AkerMcp:
+   - If you launch via `dotnet run --project Server` → the entry is `dotnet` (or `dotnet [version]`)
+   - If you ship a self-contained build → the entry is your published executable
+4. **Restart the server.** macOS caches the denial decision until the process restarts — granting alone is not enough.
+
+**Verification:**
+
+```bash
+# Trigger a screenshot from your AI client. If permission is missing, the tool returns:
+#   "macOS denied the screen capture (CGWindowListCreateImage returned NULL)..."
+# Follow the steps above and try again after restarting the server.
+```
+
+**Why no permission is needed for Unity (and most engines):** The Unity adapter implements `IScreenCapture` using its own Camera/SceneView render buffer. That happens entirely *inside* the Unity process, so macOS doesn't treat it as cross-process screen capture and no permission is required. Only when no adapter capture exists does AkerMcp fall back to the OS-level path that triggers the permission flow.
 
 ### Dynamic Code Execution (`execute`)
 
@@ -651,11 +675,15 @@ AkerMCP/
 ├── Server/                              AkerMcp.Server (net8.0 console app)
 │   ├── McpServer.cs                     JSON-RPC dispatcher, MCP lifecycle
 │   ├── ToolRegistry.cs                  14 generic tool definitions
-│   ├── ImageProcessor.cs                Resize + JPEG normalization (Win-only)
-│   ├── ScreenCaptureService.cs          OS-level window capture via PrintWindow (Win-only)
-│   ├── ResourceRegistry.cs             5 resource definitions
-│   ├── EngineConnection.cs             IPC client to engine plugin
-│   └── StdioTransport.cs              stdin/stdout transport
+│   ├── ResourceRegistry.cs              5 resource definitions
+│   ├── EngineConnection.cs              IPC client to engine plugin
+│   ├── StdioTransport.cs                stdin/stdout transport
+│   ├── ImageProcessor.cs                Resize + JPEG normalization (cross-platform via ImageSharp)
+│   └── Platform/                        OS-level window capture (per-OS impls)
+│       ├── IPlatformScreenCapture.cs    Common interface
+│       ├── PlatformScreenCapture.cs     Runtime OS-based factory
+│       ├── WindowsScreenCapture.cs      Win32 PrintWindow + GDI+
+│       └── MacScreenCapture.cs          Quartz CGWindowListCreateImage + ImageIO P/Invoke
 ├── Client/                              AkerMcp.Client (netstandard2.1)
 │   ├── EnginePluginBase.cs             Abstract base for adapters
 │   ├── IpcRequestHandler.cs            Request routing and execution
@@ -711,7 +739,9 @@ public class MyEnginePlugin : EnginePluginBase
 | `IEditorContext` | Selection, scene management, console logs | No |
 | `IAssetManager` | Asset search, load, save, delete | No |
 | `ICompilationSupport` | Script recompilation, error retrieval | No |
-| `IScreenCapture` | Engine-internal render-buffer capture (Game/Scene view) | No — falls back to OS-level `PrintWindow` on Windows |
+| `IScreenCapture` | Engine-internal render-buffer capture (Game/Scene view) | No — falls back to OS-level capture on Windows (`PrintWindow`) and macOS (Quartz). On Linux, this interface is required |
+
+> **Tip for the macOS OS-level fallback:** Set `IEngineCapabilities.EngineName` to a string that matches the prefix of your editor's window title (e.g. `"Unity"`, `"Godot"`, `"Stride"`, `"Flax"`). The macOS capture path uses this to disambiguate the engine's main window from inspector/floating panels owned by the same PID.
 
 Register custom type converters for engine-specific structs:
 
@@ -999,6 +1029,14 @@ Prefix the property with the component type name: `Rigidbody.mass` instead of ju
 **Connection drops after Unity recompiles scripts**
 
 Domain reload in Unity tears down the plugin. Re-click **Start** in the AkerMcp window after a recompile, then restart the server.
+
+**macOS: `take_screenshot` returns "macOS denied the screen capture"**
+
+Only happens when the OS-level fallback is used (engine adapter doesn't implement `IScreenCapture`). Open **System Settings → Privacy & Security → Screen Recording**, enable the entry for the binary running the server (typically `dotnet`), then **restart the server** — macOS caches the denial decision until the process restarts. See [macOS: Screen Recording permission](#macos-screen-recording-permission) for the full procedure.
+
+**macOS: `take_screenshot` returns "No on-screen window found for PID"**
+
+Only happens with the OS-level fallback. The engine's main window cannot be located via title prefix. Verify that `IEngineCapabilities.EngineName` in your adapter matches the actual editor window title prefix (e.g. `"Unity"` for Unity Editor). The match is case-insensitive but must be a prefix.
 
 **Unity says "Opening file failed: Access is denied"**
 

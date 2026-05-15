@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using AkerMcp.Server.Platform;
 using AkerMcp.Shared.Ipc;
 using AkerMcp.Shared.Protocol;
 
@@ -349,10 +350,9 @@ Typical size 150-400 KB, well under model image limits.",
                     return ToolResult.Error($"Screenshot failed: {engineResult.Error ?? "unknown error"}");
 
                 // Strategy 2: OS-level fallback
-                if (!OperatingSystem.IsWindows())
-                    return ToolResult.Error(
-                        "Engine does not implement IScreenCapture, and OS-level capture is " +
-                        "currently Windows-only. Implement IScreenCapture in your engine adapter.");
+                var capture = PlatformScreenCapture.Current;
+                if (capture == null)
+                    return ToolResult.Error(PlatformScreenCapture.UnsupportedPlatformMessage);
 
                 StdioTransport.LogInfo("Engine has no IScreenCapture; using OS-level fallback.");
 
@@ -371,40 +371,34 @@ Typical size 150-400 KB, well under model image limits.",
                     return ToolResult.Error($"Failed to parse window info: {ex.Message}");
                 }
 
-                if (!windowInfo.TryGetProperty("windowHandle", out var hElement))
-                    return ToolResult.Error("Window info missing 'windowHandle'.");
+                if (!windowInfo.TryGetProperty("pid", out var pidElement))
+                    return ToolResult.Error("Window info missing 'pid'.");
+                var pid = pidElement.GetInt32();
+                if (pid <= 0)
+                    return ToolResult.Error("Engine reports invalid PID.");
 
-                var handle = hElement.GetInt64();
-                if (handle == 0)
-                    return ToolResult.Error("Engine reports no main window handle.");
+                var titlePrefix = windowInfo.TryGetProperty("windowTitlePrefix", out var p)
+                    ? (p.GetString() ?? "")
+                    : "";
 
-                rawImage = ScreenCaptureService.CaptureWindow(handle);
+                rawImage = capture.CaptureMainWindow(pid, titlePrefix, out var captureError);
                 if (rawImage == null || rawImage.Length == 0)
-                    return ToolResult.Error(
-                        "OS-level capture failed. Window may be minimized or DWM-incompatible.");
+                    return ToolResult.Error(captureError ?? "OS-level capture failed.");
 
                 sourceContentType = "image/png";
             }
 
-            // Normalize: resize + JPEG (Windows only; pass-through elsewhere)
+            // Normalize: resize + JPEG. Cross-platform via ImageSharp.
             byte[] outBytes;
             string outMime;
-            if (OperatingSystem.IsWindows())
+            try
             {
-                try
-                {
-                    outBytes = ImageProcessor.NormalizeToJpeg(rawImage);
-                    outMime = "image/jpeg";
-                }
-                catch (Exception ex)
-                {
-                    return ToolResult.Error($"Image processing failed: {ex.Message}");
-                }
+                outBytes = ImageProcessor.NormalizeToJpeg(rawImage);
+                outMime = "image/jpeg";
             }
-            else
+            catch (Exception ex)
             {
-                outBytes = rawImage;
-                outMime = sourceContentType;
+                return ToolResult.Error($"Image processing failed: {ex.Message}");
             }
 
             var base64 = Convert.ToBase64String(outBytes);

@@ -1,19 +1,19 @@
 using System;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 
-namespace AkerMcp.Server
+namespace AkerMcp.Server.Platform
 {
     /// <summary>
-    /// OS-level window capture via PrintWindow. Captures occluded windows without
-    /// stealing foreground. Windows-only fallback used when the engine adapter does
-    /// not implement IScreenCapture.
+    /// Windows OS-level window capture via PrintWindow. Captures occluded windows
+    /// without stealing foreground focus.
     /// </summary>
     [SupportedOSPlatform("windows")]
-    public static class ScreenCaptureService
+    internal sealed class WindowsScreenCapture : IPlatformScreenCapture
     {
         private const uint PW_RENDERFULLCONTENT = 0x00000002;
 
@@ -32,22 +32,48 @@ namespace AkerMcp.Server
         [StructLayout(LayoutKind.Sequential)]
         private struct RECT { public int Left, Top, Right, Bottom; }
 
-        public static void EnsureDpiAwareness()
+        public void Initialize()
         {
             try { SetProcessDpiAwareness(2); /* PROCESS_PER_MONITOR_DPI_AWARE */ }
             catch { /* already set or unsupported, ignore */ }
         }
 
-        /// <returns>Raw PNG-encoded bytes of the captured window, or null on failure.</returns>
-        public static byte[]? CaptureWindow(long windowHandle)
+        public byte[]? CaptureMainWindow(int pid, string titlePrefix, out string? error)
         {
-            var hWnd = new IntPtr(windowHandle);
-            if (!IsWindow(hWnd)) return null;
-            if (!GetClientRect(hWnd, out var rect)) return null;
+            error = null;
+
+            IntPtr hWnd;
+            try
+            {
+                using var process = Process.GetProcessById(pid);
+                process.Refresh();
+                hWnd = process.MainWindowHandle;
+            }
+            catch (Exception ex)
+            {
+                error = $"Cannot resolve process PID {pid}: {ex.Message}";
+                return null;
+            }
+
+            if (hWnd == IntPtr.Zero || !IsWindow(hWnd))
+            {
+                error = $"Process {pid} has no main window handle (engine may be minimized or headless).";
+                return null;
+            }
+
+            if (!GetClientRect(hWnd, out var rect))
+            {
+                error = "GetClientRect failed.";
+                return null;
+            }
 
             int w = rect.Right - rect.Left;
             int h = rect.Bottom - rect.Top;
-            if (w <= 0 || h <= 0) return null;
+            if (w <= 0 || h <= 0)
+            {
+                error = $"Invalid window dimensions: {w}x{h}";
+                return null;
+            }
 
             using var bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb);
             using (var gfx = Graphics.FromImage(bmp))
@@ -56,7 +82,10 @@ namespace AkerMcp.Server
                 try
                 {
                     if (!PrintWindow(hWnd, hdc, PW_RENDERFULLCONTENT))
+                    {
+                        error = "PrintWindow returned false (window may be DWM-incompatible).";
                         return null;
+                    }
                 }
                 finally { gfx.ReleaseHdc(hdc); }
             }
