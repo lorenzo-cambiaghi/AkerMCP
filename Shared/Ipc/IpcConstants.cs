@@ -4,6 +4,7 @@ namespace AkerMcp.Shared.Ipc
     {
         public const string PipePrefix = "aker-mcp-";
         public const string DiscoveryDirectory = "aker-mcp";
+        public const string ProtocolVersion = "1.1.0"; // Bump on any IPC schema change
 
         public static class Methods
         {

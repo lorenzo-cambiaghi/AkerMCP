@@ -54,7 +54,7 @@ namespace AkerMcp.Client
             _cts = new CancellationTokenSource();
 
             _ = Task.Run(() => RunPipeServer(_cts.Token));
-            Log($"AkerMcp plugin started. Pipe: {_discovery.PipeName}");
+            Log($"AkerMcp Client v{AkerMcp.Shared.Ipc.IpcConstants.ProtocolVersion} started. Pipe: {_discovery.PipeName}");
         }
 
         public void Stop()

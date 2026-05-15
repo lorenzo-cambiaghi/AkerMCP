@@ -55,9 +55,11 @@ namespace AkerMcp.Server
             var discoveryDir = Path.Combine(Path.GetTempPath(), IpcConstants.DiscoveryDirectory);
             if (!Directory.Exists(discoveryDir))
             {
-                StdioTransport.LogInfo("No engine plugin discovered (discovery directory not found). Running in standalone mode.");
+                StdioTransport.LogInfo("No engine plugin discovered (discovery directory not found).");
                 return false;
             }
+
+            PurgeStaleLockFiles(discoveryDir);
 
             foreach (var lockFile in Directory.GetFiles(discoveryDir, "*.lock"))
             {
@@ -66,25 +68,78 @@ namespace AkerMcp.Server
                     var content = File.ReadAllText(lockFile);
                     var info = JsonSerializer.Deserialize<JsonElement>(content);
 
-                    if (info.TryGetProperty("pipe", out var pipeElement))
+                    if (!info.TryGetProperty("pipe", out var pipeElement))
+                        continue;
+
+                    var pipeName = pipeElement.GetString();
+                    if (pipeName == null)
+                        continue;
+
+                    StdioTransport.LogInfo($"Attempting connection to pipe: {pipeName}");
+
+                    if (await TryConnect(pipeName, 5000, ct).ConfigureAwait(false))
                     {
-                        var pipeName = pipeElement.GetString();
-                        if (pipeName != null && await TryConnect(pipeName, 3000, ct).ConfigureAwait(false))
+                        var engineName = info.TryGetProperty("engine", out var eng) ? eng.GetString() : "Unknown";
+                        var clientProtocol = info.TryGetProperty("protocolVersion", out var prot) ? prot.GetString() : "Unknown";
+                        
+                        StdioTransport.LogInfo($"Connected to {engineName} engine via {pipeName} (Client Protocol: v{clientProtocol})");
+                        
+                        if (clientProtocol != IpcConstants.ProtocolVersion)
                         {
-                            if (info.TryGetProperty("engine", out var eng))
-                                StdioTransport.LogInfo($"Connected to {eng.GetString()} engine");
-                            return true;
+                            StdioTransport.LogError($"PROTOCOL MISMATCH! Server is v{IpcConstants.ProtocolVersion} but Client is v{clientProtocol}. Expect connection errors.");
+                        }
+                        
+                        return true;
+                    }
+                }
+                catch
+                {
+                    // Corrupt lock file, skip
+                }
+            }
+
+            StdioTransport.LogInfo("No engine plugin available after discovery scan.");
+            return false;
+        }
+
+        private static void PurgeStaleLockFiles(string discoveryDir)
+        {
+            foreach (var lockFile in Directory.GetFiles(discoveryDir, "*.lock"))
+            {
+                try
+                {
+                    var content = File.ReadAllText(lockFile);
+                    var info = JsonSerializer.Deserialize<JsonElement>(content);
+
+                    if (info.TryGetProperty("pid", out var pidElement))
+                    {
+                        var pid = pidElement.GetInt32();
+                        if (!IsProcessAlive(pid))
+                        {
+                            StdioTransport.LogInfo($"Removing stale lock file: {Path.GetFileName(lockFile)} (PID {pid} is dead)");
+                            File.Delete(lockFile);
                         }
                     }
                 }
                 catch
                 {
-                    // Stale lock file, skip
+                    // Corrupt file, remove it
+                    try { File.Delete(lockFile); } catch { }
                 }
             }
+        }
 
-            StdioTransport.LogInfo("No engine plugin available. Running in standalone mode.");
-            return false;
+        private static bool IsProcessAlive(int pid)
+        {
+            try
+            {
+                var process = System.Diagnostics.Process.GetProcessById(pid);
+                return !process.HasExited;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         public async Task<ToolResult> ForwardToolCall(string method, JsonElement? arguments, CancellationToken ct)
@@ -238,14 +293,31 @@ namespace AkerMcp.Server
             catch (OperationCanceledException) { }
             catch (EndOfStreamException)
             {
-                StdioTransport.LogInfo("Engine plugin disconnected.");
-                foreach (var pending in _pendingRequests.Values)
-                    pending.TrySetCanceled();
+                StdioTransport.LogInfo("Engine plugin disconnected gracefully.");
+                CancelPendingRequests();
             }
             catch (Exception ex)
             {
-                StdioTransport.LogError($"IPC listener error: {ex.Message}");
+                StdioTransport.LogInfo($"Engine connection lost: {ex.Message}");
+                CancelPendingRequests();
             }
+            finally
+            {
+                Disconnect();
+            }
+        }
+
+        private void CancelPendingRequests()
+        {
+            foreach (var pending in _pendingRequests.Values)
+                pending.TrySetCanceled();
+            _pendingRequests.Clear();
+        }
+
+        private void Disconnect()
+        {
+            _channel?.Dispose();
+            _channel = null; // This allows IsConnected to become false, triggering the retry loop
         }
 
         public class BinaryToolCallResult
