@@ -15,7 +15,8 @@ namespace AkerMcp.Client
 
         public PluginDiscovery(string engineName, string engineVersion)
         {
-            var pid = Process.GetCurrentProcess().Id;
+            var current = Process.GetCurrentProcess();
+            var pid = current.Id;
             PipeName = $"{IpcConstants.PipePrefix}{engineName.ToLowerInvariant()}-{pid}";
 
             var discoveryDir = Path.Combine(Path.GetTempPath(), IpcConstants.DiscoveryDirectory);
@@ -26,6 +27,8 @@ namespace AkerMcp.Client
 
             _lockFilePath = Path.Combine(discoveryDir, $"{engineName.ToLowerInvariant()}-{pid}.lock");
 
+            // startTime must be the *process* start time (not "now") so that the
+            // PID-recycling guard in IsLockOwnerAlive works on subsequent reads.
             var info = new
             {
                 pipe = PipeName,
@@ -33,7 +36,7 @@ namespace AkerMcp.Client
                 version = engineVersion,
                 protocolVersion = IpcConstants.ProtocolVersion,
                 pid = pid,
-                startTime = DateTime.UtcNow.ToString("o")
+                startTime = current.StartTime.ToUniversalTime().ToString("o")
             };
 
             File.WriteAllText(_lockFilePath, JsonSerializer.Serialize(info));
@@ -49,20 +52,8 @@ namespace AkerMcp.Client
                     {
                         var content = File.ReadAllText(lockFile);
                         var info = JsonSerializer.Deserialize<JsonElement>(content);
-                        if (info.TryGetProperty("pid", out var pidElem))
-                        {
-                            var pid = pidElem.GetInt32();
-                            try
-                            {
-                                Process.GetProcessById(pid);
-                                // Process alive, leave it
-                            }
-                            catch
-                            {
-                                // Process dead, remove stale file
-                                File.Delete(lockFile);
-                            }
-                        }
+                        if (!IsLockOwnerAlive(info))
+                            File.Delete(lockFile);
                     }
                     catch
                     {
@@ -71,6 +62,37 @@ namespace AkerMcp.Client
                 }
             }
             catch { /* Discovery dir access error, skip */ }
+        }
+
+        private static bool IsLockOwnerAlive(JsonElement info)
+        {
+            if (!info.TryGetProperty("pid", out var pidElem)) return false;
+            var pid = pidElem.GetInt32();
+
+            Process process;
+            try { process = Process.GetProcessById(pid); }
+            catch { return false; }
+
+            try
+            {
+                if (process.HasExited) return false;
+
+                // Guard against PID recycling: compare process start time with the
+                // one recorded in the lock file. Tolerate small clock-skew (2s).
+                if (info.TryGetProperty("startTime", out var startElem) &&
+                    DateTime.TryParse(startElem.GetString(), null,
+                        System.Globalization.DateTimeStyles.RoundtripKind, out var lockStart))
+                {
+                    var processStart = process.StartTime.ToUniversalTime();
+                    if (Math.Abs((lockStart - processStart).TotalSeconds) > 2)
+                        return false;
+                }
+                return true;
+            }
+            finally
+            {
+                process.Dispose();
+            }
         }
 
         public void Dispose()

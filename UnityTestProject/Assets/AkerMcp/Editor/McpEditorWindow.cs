@@ -12,23 +12,8 @@ namespace AkerMcp.Unity.Editor
             GetWindow<McpEditorWindow>("AkerMcp");
         }
 
-        private void OnEnable()
-        {
-            AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
-        }
-
-        private void OnDisable()
-        {
-            AssemblyReloadEvents.beforeAssemblyReload -= OnBeforeAssemblyReload;
-            if (UnityMcpPlugin.IsRunning)
-                UnityMcpPlugin.Instance.Stop();
-        }
-
-        private void OnBeforeAssemblyReload()
-        {
-            if (UnityMcpPlugin.IsRunning)
-                UnityMcpPlugin.Instance.Stop();
-        }
+        // Lifecycle (assembly reload, editor quit) is handled centrally
+        // by UnityMcpLifecycle so cleanup runs even when this window is closed.
 
         private void OnGUI()
         {
