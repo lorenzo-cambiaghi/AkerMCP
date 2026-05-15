@@ -15,8 +15,9 @@ namespace AkerMcp.Server
                 cts.Cancel();
             };
 
-            if (OperatingSystem.IsWindows())
-                ScreenCaptureService.EnsureDpiAwareness();
+            // Init the per-OS capture impl (DPI awareness on Win, no-op on Mac).
+            // Touching the property triggers initialization.
+            _ = AkerMcp.Server.Platform.PlatformScreenCapture.Current;
 
             using var transport = new StdioTransport();
             using var engine = new EngineConnection();

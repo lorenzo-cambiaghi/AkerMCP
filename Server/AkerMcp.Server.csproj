@@ -7,7 +7,11 @@
     <RootNamespace>AkerMcp.Server</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <!-- System.Drawing.Common is kept for the Windows-only OS-level capture
+         path (PrintWindow + GDI+). Cross-platform output normalization is
+         done by ImageSharp, which is pure-managed and works on all OSes. -->
     <PackageReference Include="System.Drawing.Common" Version="8.0.0" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
     <ProjectReference Include="..\Shared\AkerMcp.Shared.csproj" />
   </ItemGroup>
 </Project>
