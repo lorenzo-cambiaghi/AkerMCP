@@ -58,7 +58,7 @@ for (int i = 0; i < 10; i++) {
 
 Traditional MCP integrations for game engines ship 100+ hand-written tools — one per operation, one per component type. Every engine update breaks them.
 
-AkerMCP replaces all of that with **13 generic tools** powered by runtime reflection and **Roslyn**. A single `set_property` tool can modify *any* property on *any* object in *any* engine, while the `execute` tool enables complex procedural generation via C# scripts. The engine-specific adapter provides the necessary layer for interacting directly with the engine's API.
+AkerMCP replaces all of that with **14 generic tools** powered by runtime reflection and **Roslyn**. A single `set_property` tool can modify *any* property on *any* object in *any* engine, while the `execute` tool enables complex procedural generation via C# scripts. The `take_screenshot` tool closes the loop, giving the AI a way to *visually verify* what it just changed. The engine-specific adapter provides the necessary layer for interacting directly with the engine's API.
 
 ```
 AI: "Set the player's position to (10, 0, 5)"
@@ -73,8 +73,9 @@ No custom tool class needed. No code generation. Just reflection.
 
 ## Features
 
-- **13 Generic Reflection-Based Tools**: Operate on any object or component without custom tool definitions.
+- **14 Generic Reflection-Based Tools**: Operate on any object or component without custom tool definitions.
 - **Roslyn-Powered Dynamic Execution**: Send arbitrary C# scripts via the `execute` tool to perform complex procedural tasks or bulk operations directly within the Unity Editor.
+- **Visual Verification (`take_screenshot`)**: Hybrid capture pipeline — engine-internal render-buffer capture when available (highest quality, works occluded), OS-level window capture (`PrintWindow`) as universal fallback. Output is auto-resized and JPEG-encoded to fit AI image limits.
 - **MessagePack IPC Protocol**: High-performance, low-latency binary communication between the standalone MCP Server and the engine plugin.
 - **Robust Type System**: Serializes and deserializes Unity-specific structs (`Vector3`, `Color`, `Bounds`) seamlessly.
 - **Engine-Agnostic Core**: Shared .NET Standard 2.1 core makes it easy to port to Godot, Stride, Flax Engine, or other C# engines by writing a simple adapter.
@@ -401,6 +402,44 @@ If you see this, everything is working.
 | `get_console_logs` | Read engine console entries with level and text filtering |
 | `execute` | Run arbitrary C# code in the engine context (Roslyn) |
 
+### Visual Verification
+
+| Tool | Description |
+|------|-------------|
+| `take_screenshot` | Capture the editor's Game or Scene view and return a JPEG image to the AI |
+
+#### How `take_screenshot` works
+
+The tool follows a **hybrid capture strategy** that prefers quality but always succeeds:
+
+1. **Engine-internal path** *(if the adapter implements `IScreenCapture`)* — captures directly from the render buffer. Works even when the editor window is occluded or partially off-screen. Highest quality.
+2. **OS-level fallback** *(Windows only, automatic)* — uses Win32 `PrintWindow(PW_RENDERFULLCONTENT)` to grab the engine's main window. Works for any C# engine without requiring adapter code. Captures occluded windows without stealing foreground focus.
+
+Output is automatically:
+- **Resized** to a maximum of 1920px on the longest side
+- **Re-encoded as JPEG** (quality 85)
+
+Typical output size: **~150-400 KB**, comfortably under Claude API image limits (~5 MB).
+
+**Parameters:**
+
+```json
+{ "view": "game" }   // default — captures the Game View
+{ "view": "scene" }  // captures the active Scene View (Unity)
+```
+
+**Example:**
+
+```
+→ set_property {"object_path": "/Player", "property_path": "Light.color", "value": {"r":1,"g":0,"b":0,"a":1}}
+← Property 'Light.color' set successfully on /Player
+
+→ take_screenshot {"view": "scene"}
+← [JPEG image, 1920×1080, 287 KB]   // AI now sees the red light
+```
+
+> **Platform note:** The OS-level fallback is currently Windows-only (uses `System.Drawing.Common`). On macOS/Linux, the engine adapter must implement `IScreenCapture` (the Unity adapter does). Future work may add SkiaSharp-based fallback for cross-platform OS capture.
+
 ### Dynamic Code Execution (`execute`)
 
 The `execute` tool runs arbitrary C# code inside the Unity Editor using Roslyn (`Microsoft.CodeAnalysis.CSharp.Scripting`). This is the most powerful tool — it can do anything the Unity Editor API allows.
@@ -573,7 +612,7 @@ JSON examples:
                              │ JSON-RPC 2.0 / stdio
                   ┌──────────▼───────────┐
                   │    AkerMCP Server    │   .NET 8 console process
-                  │   13 MCP tools       │
+                  │   14 MCP tools       │
                   │    5 MCP resources   │
                   └──────────┬───────────┘
                              │ Named Pipe + MessagePack
@@ -611,7 +650,9 @@ AkerMCP/
 │   └── Ipc/                             Named pipe channel, binary framing
 ├── Server/                              AkerMcp.Server (net8.0 console app)
 │   ├── McpServer.cs                     JSON-RPC dispatcher, MCP lifecycle
-│   ├── ToolRegistry.cs                  13 generic tool definitions
+│   ├── ToolRegistry.cs                  14 generic tool definitions
+│   ├── ImageProcessor.cs                Resize + JPEG normalization (Win-only)
+│   ├── ScreenCaptureService.cs          OS-level window capture via PrintWindow (Win-only)
 │   ├── ResourceRegistry.cs             5 resource definitions
 │   ├── EngineConnection.cs             IPC client to engine plugin
 │   └── StdioTransport.cs              stdin/stdout transport
@@ -632,6 +673,7 @@ AkerMCP/
             ├── UnityCompilationSupport.cs Script compilation tools
             ├── UnityEditorContext.cs    Active selection and console logs
             ├── UnityMainThreadDispatcher.cs Unity main thread marshalling
+            ├── UnityScreenCapture.cs    Game/Scene view render-buffer capture
             └── UnityMcpPlugin.cs        Plugin entry point
 ```
 
@@ -653,6 +695,7 @@ public class MyEnginePlugin : EnginePluginBase
     protected override IEditorContext? CreateEditorContext() => new MyEditorContext();
     protected override IAssetManager? CreateAssetManager() => null;
     protected override ICompilationSupport? CreateCompilationSupport() => new MyCompilationSupport();
+    protected override IScreenCapture? CreateScreenCapture() => new MyScreenCapture();
 
     protected override void Log(string message) { /* ... */ }
     protected override void LogError(string message) { /* ... */ }
@@ -668,6 +711,7 @@ public class MyEnginePlugin : EnginePluginBase
 | `IEditorContext` | Selection, scene management, console logs | No |
 | `IAssetManager` | Asset search, load, save, delete | No |
 | `ICompilationSupport` | Script recompilation, error retrieval | No |
+| `IScreenCapture` | Engine-internal render-buffer capture (Game/Scene view) | No — falls back to OS-level `PrintWindow` on Windows |
 
 Register custom type converters for engine-specific structs:
 
@@ -682,7 +726,7 @@ TypeRegistry.Instance.RegisterCustomSerializer<Vector3>(
 
 ## AI Integration Rules
 
-AkerMCP embeds comprehensive usage instructions **directly into each tool's description** served via the MCP protocol. This means any AI client (Claude, Cursor, Copilot, Antigravity) automatically learns how to use all 13 tools correctly — including property path syntax, the Inspect → Modify → Verify workflow, Roslyn execution globals, and compilation verification — **with zero configuration**.
+AkerMCP embeds comprehensive usage instructions **directly into each tool's description** served via the MCP protocol. This means any AI client (Claude, Cursor, Copilot, Antigravity) automatically learns how to use all 14 tools correctly — including property path syntax, the Inspect → Modify → Verify workflow, Roslyn execution globals, compilation verification, and visual verification via screenshots — **with zero configuration**.
 
 ### Optional: Boost with a rules file
 
@@ -711,7 +755,7 @@ Copy everything inside the block below into your rules file:
 
 #### AkerMCP — AI Integration Rules
 
-You have access to a Unity (or Godot, Stride, Flax) game engine via the `game-engine` MCP server. This gives you 13 tools to inspect, query, modify, and script the active scene — all from the editor.
+You have access to a Unity (or Godot, Stride, Flax) game engine via the `game-engine` MCP server. This gives you 14 tools to inspect, query, modify, script, and visually verify the active scene — all from the editor.
 
 #### Available Tools (quick reference)
 
@@ -730,6 +774,7 @@ You have access to a Unity (or Godot, Stride, Flax) game engine via the `game-en
 | `get_compile_errors` | You need to check if scripts compiled successfully |
 | `get_console_logs` | You need to read runtime errors, warnings, or debug output |
 | `execute` | You need to run arbitrary C# code (procedural generation, bulk ops, complex logic) |
+| `take_screenshot` | You need to **see** the result of a change (placement, materials, lighting, UI) |
 
 #### Core Workflow: Inspect → Modify → Verify
 
@@ -738,6 +783,7 @@ Always follow this pattern:
 1. **Inspect first.** Before modifying anything, call `inspect` to see the object's components, properties, and current values. Never guess.
 2. **Modify.** Use `set_property` for single changes, `execute` for complex operations.
 3. **Verify.** Call `get_property` or `inspect` again to confirm the change took effect. Check `get_console_logs` if something seems wrong.
+4. **Visually verify (when relevant).** For changes that affect what the user *sees* — placement, materials, lighting, UI layout, scale — call `take_screenshot` after the change to confirm the result looks right. This catches problems that property values alone cannot reveal (e.g. an object placed inside another, a material that compiled but renders pink, a UI element clipped off-screen).
 
 ```
 Bad:  set_property "/Player" "mass" 5        ← "mass" might not resolve (it's on Rigidbody)
@@ -781,6 +827,8 @@ MeshRenderer.material.color → Color
 | Access Editor API (AssetDatabase, Undo groups, etc.) | `execute` |
 | Complex conditional logic | `execute` |
 | Create materials, shaders, ScriptableObjects | `execute` |
+| Confirm a visual change actually looks right | `take_screenshot` |
+| Show the user what the scene currently looks like | `take_screenshot` |
 
 #### Writing `execute` Scripts
 
@@ -817,6 +865,43 @@ FindAll<Rigidbody>();  // returns null, you won't know the result
 ```
 
 **Timeout**: Default is 5 seconds. Pass `timeout_ms` for longer operations.
+
+#### Visual Verification with `take_screenshot`
+
+Use it whenever the user asks "how does it look?", "did it work?", or after making any change that has a **visual outcome**:
+
+| Situation | Should you screenshot? |
+|-----------|------------------------|
+| Moved/created/deleted an object | ✅ Yes — confirm placement |
+| Changed a material, color, or texture | ✅ Yes — colors can fail silently (pink fallback shaders) |
+| Modified lighting | ✅ Yes — intensity/color changes are hard to predict numerically |
+| Modified UI layout | ✅ Yes — anchoring/scaling bugs are visual-only |
+| Spawned procedural content | ✅ Yes — verify the generation looks reasonable |
+| Changed a non-visual property (mass, tag, name, layer) | ❌ No — `get_property` is enough |
+| Wrote a script | ❌ No — use `get_compile_errors` instead |
+
+**Parameters:**
+
+```json
+{ "view": "game" }   // default — Game View, what the player sees
+{ "view": "scene" }  // Scene View, useful for inspecting the full editor with gizmos
+```
+
+Output is a JPEG (~150-400 KB, max 1920px). You'll receive it as an image content block — read it like any other image.
+
+**Pattern: change → screenshot → react**
+
+```
+→ execute "for (int i = 0; i < 50; i++) { var t = GameObject.CreatePrimitive(PrimitiveType.Cube); t.transform.position = new Vector3(Random.Range(-20,20), 0, Random.Range(-20,20)); t.name = $\"Tree_{i}\"; } return \"spawned 50\";"
+← spawned 50
+
+→ take_screenshot {"view": "scene"}
+← [JPEG image]
+   ← AI sees: cubes are clustered too tightly in one corner — distribution looks wrong
+   → Fixes the script and re-runs.
+```
+
+**Don't screenshot for every micro-change.** It's not free — the AI client renders the image and consumes context. Use it at the end of a logical edit, not after each `set_property` in a sequence.
 
 #### After Writing or Modifying C# Scripts
 
@@ -870,6 +955,8 @@ Whenever you create or edit a `.cs` file in the Unity project:
 | Assume paths are case-insensitive | They're case-sensitive on the engine side |
 | Create complex objects one property at a time | Use `execute` with a single script |
 | Forget to `return` values in `execute` | Always return a string describing what happened |
+| Screenshot after every micro-change | Screenshot once at the end of a logical edit |
+| Trust property values alone for visual changes | `take_screenshot` to confirm the actual rendered result |
 
 #### Error Recovery
 

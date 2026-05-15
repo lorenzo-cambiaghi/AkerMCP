@@ -19,6 +19,7 @@ namespace AkerMcp.Client
         private readonly IEditorContext? _editorContext;
         private readonly ICompilationSupport? _compilationSupport;
         private readonly ICodeExecutor? _codeExecutor;
+        private readonly IScreenCapture? _screenCapture;
         private readonly IEngineCapabilities _capabilities;
         private readonly IMainThreadDispatcher _dispatcher;
         private readonly PropertyPathResolver _pathResolver;
@@ -41,7 +42,8 @@ namespace AkerMcp.Client
             IAssetManager? assetManager = null,
             IEditorContext? editorContext = null,
             ICompilationSupport? compilationSupport = null,
-            ICodeExecutor? codeExecutor = null)
+            ICodeExecutor? codeExecutor = null,
+            IScreenCapture? screenCapture = null)
         {
             _sceneGraph = sceneGraph;
             _capabilities = capabilities;
@@ -51,6 +53,7 @@ namespace AkerMcp.Client
             _editorContext = editorContext;
             _compilationSupport = compilationSupport;
             _codeExecutor = codeExecutor;
+            _screenCapture = screenCapture;
             _pathResolver = new PropertyPathResolver();
             _inspector = new ReflectionInspector();
             _methodInvoker = new MethodInvoker();
@@ -61,6 +64,10 @@ namespace AkerMcp.Client
         {
             try
             {
+                // Binary response paths bypass the string-based switch
+                if (request.Method == IpcConstants.Methods.TakeScreenshot)
+                    return await HandleTakeScreenshot(request, ct);
+
                 var result = request.Method switch
                 {
                     IpcConstants.Methods.Ping => "pong",
@@ -83,6 +90,7 @@ namespace AkerMcp.Client
                     IpcConstants.Methods.SelectObject => await HandleSelectObject(request, ct),
                     IpcConstants.Methods.GetSelection => await HandleGetSelection(ct),
                     IpcConstants.Methods.Execute => await HandleExecute(request, ct),
+                    IpcConstants.Methods.GetWindowInfo => HandleGetWindowInfo(),
                     _ => throw new InvalidOperationException($"Unknown method: {request.Method}")
                 };
 
@@ -92,6 +100,44 @@ namespace AkerMcp.Client
             {
                 return IpcResponse.Fail(request.Id, $"{ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
             }
+        }
+
+        private async Task<IpcResponse> HandleTakeScreenshot(IpcRequest request, CancellationToken ct)
+        {
+            if (_screenCapture == null)
+                return IpcResponse.FailWithCode(request.Id,
+                    IpcConstants.ErrorCodes.NotSupported,
+                    "Engine does not implement IScreenCapture.");
+
+            var args = ParseArgs(request);
+            var viewType = args.TryGetProperty("view", out var v)
+                ? v.GetString() ?? "game" : "game";
+
+            var captured = await _dispatcher.RunOnMainThread(
+                () => _screenCapture.CaptureView(viewType), ct);
+
+            if (captured == null)
+                return IpcResponse.Fail(request.Id, "Engine capture returned null.");
+
+            var (bytes, contentType) = captured.Value;
+            if (bytes == null || bytes.Length == 0)
+                return IpcResponse.Fail(request.Id, "Engine capture returned empty bytes.");
+
+            return IpcResponse.Binary(request.Id, bytes, contentType);
+        }
+
+        private string HandleGetWindowInfo()
+        {
+            var process = System.Diagnostics.Process.GetCurrentProcess();
+            process.Refresh();
+
+            var handle = process.MainWindowHandle.ToInt64();
+            return JsonSerializer.Serialize(new
+            {
+                pid = process.Id,
+                windowHandle = handle,
+                windowTitle = process.MainWindowTitle
+            }, _jsonOptions);
         }
 
         private async Task<string> HandleInspect(IpcRequest request, CancellationToken ct)

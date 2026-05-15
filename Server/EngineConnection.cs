@@ -132,6 +132,58 @@ namespace AkerMcp.Server
             }
         }
 
+        public async Task<BinaryToolCallResult> ForwardBinaryToolCall(
+            string method, JsonElement? arguments, CancellationToken ct)
+        {
+            if (_channel == null)
+                return new BinaryToolCallResult { Error = "No engine connected." };
+
+            var payload = arguments.HasValue
+                ? System.Text.Encoding.UTF8.GetBytes(arguments.Value.GetRawText())
+                : null;
+
+            var requestId = Interlocked.Increment(ref _nextRequestId);
+            var request = new IpcRequest
+            {
+                Id = requestId,
+                Method = method,
+                Payload = payload
+            };
+
+            var tcs = new TaskCompletionSource<IpcResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _pendingRequests[requestId] = tcs;
+
+            try
+            {
+                await _channel.SendRequest(request, ct).ConfigureAwait(false);
+
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(30000);
+                using var reg = cts.Token.Register(() => tcs.TrySetCanceled());
+
+                var response = await tcs.Task.ConfigureAwait(false);
+
+                if (!response.Success)
+                {
+                    return new BinaryToolCallResult
+                    {
+                        ErrorCode = response.ErrorCode,
+                        Error = response.Error
+                    };
+                }
+
+                return new BinaryToolCallResult
+                {
+                    Bytes = response.Payload,
+                    ContentType = response.ContentType
+                };
+            }
+            finally
+            {
+                _pendingRequests.TryRemove(requestId, out _);
+            }
+        }
+
         public async Task<string> ForwardResourceRead(string method, CancellationToken ct)
         {
             if (_channel == null)
@@ -194,6 +246,14 @@ namespace AkerMcp.Server
             {
                 StdioTransport.LogError($"IPC listener error: {ex.Message}");
             }
+        }
+
+        public class BinaryToolCallResult
+        {
+            public byte[]? Bytes { get; set; }
+            public string? ContentType { get; set; }
+            public string? ErrorCode { get; set; }
+            public string? Error { get; set; }
         }
 
         public void Dispose()
