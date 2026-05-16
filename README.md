@@ -415,7 +415,7 @@ The tool follows a **hybrid capture strategy** that prefers quality but always s
 1. **Engine-internal path** *(if the adapter implements `IScreenCapture`)* — captures directly from the render buffer. Works even when the editor window is occluded or partially off-screen. Highest quality.
 2. **OS-level fallback** *(automatic, cross-platform on Windows + macOS)* — captures the engine's main window without stealing foreground focus. Works for any C# engine without requiring adapter code. Per-OS implementation is selected at runtime:
    - **Windows** — Win32 `PrintWindow(PW_RENDERFULLCONTENT)` via `user32.dll`
-   - **macOS** — Quartz `CGWindowListCreateImage` via `CoreGraphics.framework` + `ImageIO.framework`. Window discovery: enumerates on-screen windows owned by the engine PID, picks the one whose title starts with the engine name (e.g. "Unity") and largest area
+   - **macOS** — Quartz `CGWindowListCreateImage` via `CoreGraphics.framework` + `ImageIO.framework`. Window discovery: enumerates on-screen windows owned by the engine PID; among those, prefers any whose title contains the engine name (anywhere — matches both "Unity 6000…" and "… Godot Engine") and within that subset picks the largest by area. If no title contains the engine name, falls back to the largest PID-owned window
    - **Linux** — not implemented; the engine adapter must implement `IScreenCapture`
 
 Output is automatically (cross-platform via ImageSharp):
@@ -679,11 +679,13 @@ AkerMCP/
 │   ├── EngineConnection.cs              IPC client to engine plugin
 │   ├── StdioTransport.cs                stdin/stdout transport
 │   ├── ImageProcessor.cs                Resize + JPEG normalization (cross-platform via ImageSharp)
-│   └── Platform/                        OS-level window capture (per-OS impls)
+│   └── Platform/                        OS-level window capture
 │       ├── IPlatformScreenCapture.cs    Common interface
 │       ├── PlatformScreenCapture.cs     Runtime OS-based factory
-│       ├── WindowsScreenCapture.cs      Win32 PrintWindow + GDI+
-│       └── MacScreenCapture.cs          Quartz CGWindowListCreateImage + ImageIO P/Invoke
+│       ├── Windows/
+│       │   └── WindowsScreenCapture.cs  Win32 PrintWindow + GDI+
+│       └── Mac/
+│           └── MacScreenCapture.cs      Quartz CGWindowListCreateImage + ImageIO P/Invoke
 ├── Client/                              AkerMcp.Client (netstandard2.1)
 │   ├── EnginePluginBase.cs             Abstract base for adapters
 │   ├── IpcRequestHandler.cs            Request routing and execution
@@ -741,7 +743,7 @@ public class MyEnginePlugin : EnginePluginBase
 | `ICompilationSupport` | Script recompilation, error retrieval | No |
 | `IScreenCapture` | Engine-internal render-buffer capture (Game/Scene view) | No — falls back to OS-level capture on Windows (`PrintWindow`) and macOS (Quartz). On Linux, this interface is required |
 
-> **Tip for the macOS OS-level fallback:** Set `IEngineCapabilities.EngineName` to a string that matches the prefix of your editor's window title (e.g. `"Unity"`, `"Godot"`, `"Stride"`, `"Flax"`). The macOS capture path uses this to disambiguate the engine's main window from inspector/floating panels owned by the same PID.
+> **Tip for the macOS OS-level fallback:** `IEngineCapabilities.EngineName` is used as a window-title preference signal — the macOS capture path prefers PID-owned windows whose title *contains* this string (anywhere in the title) to disambiguate the editor's main window from inspector/floating panels. The match is case-insensitive and works for both prefix-style titles (Unity: `"Unity 6000.x …"`) and suffix-style titles (Godot: `"Scene - Project - Godot Engine"`). If no window matches, the largest PID-owned window is used as a fallback, so even a non-matching `EngineName` won't break the capture.
 
 Register custom type converters for engine-specific structs:
 

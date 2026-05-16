@@ -3,14 +3,16 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Microsoft.Win32.SafeHandles;
 
-namespace AkerMcp.Server.Platform
+namespace AkerMcp.Server.Platform.Mac
 {
     /// <summary>
     /// macOS OS-level window capture via Quartz (CoreGraphics + ImageIO).
     ///
-    /// Window discovery: enumerates on-screen windows owned by the engine PID,
-    /// picks the one whose title starts with the supplied prefix and (tie-breaker)
-    /// has the largest bounds area.
+    /// Window discovery: enumerates on-screen windows owned by the engine PID.
+    /// Among those, prefers any whose title contains the engine name (anywhere
+    /// in the title — covers both "Unity ..." and "... Godot Engine" formats).
+    /// Within the preferred set (or the whole set if no title matches), picks
+    /// the window with the largest bounds area as the editor's main window.
     ///
     /// Permission: requires "Screen Recording" in System Settings → Privacy &amp;
     /// Security. Without it, CGWindowListCreateImage returns NULL and we surface
@@ -41,11 +43,15 @@ namespace AkerMcp.Server.Platform
                 return null;
             }
 
+            // NominalResolution captures at the window's logical size (1x), not the
+            // native pixel size. On Retina (2x/3x) BestResolution would capture 4-9x
+            // more pixels than our 1920px output target, then ImageSharp would have
+            // to downscale them — pure waste.
             using var image = new CGImageHandle(CGWindowListCreateImage(
                 CGRect.Null,
                 kCGWindowListOptionIncludingWindow,
                 windowID,
-                kCGWindowImageBoundsIgnoreFraming | kCGWindowImageBestResolution));
+                kCGWindowImageBoundsIgnoreFraming | kCGWindowImageNominalResolution));
 
             if (image.IsInvalid)
             {
@@ -102,19 +108,24 @@ namespace AkerMcp.Server.Platform
                 double area = bounds.width * bounds.height;
 
                 var title = TryGetStringFromDict(dict, "kCGWindowName") ?? "";
-                bool matchesPrefix = !string.IsNullOrEmpty(titlePrefix) &&
-                                     title.StartsWith(titlePrefix, StringComparison.OrdinalIgnoreCase);
+                // Contains (not StartsWith): editor titles vary in format. Unity
+                // starts with "Unity 6000…", but Godot ends with "… Godot Engine".
+                // Since we've already filtered by PID, false positives are limited
+                // to other windows owned by the same engine process — all of which
+                // are valid capture targets anyway.
+                bool matchesTitle = !string.IsNullOrEmpty(titlePrefix) &&
+                                    title.IndexOf(titlePrefix, StringComparison.OrdinalIgnoreCase) >= 0;
 
-                // Prefer prefix-matched windows. Within the matched (or unmatched) set,
+                // Prefer title-matched windows. Within the matched (or unmatched) set,
                 // pick the largest by area. Promote to "matched mode" the first time
-                // we hit a prefix match, discarding any prior "unmatched best".
-                if (matchesPrefix && !prefixMatched)
+                // we hit a title match, discarding any prior "unmatched best".
+                if (matchesTitle && !prefixMatched)
                 {
                     prefixMatched = true;
                     bestArea = area;
                     bestID = (uint)windowNumber;
                 }
-                else if (matchesPrefix == prefixMatched && area > bestArea)
+                else if (matchesTitle == prefixMatched && area > bestArea)
                 {
                     bestArea = area;
                     bestID = (uint)windowNumber;
@@ -269,16 +280,27 @@ namespace AkerMcp.Server.Platform
         // CGWindowImageOption flags
         private const uint kCGWindowImageBoundsIgnoreFraming = 1 << 0;
         private const uint kCGWindowImageBestResolution      = 1 << 3;
+        private const uint kCGWindowImageNominalResolution   = 1 << 4;
 
-        // CGRectNull canonical value (NaN origin). The CGRect is passed BY VALUE
-        // to CGWindowListCreateImage — 4 doubles, 32 bytes — per System V AMD64
-        // and ARM64 AAPCS calling conventions. Passing IntPtr.Zero here corrupts
-        // the register-passed argument layout and the function silently fails.
+        // CGRect must be passed BY VALUE to CGWindowListCreateImage (4 doubles
+        // = 32 bytes, in XMM0-3 on x86_64 / d0-d3 on ARM64). Passing IntPtr.Zero
+        // would corrupt the register layout and the function silently fails.
+        //
+        // CGRectNull canonical value is { Infinity, Infinity, 0, 0 } per Apple's
+        // CGGeometry.h and Mono/Xamarin's convention. With the IncludingWindow
+        // listOption the value is ignored, but matching the convention avoids
+        // surprises if we ever change listOption.
         [StructLayout(LayoutKind.Sequential)]
         private struct CGRect
         {
             public double X, Y, Width, Height;
-            public static CGRect Null => new CGRect { X = double.NaN, Y = double.NaN, Width = 0, Height = 0 };
+            public static CGRect Null => new CGRect
+            {
+                X = double.PositiveInfinity,
+                Y = double.PositiveInfinity,
+                Width = 0,
+                Height = 0,
+            };
         }
 
         private enum CFStringEncoding : uint

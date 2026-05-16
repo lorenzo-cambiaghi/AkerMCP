@@ -6,7 +6,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 
-namespace AkerMcp.Server.Platform
+namespace AkerMcp.Server.Platform.Windows
 {
     /// <summary>
     /// Windows OS-level window capture via PrintWindow. Captures occluded windows
