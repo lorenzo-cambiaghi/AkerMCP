@@ -1,4 +1,7 @@
 using System;
+using System.Runtime.InteropServices;
+using AkerMcp.Server.Platform.Mac;
+using AkerMcp.Server.Platform.Windows;
 
 namespace AkerMcp.Server.Platform
 {
@@ -8,30 +11,28 @@ namespace AkerMcp.Server.Platform
     /// </summary>
     public static class PlatformScreenCapture
     {
-        private static IPlatformScreenCapture? _current;
-        private static bool _initialized;
+        // Lazy<T> with default ExecutionAndPublication mode: thread-safe; the
+        // factory runs at most once and all callers observe the same instance.
+        private static readonly Lazy<IPlatformScreenCapture?> _current =
+            new Lazy<IPlatformScreenCapture?>(CreateAndInitialize);
 
-        public static IPlatformScreenCapture? Current
+        public static IPlatformScreenCapture? Current => _current.Value;
+
+        private static IPlatformScreenCapture? CreateAndInitialize()
         {
-            get
-            {
-                if (_initialized) return _current;
-                _initialized = true;
+            IPlatformScreenCapture? impl = null;
+            if (OperatingSystem.IsWindows())
+                impl = new WindowsScreenCapture();
+            else if (OperatingSystem.IsMacOS())
+                impl = new MacScreenCapture();
 
-                if (OperatingSystem.IsWindows())
-                    _current = new WindowsScreenCapture();
-                else if (OperatingSystem.IsMacOS())
-                    _current = new MacScreenCapture();
-                else
-                    _current = null;
-
-                _current?.Initialize();
-                return _current;
-            }
+            impl?.Initialize();
+            return impl;
         }
 
         public static string UnsupportedPlatformMessage =>
-            "OS-level screen capture is not implemented for this platform. " +
+            $"OS-level screen capture is not implemented for this platform " +
+            $"({RuntimeInformation.OSDescription}). " +
             "Implement IScreenCapture in your engine adapter to enable screenshots.";
     }
 }

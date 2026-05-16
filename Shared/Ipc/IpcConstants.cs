@@ -4,7 +4,8 @@ namespace AkerMcp.Shared.Ipc
     {
         public const string PipePrefix = "aker-mcp-";
         public const string DiscoveryDirectory = "aker-mcp";
-        public const string ProtocolVersion = "1.1.0"; // Bump on any IPC schema change
+        public const string ProtocolVersion = "1.2.0"; // Bump on any IPC schema change
+        // 1.2.0: added windowTitlePrefix to GetWindowInfo payload (Mac fallback support)
 
         public static class Methods
         {
