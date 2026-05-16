@@ -42,7 +42,7 @@ namespace AkerMcp.Server.Platform
             }
 
             using var image = new CGImageHandle(CGWindowListCreateImage(
-                CGRectNull,
+                CGRect.Null,
                 kCGWindowListOptionIncludingWindow,
                 windowID,
                 kCGWindowImageBoundsIgnoreFraming | kCGWindowImageBestResolution));
@@ -270,7 +270,16 @@ namespace AkerMcp.Server.Platform
         private const uint kCGWindowImageBoundsIgnoreFraming = 1 << 0;
         private const uint kCGWindowImageBestResolution      = 1 << 3;
 
-        private static readonly IntPtr CGRectNull = IntPtr.Zero;
+        // CGRectNull canonical value (NaN origin). The CGRect is passed BY VALUE
+        // to CGWindowListCreateImage — 4 doubles, 32 bytes — per System V AMD64
+        // and ARM64 AAPCS calling conventions. Passing IntPtr.Zero here corrupts
+        // the register-passed argument layout and the function silently fails.
+        [StructLayout(LayoutKind.Sequential)]
+        private struct CGRect
+        {
+            public double X, Y, Width, Height;
+            public static CGRect Null => new CGRect { X = double.NaN, Y = double.NaN, Width = 0, Height = 0 };
+        }
 
         private enum CFStringEncoding : uint
         {
@@ -289,7 +298,7 @@ namespace AkerMcp.Server.Platform
 
         [DllImport(CoreGraphics, EntryPoint = "CGWindowListCreateImage")]
         private static extern IntPtr CGWindowListCreateImage(
-            IntPtr screenBoundsRect, uint listOption, uint windowID, uint imageOption);
+            CGRect screenBounds, uint listOption, uint windowID, uint imageOption);
 
         [DllImport(CoreGraphics)]
         private static extern void CGImageRelease(IntPtr image);
@@ -307,21 +316,27 @@ namespace AkerMcp.Server.Platform
         [DllImport(CoreFoundation)]
         private static extern IntPtr CFDictionaryGetValue(IntPtr theDict, IntPtr key);
 
+        // Boolean returns from CoreFoundation are 1-byte (unsigned char), NOT the
+        // 4-byte Win32 BOOL the .NET marshaller defaults to. I1 = 1 byte signed.
         [DllImport(CoreFoundation)]
+        [return: MarshalAs(UnmanagedType.I1)]
         private static extern bool CFNumberGetValue(IntPtr number, CFNumberType type, out int valuePtr);
 
         [DllImport(CoreFoundation)]
+        [return: MarshalAs(UnmanagedType.I1)]
         private static extern bool CFNumberGetValue(IntPtr number, CFNumberType type, out double valuePtr);
 
         [DllImport(CoreFoundation)]
         private static extern long CFStringGetLength(IntPtr theString);
 
         [DllImport(CoreFoundation)]
+        [return: MarshalAs(UnmanagedType.I1)]
         private static extern bool CFStringGetCString(IntPtr theString, byte[] buffer, long bufferSize, CFStringEncoding encoding);
 
         [DllImport(CoreFoundation)]
         private static extern IntPtr CFStringCreateWithBytes(
-            IntPtr alloc, byte[] bytes, long numBytes, CFStringEncoding encoding, bool isExternalRepresentation);
+            IntPtr alloc, byte[] bytes, long numBytes, CFStringEncoding encoding,
+            [MarshalAs(UnmanagedType.I1)] bool isExternalRepresentation);
 
         [DllImport(CoreFoundation)]
         private static extern IntPtr CFDataCreateMutable(IntPtr allocator, long capacity);
@@ -341,6 +356,7 @@ namespace AkerMcp.Server.Platform
         private static extern void CGImageDestinationAddImage(IntPtr idst, IntPtr image, IntPtr properties);
 
         [DllImport(ImageIO)]
+        [return: MarshalAs(UnmanagedType.I1)]
         private static extern bool CGImageDestinationFinalize(IntPtr idst);
 
         // ─────────────────────────────────────────────────────────────────────────
