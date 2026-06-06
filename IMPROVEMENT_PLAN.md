@@ -474,8 +474,9 @@ namespace AkerMcp.Unity.Editor
 
         private static void OnAfterReload()
         {
-            // Se era attivo prima del reload, riavvia automaticamente
-            if (SessionState.GetBool(WasRunningKey, false))
+            // Se era attivo prima del reload, E l'utente ha l'opzione attiva, riavvia
+            bool autoRestartEnabled = EditorPrefs.GetBool("AkerMcp_AutoRestartEnabled", true);
+            if (SessionState.GetBool(WasRunningKey, false) && autoRestartEnabled)
             {
                 UnityMcpPlugin.Instance.Start();
                 UnityEngine.Debug.Log("[AkerMcp] Auto-restarted after domain reload.");
@@ -485,7 +486,27 @@ namespace AkerMcp.Unity.Editor
 }
 ```
 
-**Perché `SessionState` e non `EditorPrefs`**: `EditorPrefs` persiste su disco tra sessioni dell'Editor. Se l'Editor crasha o viene chiuso con il plugin attivo, alla prossima apertura partirebbe automaticamente — comportamento non desiderato. `SessionState` vive solo per la durata della sessione dell'Editor: se chiudi e riapri Unity, il plugin resta fermo (com'è giusto).
+#### [MODIFY] `UnityTestProject/Assets/AkerMcp/Editor/McpEditorWindow.cs` — Toggle UI
+
+Aggiungere un checkbox per lasciare all'utente il controllo su questa funzionalità:
+
+```csharp
+    // ... dentro OnGUI() ...
+
+    EditorGUILayout.Space(10);
+    
+    // Toggle Auto-Restart
+    bool autoRestart = EditorPrefs.GetBool("AkerMcp_AutoRestartEnabled", true);
+    bool newAutoRestart = EditorGUILayout.ToggleLeft("Auto-restart after domain reload", autoRestart);
+    if (newAutoRestart != autoRestart)
+    {
+        EditorPrefs.SetBool("AkerMcp_AutoRestartEnabled", newAutoRestart);
+    }
+    
+    EditorGUILayout.Space(10);
+```
+
+**Perché `SessionState` e non `EditorPrefs` per il flag `WasRunning`**: `EditorPrefs` persiste su disco tra sessioni dell'Editor. Se l'Editor crasha o viene chiuso con il plugin attivo, alla prossima apertura partirebbe automaticamente — comportamento non desiderato. `SessionState` vive solo per la durata della sessione dell'Editor: se chiudi e riapri Unity, il plugin resta fermo. Il flag `AutoRestartEnabled` invece è una preferenza dell'utente e va salvato in `EditorPrefs`.
 
 #### [MODIFY] `Client/EnginePluginBase.cs` — `Start()` idempotente
 
