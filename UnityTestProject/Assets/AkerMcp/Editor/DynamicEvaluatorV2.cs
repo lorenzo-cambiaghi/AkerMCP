@@ -182,8 +182,33 @@ namespace AkerMcp.Unity
                 .Distinct()
                 .ToArray();
 
+            // Build metadata references WITHOUT holding file locks on the project's own
+            // assemblies. Roslyn's Assembly-based references (and CreateFromFile) memory-map the
+            // .dll and keep a read handle open for the plugin's lifetime. For DLLs that Unity
+            // overwrites on every recompile (everything under Library/ScriptAssemblies — i.e. the
+            // asmdef + Assembly-CSharp DLLs) that lock makes the next compile fail with
+            // "Copying the file failed: ... being used by another process". So we load those from
+            // an in-memory copy (CreateFromImage), and only file-reference the immutable
+            // engine/package DLLs (which Unity never rewrites, so locking them is harmless).
+            string scriptAsmDir = Path.GetFullPath("Library/ScriptAssemblies")
+                .Replace('\\', '/').TrimEnd('/');
+            var references = new List<Microsoft.CodeAnalysis.MetadataReference>(assemblies.Length);
+            foreach (var a in assemblies)
+            {
+                try
+                {
+                    string loc = a.Location;
+                    bool isProjectAsm = Path.GetFullPath(loc).Replace('\\', '/')
+                        .StartsWith(scriptAsmDir, StringComparison.OrdinalIgnoreCase);
+                    references.Add(isProjectAsm
+                        ? Microsoft.CodeAnalysis.MetadataReference.CreateFromImage(File.ReadAllBytes(loc))
+                        : Microsoft.CodeAnalysis.MetadataReference.CreateFromFile(loc));
+                }
+                catch { /* skip unreadable assembly */ }
+            }
+
             return ScriptOptions.Default
-                .WithReferences(assemblies)
+                .WithReferences(references)
                 .WithImports(imports)
                 .WithAllowUnsafe(false);
         }
