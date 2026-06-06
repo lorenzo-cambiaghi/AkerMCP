@@ -169,11 +169,12 @@ That's it. The server is ready to run. Now set up the Unity side.
 
 ## Unity Plugin Setup
 
-### Step 1 — Copy DLLs into your Unity project
+### Step 1 — Add AkerMCP to Your Unity Project
 
-The easiest way to integrate AkerMCP is by using the provided scripts. These scripts build the project, publish the dependencies, and copy all necessary DLLs (including Roslyn) directly into your Unity project's `Plugins` folder.
+There are two ways to do this: exploring our included test project, or adding AkerMCP directly into your own game.
 
-If you're using the included test project (`UnityTestProject/`):
+#### Option A: I want to use the included Test Project
+If you just want to see AkerMCP in action, run the included setup scripts. These scripts build the project, gather dependencies, and copy all DLLs (including Roslyn) into the `UnityTestProject/` folder.
 
 ```bash
 # macOS / Linux
@@ -185,19 +186,31 @@ export UNITY_EDITOR_PATH=/Applications/Unity/Hub/Editor/2022.3.0f1/Unity.app/Con
 # Set UNITY_EDITOR_PATH to your Unity Editor\Data folder to include Roslyn DLLs
 $env:UNITY_EDITOR_PATH="C:\Program Files\Unity\Hub\Editor\2022.3.0f1\Editor\Data"
 .\copy-dlls.bat
-
-# Note: If you are using the classic Command Prompt (cmd.exe), use:
-# set UNITY_EDITOR_PATH=... and run copy-dlls.bat (without .\)
 ```
 
-> **Note on Roslyn:** The `execute` tool requires Roslyn DLLs to compile C# at runtime. The scripts attempt to locate these automatically in common Unity installation paths. If they fail, set the `UNITY_EDITOR_PATH` variable manually as shown above.
+#### Option B: I want to add AkerMCP to MY OWN Unity Project
+If you want to use AkerMCP in your personal game, follow these beginner-friendly steps:
 
-> **Manual Installation:**
-> If you want to add AkerMCP to your **own** Unity project manually, create a folder like `Assets/Plugins/AkerMcp` and copy the following:
-> 1. All DLLs generated in `.publish/` after running `dotnet publish Shared/AkerMcp.Shared.csproj -c Release -o .publish`.
-> 2. `AkerMcp.Client.dll` from `Client/bin/Release/netstandard2.1/`.
-> 3. The Roslyn DLLs (`Microsoft.CodeAnalysis.dll`, `Microsoft.CodeAnalysis.CSharp.dll`, `Microsoft.CodeAnalysis.Scripting.dll`, `Microsoft.CodeAnalysis.CSharp.Scripting.dll`, and `System.Reflection.Metadata.dll`) from your Unity Editor's `MonoBleedingEdge/lib/mono/4.5/` directory.
-> 4. The adapter C# scripts from `UnityTestProject/Assets/AkerMcp/` into your project's `Assets/` folder.
+1. **Build the dependencies first.** Open a terminal in the `AkerMCP` repository folder and run:
+   ```bash
+   dotnet publish Shared/AkerMcp.Shared.csproj -c Release -o .publish
+   ```
+2. **Copy the AkerMCP folder.** In your file explorer, go into `AkerMCP/UnityTestProject/Assets/` and copy the entire `AkerMcp` folder. Paste it directly into your own Unity project's `Assets/` folder.
+   *(This folder contains the C# scripts that tell Unity how to talk to the AI).*
+3. **Copy the Plugins.** Create a folder named `Plugins` inside your Unity project's `Assets/AkerMcp/` folder (so you have `Assets/AkerMcp/Plugins/`). Now, copy the following `.dll` files into it:
+   - Everything inside the `AkerMCP/.publish/` folder you just generated.
+   - `AkerMcp.Client.dll` from `AkerMCP/Client/bin/Release/netstandard2.1/`.
+4. **Copy the Roslyn Compilers (for C# Execution).** The `execute` tool needs Unity's internal compiler DLLs to work. Go to your Unity Editor installation folder on your computer:
+   - *Windows:* `C:\Program Files\Unity\Hub\Editor\[YourVersion]\Editor\Data\MonoBleedingEdge\lib\mono\4.5\`
+   - *Mac:* `/Applications/Unity/Hub/Editor/[YourVersion]/Unity.app/Contents/MonoBleedingEdge/lib/mono/4.5/`
+   Copy these 5 specific DLLs into your `Assets/AkerMcp/Plugins/` folder:
+   - `Microsoft.CodeAnalysis.dll`
+   - `Microsoft.CodeAnalysis.CSharp.dll`
+   - `Microsoft.CodeAnalysis.Scripting.dll`
+   - `Microsoft.CodeAnalysis.CSharp.Scripting.dll`
+   - `System.Reflection.Metadata.dll`
+
+Once you open your Unity project, Unity will automatically compile the AkerMCP scripts.
 
 ### Step 2 — Open the Unity project
 
@@ -1030,7 +1043,7 @@ Prefix the property with the component type name: `Rigidbody.mass` instead of ju
 
 **Connection drops after Unity recompiles scripts**
 
-Domain reload in Unity tears down the plugin. Re-click **Start** in the AkerMcp window after a recompile, then restart the server.
+Domain reload in Unity tears down the plugin to safely release file locks. Re-click **Start** in the AkerMcp window after a recompile. The MCP server features an infinite background retry loop and will automatically detect the new instance and reconnect—you do **not** need to restart the server.
 
 **macOS: `take_screenshot` returns "macOS denied the screen capture"**
 
