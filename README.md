@@ -215,7 +215,53 @@ Antigravity reads `mcp_config.json` from its user-data directory (`~/.gemini/ant
 }
 ```
 
-> *If you are a developer running from source, you can still use `"command": "dotnet"` and `"args": ["run", "--project", "/path/to/AkerMcp.Server"]` as shown in previous versions of this guide.*
+### VS Code + Copilot
+
+Add to your `.vscode/settings.json` or use the **MCP: Add Server** command:
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "game-engine": {
+        "command": "C:\\Tools\\AkerMcp.Server\\AkerMcp.Server.exe",
+        "args": []
+      }
+    }
+  }
+}
+```
+
+### Alternative: Running from Source (For Developers)
+
+If you cloned the repository or prefer running via the .NET SDK instead of using the standalone binaries, use `dotnet run`. This is often necessary if you are actively modifying the MCP server code.
+
+**CLI command:**
+```bash
+claude mcp add game-engine -- dotnet run --project /absolute/path/to/AkerMCP/Server -c Release --verbosity quiet --nologo
+```
+
+**JSON Configuration (for Claude Code config, Cursor, Antigravity, etc):**
+```json
+{
+  "mcpServers": {
+    "game-engine": {
+      "type": "stdio",
+      "command": "dotnet",
+      "args": [
+        "run",
+        "--project",
+        "C:/absolute/path/to/AkerMCP/Server",
+        "-c",
+        "Release",
+        "--verbosity",
+        "quiet",
+        "--nologo"
+      ]
+    }
+  }
+}
+```
 
 ---
 
