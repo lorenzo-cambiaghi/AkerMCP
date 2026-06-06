@@ -204,8 +204,8 @@ All generated release files will be placed in the `Build/` directory:
 There are three ways to do this, ranging from a simple double-click to building from source.
 
 #### Option A: The Simple Way (Recommended)
-1. Go to the [Releases](https://github.com/lorenzo-cambiaghi/AkerMCP/releases) page of this repository.
-2. Download the latest `AkerMCP.unitypackage`.
+1. Go to the `Build/` folder in this repository.
+2. Download the `AkerMCP.unitypackage`.
 3. Open your Unity project.
 4. Double-click the downloaded `.unitypackage` file and click **Import**.
    *(This package already contains all the necessary C# scripts, pre-built dependencies, and Roslyn compilers).*
