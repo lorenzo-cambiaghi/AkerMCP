@@ -70,7 +70,7 @@ namespace AkerMcp.Unity.Editor
                 "  \"mcpServers\": {\n" +
                 "    \"game-engine\": {\n" +
                 "      \"command\": \"dotnet\",\n" +
-                "      \"args\": [\"run\", \"--project\", \"/path/to/AkerMcp/Server\"]\n" +
+                "      \"args\": [\"run\", \"--project\", \"/path/to/AkerMcp/Server\", \"-c\", \"Release\", \"--verbosity\", \"quiet\", \"--nologo\"]\n" +
                 "    }\n" +
                 "  }\n" +
                 "}",

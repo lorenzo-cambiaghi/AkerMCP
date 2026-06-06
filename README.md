@@ -242,7 +242,7 @@ The MCP server is a standalone .NET process that the AI client launches. You con
 Run this once to add the server to your Claude Code configuration:
 
 ```bash
-claude mcp add game-engine -- dotnet run --project /absolute/path/to/AkerMCP/Server
+claude mcp add game-engine -- dotnet run --project /absolute/path/to/AkerMCP/Server -c Release --verbosity quiet --nologo
 ```
 
 Or add it manually to your project's `.claude/settings.json`:
@@ -252,7 +252,7 @@ Or add it manually to your project's `.claude/settings.json`:
   "mcpServers": {
     "game-engine": {
       "command": "dotnet",
-      "args": ["run", "--project", "/absolute/path/to/AkerMCP/Server"]
+      "args": ["run", "--project", "/absolute/path/to/AkerMCP/Server", "-c", "Release", "--verbosity", "quiet", "--nologo"]
     }
   }
 }
@@ -273,7 +273,7 @@ Open **Settings → Developer → Edit Config** and add:
   "mcpServers": {
     "game-engine": {
       "command": "dotnet",
-      "args": ["run", "--project", "/absolute/path/to/AkerMCP/Server"]
+      "args": ["run", "--project", "/absolute/path/to/AkerMCP/Server", "-c", "Release", "--verbosity", "quiet", "--nologo"]
     }
   }
 }
@@ -294,7 +294,7 @@ Open **Settings → MCP** and click **+ Add new MCP server**, then choose **comm
   "mcpServers": {
     "game-engine": {
       "command": "dotnet",
-      "args": ["run", "--project", "/absolute/path/to/AkerMCP/Server"]
+      "args": ["run", "--project", "/absolute/path/to/AkerMCP/Server", "-c", "Release", "--verbosity", "quiet", "--nologo"]
     }
   }
 }
@@ -311,7 +311,7 @@ Open **Settings → MCP** and add:
   "mcpServers": {
     "game-engine": {
       "command": "dotnet",
-      "args": ["run", "--project", "/absolute/path/to/AkerMCP/Server"]
+      "args": ["run", "--project", "/absolute/path/to/AkerMCP/Server", "-c", "Release", "--verbosity", "quiet", "--nologo"]
     }
   }
 }
@@ -332,7 +332,7 @@ Add an entry under `mcpServers`:
   "mcpServers": {
     "game-engine": {
       "command": "dotnet",
-      "args": ["run", "--project", "C:/path/to/AkerMCP/Server"],
+      "args": ["run", "--project", "C:/path/to/AkerMCP/Server", "-c", "Release", "--verbosity", "quiet", "--nologo"],
       "type": "stdio"
     }
   }
@@ -351,7 +351,7 @@ Add to your `.vscode/settings.json` or use the **MCP: Add Server** command:
     "servers": {
       "game-engine": {
         "command": "dotnet",
-        "args": ["run", "--project", "/absolute/path/to/AkerMCP/Server"]
+        "args": ["run", "--project", "/absolute/path/to/AkerMCP/Server", "-c", "Release", "--verbosity", "quiet", "--nologo"]
       }
     }
   }
