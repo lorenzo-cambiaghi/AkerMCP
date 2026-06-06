@@ -171,10 +171,17 @@ That's it. The server is ready to run. Now set up the Unity side.
 
 ### Step 1 — Add AkerMCP to Your Unity Project
 
-There are two ways to do this: exploring our included test project, or adding AkerMCP directly into your own game.
+There are three ways to do this, ranging from a simple double-click to building from source.
 
-#### Option A: I want to use the included Test Project
-If you just want to see AkerMCP in action, run the included setup scripts. These scripts build the project, gather dependencies, and copy all DLLs (including Roslyn) into the `UnityTestProject/` folder.
+#### Option A: The Simple Way (Recommended)
+1. Go to the [Releases](https://github.com/lorenzo-cambiaghi/AkerMCP/releases) page of this repository.
+2. Download the latest `AkerMCP.unitypackage`.
+3. Open your Unity project.
+4. Double-click the downloaded `.unitypackage` file and click **Import**.
+   *(This package already contains all the necessary C# scripts, pre-built dependencies, and Roslyn compilers).*
+
+#### Option B: I want to use the included Test Project
+If you just want to explore our test scene and see AkerMCP in action, clone the repository and run the setup scripts. These scripts build the project, gather dependencies, and copy all DLLs (including Roslyn) into the `UnityTestProject/` folder.
 
 ```bash
 # macOS / Linux
@@ -187,30 +194,20 @@ export UNITY_EDITOR_PATH=/Applications/Unity/Hub/Editor/2022.3.0f1/Unity.app/Con
 $env:UNITY_EDITOR_PATH="C:\Program Files\Unity\Hub\Editor\2022.3.0f1\Editor\Data"
 .\copy-dlls.bat
 ```
+Then open `UnityTestProject/` in Unity Hub.
 
-#### Option B: I want to add AkerMCP to MY OWN Unity Project
-If you want to use AkerMCP in your personal game, follow these beginner-friendly steps:
+#### Option C: Manual Build (Advanced)
+If you are modifying AkerMCP source code and want to push changes to your own Unity project:
 
-1. **Build the dependencies first.** Open a terminal in the `AkerMCP` repository folder and run:
+1. **Build the dependencies.** Open a terminal in the `AkerMCP` repository folder and run:
    ```bash
    dotnet publish Shared/AkerMcp.Shared.csproj -c Release -o .publish
    ```
-2. **Copy the AkerMCP folder.** In your file explorer, go into `AkerMCP/UnityTestProject/Assets/` and copy the entire `AkerMcp` folder. Paste it directly into your own Unity project's `Assets/` folder.
-   *(This folder contains the C# scripts that tell Unity how to talk to the AI).*
-3. **Copy the Plugins.** Create a folder named `Plugins` inside your Unity project's `Assets/AkerMcp/` folder (so you have `Assets/AkerMcp/Plugins/`). Now, copy the following `.dll` files into it:
+2. **Copy the AkerMCP folder.** Copy the `UnityTestProject/Assets/AkerMcp` folder into your own Unity project's `Assets/` folder.
+3. **Copy the Plugins.** Create a folder named `Plugins` inside your Unity project's `Assets/AkerMcp/` folder. Copy these `.dll` files into it:
    - Everything inside the `AkerMCP/.publish/` folder you just generated.
    - `AkerMcp.Client.dll` from `AkerMCP/Client/bin/Release/netstandard2.1/`.
-4. **Copy the Roslyn Compilers (for C# Execution).** The `execute` tool needs Unity's internal compiler DLLs to work. Go to your Unity Editor installation folder on your computer:
-   - *Windows:* `C:\Program Files\Unity\Hub\Editor\[YourVersion]\Editor\Data\MonoBleedingEdge\lib\mono\4.5\`
-   - *Mac:* `/Applications/Unity/Hub/Editor/[YourVersion]/Unity.app/Contents/MonoBleedingEdge/lib/mono/4.5/`
-   Copy these 5 specific DLLs into your `Assets/AkerMcp/Plugins/` folder:
-   - `Microsoft.CodeAnalysis.dll`
-   - `Microsoft.CodeAnalysis.CSharp.dll`
-   - `Microsoft.CodeAnalysis.Scripting.dll`
-   - `Microsoft.CodeAnalysis.CSharp.Scripting.dll`
-   - `System.Reflection.Metadata.dll`
-
-Once you open your Unity project, Unity will automatically compile the AkerMCP scripts.
+4. **Copy the Roslyn Compilers (for C# Execution).** The `execute` tool needs Unity's internal compiler DLLs to work. Go to your Unity Editor installation folder on your computer (`.../Editor/Data/MonoBleedingEdge/lib/mono/4.5/` on Windows, or `.../Unity.app/Contents/MonoBleedingEdge/lib/mono/4.5/` on Mac) and copy these 5 DLLs into your `Assets/AkerMcp/Plugins/` folder: `Microsoft.CodeAnalysis.dll`, `Microsoft.CodeAnalysis.CSharp.dll`, `Microsoft.CodeAnalysis.Scripting.dll`, `Microsoft.CodeAnalysis.CSharp.Scripting.dll`, and `System.Reflection.Metadata.dll`.
 
 ### Step 2 — Open the Unity project
 
