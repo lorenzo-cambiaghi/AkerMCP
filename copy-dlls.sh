@@ -5,10 +5,11 @@ DEST="UnityTestProject/Assets/Plugins/AkerMcp"
 mkdir -p "$DEST"
 
 echo "Building..."
-dotnet build -c Release --nologo -q
+dotnet clean -c Release --nologo
+dotnet build -c Release --nologo
 
 echo "Publishing dependencies..."
-dotnet publish Shared/AkerMcp.Shared.csproj -c Release -o .publish --nologo -q
+dotnet publish Shared/AkerMcp.Shared.csproj -c Release -o .publish --nologo
 
 echo "Copying DLLs to $DEST..."
 cp .publish/AkerMcp.Shared.dll                        "$DEST/"

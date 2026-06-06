@@ -5,11 +5,12 @@ set DEST=UnityTestProject\Assets\Plugins\AkerMcp
 if not exist "%DEST%" mkdir "%DEST%"
 
 echo Building...
-dotnet build -c Release --nologo -q
+dotnet clean -c Release --nologo
+dotnet build -c Release --nologo
 if errorlevel 1 goto :error
 
 echo Publishing dependencies...
-dotnet publish Shared\AkerMcp.Shared.csproj -c Release -o .publish --nologo -q
+dotnet publish Shared\AkerMcp.Shared.csproj -c Release -o .publish --nologo
 if errorlevel 1 goto :error
 
 echo Copying DLLs to %DEST%...
