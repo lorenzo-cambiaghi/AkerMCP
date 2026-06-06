@@ -79,7 +79,7 @@ In another session, the user wanted standard (non-voxel) meshes to react to the 
   1. The AI searched the project's custom C# and Shader code to understand exactly how the Voxel Engine stored its lighting buffers (e.g. `_VoxelGridMipped`).
   2. It wrote an HLSL include file specifically tailored to the project's architectural quirks.
   3. Using the `execute` tool, the AI tapped into Unity's `AssetDatabase` to automatically create and save the `.hlsl` files in the correct `Assets/` directory.
-  4. It guided the creation of a Shader Graph compatible wrapper, allowing the user to simply drag and drop a ready-made Custom Function Node onto any standard mesh material to receive voxel lighting.
+  4. It didn't stop at the code. Recognizing that Unity Shader Graphs are JSON files under the hood, the AI used the `execute` tool to programmatically construct and save a complete `.shadergraph` asset directly into the project. This graph automatically wired up the new HLSL Custom Function Node to the PBR Master node. The user just had to drag the AI-generated Shader onto their material, and it worked instantly.
 
 AkerMCP turns the AI from a simple "code generator" into an autonomous Technical Artist that not only writes the shaders, but natively integrates them into the engine's asset pipeline.
 
