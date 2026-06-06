@@ -400,41 +400,26 @@ Trovare e rimuovere il claim sulla persistenza dello stato, oppure sostituirlo c
 
 ### Problema
 
-Quando Unity ricompila gli script (domain reload), il plugin si ferma e **non riparte**. Il server MCP perde la connessione e il retry-loop non trova più il lock file (cancellato da `Stop()`). L'utente deve cliccare manualmente "Start" nella finestra AkerMcp dopo ogni ricompilazione — un'interruzione continua nel flusso di lavoro con l'AI.
+Quando Unity ricompila gli script (domain reload) o quando si **avvia Unity per la prima volta**, il plugin di default resta inattivo. L'utente deve aprire la finestra e cliccare "Start" ad ogni avvio o ricompilazione, creando una fastidiosa interruzione nel workflow.
 
 ### Analisi del Codice Attuale
 
-La catena di eventi durante un domain reload:
+Attualmente, `UnityMcpLifecycle` intercetta gli eventi per fermare il plugin (cleanup), ma **non lo avvia mai** automaticamente.
 
 ```
-Unity ricompila script
-  → AssemblyReloadEvents.beforeAssemblyReload      (UnityMcpLifecycle.cs:11)
-    → StopIfRunning()                               (UnityMcpLifecycle.cs:14)
-      → UnityMcpPlugin.Stop()                       (UnityMcpPlugin.cs:58)
-        → _dispatcher.Unregister()                   ← EditorApplication.update sganciato
-        → base.Stop()
-          → _cts.Cancel()                             ← pipe server task cancellato
-          → _pipeServer.Close()                       ← pipe chiusa
-          → _discovery.Dispose()                      ← LOCK FILE CANCELLATO
-        → _instance = null                            ← singleton distrutto
-
---- Domain Reload (tutti i campi static reset a null/default) ---
-
-Unity ricarica gli assembly
+Unity ricarica gli assembly (sia all'avvio che dopo ricompilazione)
   → [InitializeOnLoad] UnityMcpLifecycle ctor        (UnityMcpLifecycle.cs:8)
     → ri-registra eventi quitting + beforeAssemblyReload
-    → MA non chiama Start()!                          ← nessuno riavvia il plugin
+    → MA non chiama Start()!
 ```
-
-**Risultato**: il plugin resta morto. Il lock file non esiste più. Il server MCP non trova la pipe durante il retry-loop e resta disconnesso finché l'utente non clicca "Start" manualmente.
 
 ### Piano di Modifica
 
-La chiave è `SessionState`: un'API Unity che persiste durante i domain reload ma non tra sessioni dell'Editor. Perfetta per ricordare che il plugin era attivo e riavviarlo automaticamente.
+La soluzione più adatta a questa esigenza (riavvio sia su Domain Reload che su avvio dell'Editor) è l'uso di un singolo flag salvato in **`EditorPrefs`**. Qualsiasi volta che Unity carica gli script, controllerà se il flag è attivo e avvierà il plugin.
 
 #### [MODIFY] `UnityTestProject/Assets/AkerMcp/Editor/UnityMcpLifecycle.cs`
 
-Trasformare la classe da "solo cleanup" a "cleanup + auto-restart":
+Semplificare e aggiungere l'auto-avvio in una callback temporizzata (per permettere all'editor di stabilizzarsi un attimo prima di lanciare processi asincroni):
 
 ```csharp
 using UnityEditor;
@@ -444,42 +429,28 @@ namespace AkerMcp.Unity.Editor
     [InitializeOnLoad]
     internal static class UnityMcpLifecycle
     {
-        private const string WasRunningKey = "AkerMcp_WasRunning";
-
         static UnityMcpLifecycle()
         {
-            EditorApplication.quitting += OnQuitting;
-            AssemblyReloadEvents.beforeAssemblyReload += OnBeforeReload;
-            AssemblyReloadEvents.afterAssemblyReload += OnAfterReload;
+            EditorApplication.quitting += StopIfRunning;
+            AssemblyReloadEvents.beforeAssemblyReload += StopIfRunning;
+
+            // Riavvio automatico schedulato all'avvio di Unity e dopo ogni ricompilazione
+            EditorApplication.delayCall += AutoStartIfEnabled;
         }
 
-        private static void OnQuitting()
+        private static void StopIfRunning()
         {
-            // Quit definitivo: ferma il plugin e NON salvare il flag,
-            // così alla prossima apertura dell'Editor non parte da solo.
-            SessionState.EraseBool(WasRunningKey);
             if (UnityMcpPlugin.IsRunning)
                 UnityMcpPlugin.Instance.Stop();
         }
 
-        private static void OnBeforeReload()
+        private static void AutoStartIfEnabled()
         {
-            // Salva lo stato "era attivo" PRIMA di fermare il plugin
-            if (UnityMcpPlugin.IsRunning)
-            {
-                SessionState.SetBool(WasRunningKey, true);
-                UnityMcpPlugin.Instance.Stop();
-            }
-        }
-
-        private static void OnAfterReload()
-        {
-            // Se era attivo prima del reload, E l'utente ha l'opzione attiva, riavvia
             bool autoRestartEnabled = EditorPrefs.GetBool("AkerMcp_AutoRestartEnabled", true);
-            if (SessionState.GetBool(WasRunningKey, false) && autoRestartEnabled)
+            if (autoRestartEnabled && !UnityMcpPlugin.IsRunning)
             {
                 UnityMcpPlugin.Instance.Start();
-                UnityEngine.Debug.Log("[AkerMcp] Auto-restarted after domain reload.");
+                UnityEngine.Debug.Log("[AkerMcp] Plugin auto-started.");
             }
         }
     }
@@ -497,7 +468,7 @@ Aggiungere un checkbox per lasciare all'utente il controllo su questa funzionali
     
     // Toggle Auto-Restart
     bool autoRestart = EditorPrefs.GetBool("AkerMcp_AutoRestartEnabled", true);
-    bool newAutoRestart = EditorGUILayout.ToggleLeft("Auto-restart after domain reload", autoRestart);
+    bool newAutoRestart = EditorGUILayout.ToggleLeft("Auto-start plugin on Unity load/compile", autoRestart);
     if (newAutoRestart != autoRestart)
     {
         EditorPrefs.SetBool("AkerMcp_AutoRestartEnabled", newAutoRestart);
@@ -505,8 +476,6 @@ Aggiungere un checkbox per lasciare all'utente il controllo su questa funzionali
     
     EditorGUILayout.Space(10);
 ```
-
-**Perché `SessionState` e non `EditorPrefs` per il flag `WasRunning`**: `EditorPrefs` persiste su disco tra sessioni dell'Editor. Se l'Editor crasha o viene chiuso con il plugin attivo, alla prossima apertura partirebbe automaticamente — comportamento non desiderato. `SessionState` vive solo per la durata della sessione dell'Editor: se chiudi e riapri Unity, il plugin resta fermo. Il flag `AutoRestartEnabled` invece è una preferenza dell'utente e va salvato in `EditorPrefs`.
 
 #### [MODIFY] `Client/EnginePluginBase.cs` — `Start()` idempotente
 
