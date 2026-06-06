@@ -52,6 +52,19 @@ for (int i = 0; i < 10; i++) {
 
 *(Curious about the internal technical details? Jump to the [Architecture](#architecture) section).*
 
+### 🔍 Real-World Debugging: The "Invisible" GPU Bug
+
+To truly understand AkerMCP's power, consider a real session where a user's Voxel Ambient Occlusion (AO) was rendering completely flat, making caves far too bright.
+
+- **Without AkerMCP:** The AI reads the shader and C# code, guesses what might be wrong, and suggests 5 different things to check manually. You recompile, run, guess, and iterate blindly for hours because the state lives entirely in GPU memory.
+- **With AkerMCP:** 
+  1. The AI uses `take_screenshot` to *see* that the AO debug view is entirely white.
+  2. The AI uses the `execute` tool to run a C# script directly in the Editor, reading the 3D `RenderTexture` back to the CPU and counting the occupied voxels.
+  3. The AI discovers that the base voxel grid has 29,000 solids, but the mipmap chain is completely empty.
+  4. The AI pinpoints the exact line: `Graphics.CopyTexture` was being called incorrectly for a `Texture3D` volume (silently copying only depth-slice 0).
+
+The AI found a subtle, data-dependent GPU bug in minutes because it could directly interrogate the engine's state and memory.
+
 ---
 
 ## 🦁 How it Works (Under the Hood)
