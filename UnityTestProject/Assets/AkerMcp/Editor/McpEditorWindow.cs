@@ -42,6 +42,16 @@ namespace AkerMcp.Unity.Editor
 
             EditorGUILayout.Space(10);
 
+            // Toggle Auto-Restart
+            bool autoRestart = EditorPrefs.GetBool("AkerMcp_AutoRestartEnabled", true);
+            bool newAutoRestart = EditorGUILayout.ToggleLeft("Auto-start plugin on Unity load/compile", autoRestart);
+            if (newAutoRestart != autoRestart)
+            {
+                EditorPrefs.SetBool("AkerMcp_AutoRestartEnabled", newAutoRestart);
+            }
+
+            EditorGUILayout.Space(10);
+
             // Start/Stop button
             if (!isRunning)
             {

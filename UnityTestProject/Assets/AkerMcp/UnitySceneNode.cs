@@ -91,7 +91,10 @@ namespace AkerMcp.Unity
             {
                 if (component == null || component is Transform) continue;
                 if (TryResolveOnComponent(component, propertyPath))
-                    return _resolver.Resolve(component, propertyPath);
+                {
+                    try { return _resolver.Resolve(component, propertyPath); }
+                    catch (PropertyPathException) { continue; }
+                }
             }
 
             throw new PropertyPathException(
@@ -117,8 +120,12 @@ namespace AkerMcp.Unity
                 if (component == null || component is Transform) continue;
                 if (TryResolveOnComponent(component, propertyPath))
                 {
-                    _resolver.Set(component, propertyPath, value);
-                    return;
+                    try
+                    {
+                        _resolver.Set(component, propertyPath, value);
+                        return;
+                    }
+                    catch (PropertyPathException) { continue; }
                 }
             }
 

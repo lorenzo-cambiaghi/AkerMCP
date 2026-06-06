@@ -34,7 +34,6 @@ namespace AkerMcp.Unity
 
     public class DynamicEvaluatorV2 : ICodeExecutor
     {
-        private ScriptState<object>? _state;
         private readonly ScriptOptions _options;
         private readonly IMainThreadDispatcher _dispatcher;
         private readonly StringBuilder _outputCapture = new StringBuilder();
@@ -99,6 +98,7 @@ namespace AkerMcp.Unity
                     using UnityEngine;
                     using UnityEditor;
                     using AkerMcp.Unity;
+                    using UnityEngine.Rendering;
 
                     public class DynamicScript 
                     {{
@@ -158,7 +158,6 @@ namespace AkerMcp.Unity
 
         private ScriptOptions BuildScriptOptions()
         {
-            var assemblies = new List<Assembly>();
             var imports = new List<string>
             {
                 "System",
@@ -169,56 +168,24 @@ namespace AkerMcp.Unity
                 "UnityEditor"
             };
 
-            // Core .NET
-            assemblies.Add(typeof(object).Assembly);
-            assemblies.Add(typeof(Enumerable).Assembly);
-
-            // Try to find netstandard for type redirections (common in Unity)
-            var netstandard = AppDomain.CurrentDomain.GetAssemblies()
-                .FirstOrDefault(a => a.GetName().Name == "netstandard");
-            if (netstandard != null) assemblies.Add(netstandard);
-
-            // Unity assemblies
-            AddAssemblySafe(assemblies, typeof(GameObject));      // UnityEngine.CoreModule
-            AddAssemblySafe(assemblies, typeof(Transform));
-            AddAssemblySafe(assemblies, typeof(Rigidbody));       // UnityEngine.PhysicsModule
-            AddAssemblySafe(assemblies, typeof(Camera));
-            AddAssemblySafe(assemblies, typeof(Light));
-            AddAssemblySafe(assemblies, typeof(MeshRenderer));
-            AddAssemblySafe(assemblies, typeof(AudioSource));
-            AddAssemblySafe(assemblies, typeof(Canvas));
-            AddAssemblySafe(assemblies, typeof(Animator));
-            AddAssemblySafe(assemblies, typeof(UnityEditor.Editor)); // UnityEditor
-            AddAssemblySafe(assemblies, typeof(Selection));
-            AddAssemblySafe(assemblies, typeof(AssetDatabase));
-            AddAssemblySafe(assemblies, typeof(EditorApplication));
-            AddAssemblySafe(assemblies, typeof(Undo));
-
-            // AkerMcp assemblies
-            AddAssemblySafe(assemblies, typeof(DynamicEvaluatorV2));
-            AddAssemblySafe(assemblies, typeof(ScriptGlobals));
-
-            // User assemblies (project scripts)
-            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                if (asm.IsDynamic) continue;
-                var name = asm.GetName().Name ?? "";
-                if (name == "Assembly-CSharp" || name == "Assembly-CSharp-Editor")
-                    assemblies.Add(asm);
-            }
-
-            var distinct = assemblies.Distinct().ToArray();
+            // Include ALL non-dynamic assemblies currently loaded in the AppDomain.
+            // This automatically picks up URP, HDRP, Input System, TextMeshPro,
+            // Cinemachine, user scripts, and any other UPM package — without
+            // maintaining a hardcoded list.
+            var assemblies = AppDomain.CurrentDomain.GetAssemblies()
+                .Where(a => !a.IsDynamic)
+                .Where(a =>
+                {
+                    try { _ = a.Location; return !string.IsNullOrEmpty(a.Location); }
+                    catch { return false; }
+                })
+                .Distinct()
+                .ToArray();
 
             return ScriptOptions.Default
-                .WithReferences(distinct)
+                .WithReferences(assemblies)
                 .WithImports(imports)
                 .WithAllowUnsafe(false);
-        }
-
-        private static void AddAssemblySafe(List<Assembly> list, Type type)
-        {
-            try { list.Add(type.Assembly); }
-            catch { }
         }
 
         private static string FormatReturnValue(object value)
@@ -240,11 +207,6 @@ namespace AkerMcp.Unity
             }
 
             return value.ToString() ?? "null";
-        }
-
-        public void ResetState()
-        {
-            _state = null;
         }
     }
 }

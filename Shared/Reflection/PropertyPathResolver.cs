@@ -39,8 +39,18 @@ namespace AkerMcp.Shared.Reflection
                 var prop = _cache.GetProperty(type, segment);
                 if (prop != null && prop.CanRead)
                 {
-                    current = prop.GetValue(current);
-                    continue;
+                    try
+                    {
+                        current = prop.GetValue(current);
+                        continue;
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new PropertyPathException(
+                            $"Property '{segment}' on {type.Name} threw on read: " +
+                            $"{(ex.InnerException ?? ex).GetType().Name}: " +
+                            $"{(ex.InnerException ?? ex).Message}");
+                    }
                 }
 
                 var field = _cache.GetField(type, segment);
@@ -112,7 +122,16 @@ namespace AkerMcp.Shared.Reflection
 
             var prop = _cache.GetProperty(type, segment);
             if (prop != null && prop.CanRead)
-                return prop.GetValue(current);
+            {
+                try { return prop.GetValue(current); }
+                catch (Exception ex)
+                {
+                    throw new PropertyPathException(
+                        $"Property '{segment}' on {type.Name} threw on read: " +
+                        $"{(ex.InnerException ?? ex).GetType().Name}: " +
+                        $"{(ex.InnerException ?? ex).Message}");
+                }
+            }
 
             var field = _cache.GetField(type, segment);
             if (field != null)

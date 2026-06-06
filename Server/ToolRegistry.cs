@@ -283,7 +283,7 @@ Available globals (no initialization needed):
 Pre-imported namespaces: System, System.Collections.Generic, System.Linq, UnityEngine, UnityEditor.
 
 Important rules:
-1. State persists between calls! Variables defined in one execute call remain in memory for the next one.
+1. Each script execution is independent — variables do not persist between calls.
 2. ALWAYS return a meaningful value at the end of your script (e.g. `return ""Spawned 10 items"";`).
 3. If you need to modify many objects, use this tool instead of calling `set_property` in a loop.",
                 ParseSchema(@"{
