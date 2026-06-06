@@ -6,12 +6,12 @@ echo AkerMCP Unity Package Builder
 echo =======================================================
 
 echo.
-echo [1/3] Ensuring DLLs are compiled and up to date...
+echo [1/4] Ensuring DLLs are compiled and up to date...
 call copy-dlls.bat
 if errorlevel 1 goto :error
 
 echo.
-echo [2/3] Locating Unity Editor...
+echo [2/4] Locating Unity Editor...
 if not defined UNITY_EDITOR_PATH (
     if exist "C:\Program Files\Unity\Hub\Editor" (
         for /d %%D in ("C:\Program Files\Unity\Hub\Editor\*") do (
@@ -32,7 +32,7 @@ if not exist "%UNITY_EXE%" (
 echo Found Unity at: %UNITY_EXE%
 
 echo.
-echo [3/3] Exporting AkerMCP.unitypackage...
+echo [3/4] Exporting AkerMCP.unitypackage...
 echo (NOTE: If Unity is currently open with the test project, this step will fail or skip silently. Please close Unity first!)
 echo.
 
@@ -45,9 +45,35 @@ if not exist "%~dp0AkerMCP.unitypackage" (
 )
 
 echo.
+echo [4/4] Publishing standalone Server binaries...
+if not exist "%~dp0Build" mkdir "%~dp0Build"
+move /Y "%~dp0AkerMCP.unitypackage" "%~dp0Build\" >nul
+
+echo   - Windows (win-x64)
+dotnet publish Server\AkerMcp.Server.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o "%~dp0Build\Server-win-x64" --nologo >nul
+tar -a -c -f "%~dp0Build\AkerMcp.Server-win-x64.zip" -C "%~dp0Build\Server-win-x64" .
+
+echo   - macOS (osx-x64)
+dotnet publish Server\AkerMcp.Server.csproj -c Release -r osx-x64 --self-contained true -p:PublishSingleFile=true -o "%~dp0Build\Server-osx-x64" --nologo >nul
+tar -a -c -f "%~dp0Build\AkerMcp.Server-osx-x64.zip" -C "%~dp0Build\Server-osx-x64" .
+
+echo   - Linux (linux-x64)
+dotnet publish Server\AkerMcp.Server.csproj -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -o "%~dp0Build\Server-linux-x64" --nologo >nul
+tar -a -c -f "%~dp0Build\AkerMcp.Server-linux-x64.zip" -C "%~dp0Build\Server-linux-x64" .
+
+REM Clean up intermediate folders
+rmdir /s /q "%~dp0Build\Server-win-x64"
+rmdir /s /q "%~dp0Build\Server-osx-x64"
+rmdir /s /q "%~dp0Build\Server-linux-x64"
+
+echo.
 echo SUCCESS! 
-echo The package has been created at: %~dp0AkerMCP.unitypackage
-echo You can upload this file to GitHub Releases.
+echo All packages have been created in the Build/ directory:
+echo   - Build/AkerMCP.unitypackage
+echo   - Build/AkerMcp.Server-win-x64.zip
+echo   - Build/AkerMcp.Server-osx-x64.zip
+echo   - Build/AkerMcp.Server-linux-x64.zip
+echo You can upload these files to GitHub Releases.
 goto :end
 
 :error
