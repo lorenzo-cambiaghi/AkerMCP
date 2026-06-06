@@ -163,6 +163,8 @@ You do not need to install the .NET SDK or compile any code.
 4. Open **Window → AkerMcp** and click **Start AkerMcp Plugin**. You should see a green **Running** status.
    *(Tip: The plugin must be running before you start the server. The server discovers it automatically via a lock file).*
 
+   ![AkerMcp Editor Window](docs/images/AkerMcpView.png)
+
 ### 2. MCP Server Setup
 1. Go to the `Build/` folder.
 2. Download the standalone server for your OS (`AkerMcp.Server-*.zip` or `.tar.gz`).
