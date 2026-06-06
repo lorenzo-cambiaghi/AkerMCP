@@ -178,6 +178,23 @@ dotnet publish Shared/AkerMcp.Shared.csproj -c Release -o .publish
 
 That's it. The server is ready to run. Now set up the Unity side.
 
+### Packaging a Release (For Contributors)
+
+If you want to package AkerMCP for distribution, use the included build scripts:
+
+- **Windows:** Run `build-package.bat`
+- **macOS / Linux:** Run `./build-package.sh`
+
+*(Note: Ensure Unity is closed before running the script, as it needs to launch Unity in batch mode to export the package).*
+
+The script will automatically compile the DLLs, export the Unity package, and publish the standalone MCP server for Windows, macOS, and Linux. 
+
+All generated release files will be placed in the `Build/` directory:
+- `Build/AkerMCP.unitypackage` (Import this into your Unity project)
+- `Build/AkerMcp.Server-win-x64.zip` (Standalone server for Windows)
+- `Build/AkerMcp.Server-osx-x64.tar.gz` (Standalone server for macOS)
+- `Build/AkerMcp.Server-linux-x64.tar.gz` (Standalone server for Linux)
+
 ---
 
 ## Unity Plugin Setup
