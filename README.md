@@ -110,15 +110,15 @@ When combined, your AI gets a **complete global vision**:
 ## Table of Contents
 
 - [The Perfect Combo: AkerMCP + LynxMCP](#the-perfect-combo-akermcp--lynxmcp)
-- [Prerequisites](#prerequisites)
-- [Installation](#installation)
-- [Unity Plugin Setup](#unity-plugin-setup)
+- [Quick Start (Recommended)](#quick-start-recommended)
 - [Connecting an AI Client](#connecting-an-ai-client)
   - [Claude Code (CLI)](#claude-code-cli)
   - [Claude Desktop](#claude-desktop)
   - [Cursor](#cursor)
   - [Windsurf](#windsurf)
+  - [Google Antigravity](#google-antigravity)
   - [VS Code + Copilot](#vs-code--copilot)
+- [Advanced: Building from Source (For Developers)](#advanced-building-from-source-for-developers)
 - [Verifying the Connection](#verifying-the-connection)
 - [MCP Tools](#mcp-tools)
 - [MCP Resources](#mcp-resources)
@@ -136,61 +136,22 @@ When combined, your AI gets a **complete global vision**:
 
 You do not need to install the .NET SDK or compile any code.
 
-### Step 1 — Import the Unity Plugin
-1. Go to the `Build/` folder in this repository.
-2. Download `AkerMCP.unitypackage`.
-3. Open your Unity project and double-click the package to import it.
+### 1. Unity Setup
+1. Go to the `Build/` folder in this repository and download `AkerMCP.unitypackage`.
+2. Open your Unity project and double-click the package to import it.
    *(This package already contains all necessary C# scripts, dependencies, and Roslyn compilers).*
+3. **(Optional)** Open the menu **AkerMcp → Setup Test Scene** to create a ready-to-test scene.
+4. Open **Window → AkerMcp** and click **Start AkerMcp Plugin**. You should see a green **Running** status.
+   *(Tip: The plugin must be running before you start the server. The server discovers it automatically via a lock file).*
 
-### Step 2 — Download the MCP Server
+### 2. MCP Server Setup
 1. Go to the `Build/` folder.
-2. Download the standalone server for your OS (e.g., `AkerMcp.Server-win-x64.zip` or `.tar.gz`).
+2. Download the standalone server for your OS (`AkerMcp.Server-*.zip` or `.tar.gz`).
 3. Extract the archive anywhere on your computer.
 
 ---
 
-## Advanced: Building from Source (For Developers)
-
-If you want to modify AkerMCP or test the included Unity project, you'll need the **.NET 8.0+ SDK**.
-
-### Step 1 — Clone and Build
-```bash
-git clone https://github.com/lorenzo-cambiaghi/AkerMCP.git
-cd AkerMCP
-dotnet build -c Release
-dotnet publish Shared/AkerMcp.Shared.csproj -c Release -o .publish
-```
-
-### Step 2 — Unity Plugin Setup
-If you are modifying the source code and want to push changes to your own Unity project:
-1. Copy the `UnityTestProject/Assets/AkerMcp` folder into your own Unity project's `Assets/` folder.
-2. Create `Assets/AkerMcp/Plugins/` and copy all `.dll` files from `.publish/` and `Client/bin/Release/netstandard2.1/`.
-3. Copy the Unity Roslyn Compilers (`Microsoft.CodeAnalysis.dll`, etc.) from your Unity Editor installation (`.../Editor/Data/MonoBleedingEdge/lib/mono/4.5/`) into the `Plugins/` folder.
-
-If you just want to run the included **UnityTestProject**, run `./copy-dlls.sh` (or `copy-dlls.bat` on Windows) to automatically build and copy all dependencies.
-
-### Packaging a Release
-Run `build-package.bat` (Windows) or `./build-package.sh` (Mac/Linux) to automatically compile the DLLs, export the Unity package, and publish the standalone MCP server binaries to the `Build/` folder.
-
-### Step 2 — Open the Unity project
-
-Open `UnityTestProject/` (or your own project) in **Unity Hub**.
-
-### Step 3 — Create a test scene (optional)
-
-Menu bar: **AkerMcp → Setup Test Scene**
-
-This creates a scene with a Player (Rigidbody + Camera), three Enemies, a Ground plane, lights, and props — enough to test all tools.
-
-### Step 4 — Start the plugin
-
-Menu bar: **Window → AkerMcp**
-
-Click **Start AkerMcp Plugin**.
-
-You'll see a green **Running** status and a pipe name like `aker-mcp-unity-12345`. The plugin is now waiting for the MCP server to connect.
-
-> **Tip:** The plugin must be running *before* you start the server. The server discovers it automatically via a lock file i## Connecting an AI Client
+## Connecting an AI Client
 
 Point your AI client to the standalone executable you extracted in Step 2. 
 
@@ -236,6 +197,31 @@ Antigravity reads `mcp_config.json` from its user-data directory (`~/.gemini/ant
 ```
 
 > *If you are a developer running from source, you can still use `"command": "dotnet"` and `"args": ["run", "--project", "/path/to/AkerMcp.Server"]` as shown in previous versions of this guide.*
+
+---
+
+## Advanced: Building from Source (For Developers)
+
+If you want to modify AkerMCP or test the included Unity project, you'll need the **.NET 8.0+ SDK**.
+
+### Step 1 — Clone and Build
+```bash
+git clone https://github.com/lorenzo-cambiaghi/AkerMCP.git
+cd AkerMCP
+dotnet build -c Release
+dotnet publish Shared/AkerMcp.Shared.csproj -c Release -o .publish
+```
+
+### Step 2 — Unity Plugin Setup
+If you are modifying the source code and want to push changes to your own Unity project:
+1. Copy the `UnityTestProject/Assets/AkerMcp` folder into your own Unity project's `Assets/` folder.
+2. Create `Assets/AkerMcp/Plugins/` and copy all `.dll` files from `.publish/` and `Client/bin/Release/netstandard2.1/`.
+3. Copy the Unity Roslyn Compilers (`Microsoft.CodeAnalysis.dll`, etc.) from your Unity Editor installation (`.../Editor/Data/MonoBleedingEdge/lib/mono/4.5/`) into the `Plugins/` folder.
+
+If you just want to run the included **UnityTestProject**, run `./copy-dlls.sh` (or `copy-dlls.bat` on Windows) to automatically build and copy all dependencies.
+
+### Packaging a Release
+Run `build-package.bat` (Windows) or `./build-package.sh` (Mac/Linux) to automatically compile the DLLs, export the Unity package, and publish the standalone MCP server binaries to the `Build/` folder.
 
 ---
 
