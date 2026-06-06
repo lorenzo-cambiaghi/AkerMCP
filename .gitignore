@@ -32,7 +32,7 @@ UnityTestProject/Recordings/
 UnityTestProject/obj/
 
 # Unity - Plugin DLLs (built from source, not vendored)
-UnityTestProject/Assets/Plugins/AkerMcp/*.dll
+UnityTestProject/Assets/AkerMcp/Plugins/*.dll
 
 # Crash reports
 sysinfo.txt
@@ -50,4 +50,4 @@ crashlytics-build.properties
 !README.txt
 
 # Unity - Plugin DLL meta files
-UnityTestProject/Assets/Plugins/AkerMcp/*.dll.meta
+UnityTestProject/Assets/AkerMcp/Plugins/*.dll.meta

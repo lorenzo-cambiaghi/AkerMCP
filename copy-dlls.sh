@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-DEST="UnityTestProject/Assets/Plugins/AkerMcp"
+DEST="UnityTestProject/Assets/AkerMcp/Plugins"
 mkdir -p "$DEST"
 
 echo "Building..."

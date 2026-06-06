@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-set DEST=UnityTestProject\Assets\Plugins\AkerMcp
+set DEST=UnityTestProject\Assets\AkerMcp\Plugins
 if not exist "%DEST%" mkdir "%DEST%"
 
 echo Building...
