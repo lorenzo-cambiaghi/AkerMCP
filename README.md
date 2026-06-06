@@ -132,112 +132,45 @@ When combined, your AI gets a **complete global vision**:
 
 ---
 
-## Prerequisites
+## Quick Start (Recommended)
 
-You need two things installed before starting:
+You do not need to install the .NET SDK or compile any code.
 
-| Requirement | Version | Check | Install |
-|-------------|---------|-------|---------|
-| **.NET SDK** | 8.0+ | `dotnet --version` | [dotnet.microsoft.com/download](https://dotnet.microsoft.com/download) |
-| **Unity** | 2021.3+ | Unity Hub | [unity.com/download](https://unity.com/download) |
+### Step 1 — Import the Unity Plugin
+1. Go to the `Build/` folder in this repository.
+2. Download `AkerMCP.unitypackage`.
+3. Open your Unity project and double-click the package to import it.
+   *(This package already contains all necessary C# scripts, dependencies, and Roslyn compilers).*
 
-> **Note:** AkerMCP also works with Godot 4.x (.NET), Stride, and Flax Engine, but this guide focuses on Unity. See [Writing an Engine Adapter](#writing-an-engine-adapter) for details.
+### Step 2 — Download the MCP Server
+1. Go to the `Build/` folder.
+2. Download the standalone server for your OS (e.g., `AkerMcp.Server-win-x64.zip` or `.tar.gz`).
+3. Extract the archive anywhere on your computer.
 
 ---
 
-## Installation
+## Advanced: Building from Source (For Developers)
 
-### Step 1 — Clone the repository
+If you want to modify AkerMCP or test the included Unity project, you'll need the **.NET 8.0+ SDK**.
 
+### Step 1 — Clone and Build
 ```bash
 git clone https://github.com/lorenzo-cambiaghi/AkerMCP.git
 cd AkerMCP
-```
-
-### Step 2 — Build
-
-```bash
 dotnet build -c Release
-```
-
-You should see:
-
-```
-Build succeeded.
-    0 Warning(s)
-    0 Error(s)
-```
-
-### Step 3 — Publish dependencies
-
-This gathers all required DLLs (including MessagePack) into a single folder:
-
-```bash
 dotnet publish Shared/AkerMcp.Shared.csproj -c Release -o .publish
 ```
 
-That's it. The server is ready to run. Now set up the Unity side.
+### Step 2 — Unity Plugin Setup
+If you are modifying the source code and want to push changes to your own Unity project:
+1. Copy the `UnityTestProject/Assets/AkerMcp` folder into your own Unity project's `Assets/` folder.
+2. Create `Assets/AkerMcp/Plugins/` and copy all `.dll` files from `.publish/` and `Client/bin/Release/netstandard2.1/`.
+3. Copy the Unity Roslyn Compilers (`Microsoft.CodeAnalysis.dll`, etc.) from your Unity Editor installation (`.../Editor/Data/MonoBleedingEdge/lib/mono/4.5/`) into the `Plugins/` folder.
 
-### Packaging a Release (For Contributors)
+If you just want to run the included **UnityTestProject**, run `./copy-dlls.sh` (or `copy-dlls.bat` on Windows) to automatically build and copy all dependencies.
 
-If you want to package AkerMCP for distribution, use the included build scripts:
-
-- **Windows:** Run `build-package.bat`
-- **macOS / Linux:** Run `./build-package.sh`
-
-*(Note: Ensure Unity is closed before running the script, as it needs to launch Unity in batch mode to export the package).*
-
-The script will automatically compile the DLLs, export the Unity package, and publish the standalone MCP server for Windows, macOS, and Linux. 
-
-All generated release files will be placed in the `Build/` directory:
-- `Build/AkerMCP.unitypackage` (Import this into your Unity project)
-- `Build/AkerMcp.Server-win-x64.zip` (Standalone server for Windows)
-- `Build/AkerMcp.Server-osx-x64.tar.gz` (Standalone server for macOS)
-- `Build/AkerMcp.Server-linux-x64.tar.gz` (Standalone server for Linux)
-
----
-
-## Unity Plugin Setup
-
-### Step 1 — Add AkerMCP to Your Unity Project
-
-There are three ways to do this, ranging from a simple double-click to building from source.
-
-#### Option A: The Simple Way (Recommended)
-1. Go to the `Build/` folder in this repository.
-2. Download the `AkerMCP.unitypackage`.
-3. Open your Unity project.
-4. Double-click the downloaded `.unitypackage` file and click **Import**.
-   *(This package already contains all the necessary C# scripts, pre-built dependencies, and Roslyn compilers).*
-
-#### Option B: I want to use the included Test Project
-If you just want to explore our test scene and see AkerMCP in action, clone the repository and run the setup scripts. These scripts build the project, gather dependencies, and copy all DLLs (including Roslyn) into the `UnityTestProject/` folder.
-
-```bash
-# macOS / Linux
-# Set UNITY_EDITOR_PATH to your Unity.app/Contents path to include Roslyn DLLs
-export UNITY_EDITOR_PATH=/Applications/Unity/Hub/Editor/2022.3.0f1/Unity.app/Contents
-./copy-dlls.sh
-
-# Windows (PowerShell)
-# Set UNITY_EDITOR_PATH to your Unity Editor\Data folder to include Roslyn DLLs
-$env:UNITY_EDITOR_PATH="C:\Program Files\Unity\Hub\Editor\2022.3.0f1\Editor\Data"
-.\copy-dlls.bat
-```
-Then open `UnityTestProject/` in Unity Hub.
-
-#### Option C: Manual Build (Advanced)
-If you are modifying AkerMCP source code and want to push changes to your own Unity project:
-
-1. **Build the dependencies.** Open a terminal in the `AkerMCP` repository folder and run:
-   ```bash
-   dotnet publish Shared/AkerMcp.Shared.csproj -c Release -o .publish
-   ```
-2. **Copy the AkerMCP folder.** Copy the `UnityTestProject/Assets/AkerMcp` folder into your own Unity project's `Assets/` folder.
-3. **Copy the Plugins.** Create a folder named `Plugins` inside your Unity project's `Assets/AkerMcp/` folder. Copy these `.dll` files into it:
-   - Everything inside the `AkerMCP/.publish/` folder you just generated.
-   - `AkerMcp.Client.dll` from `AkerMCP/Client/bin/Release/netstandard2.1/`.
-4. **Copy the Roslyn Compilers (for C# Execution).** The `execute` tool needs Unity's internal compiler DLLs to work. Go to your Unity Editor installation folder on your computer (`.../Editor/Data/MonoBleedingEdge/lib/mono/4.5/` on Windows, or `.../Unity.app/Contents/MonoBleedingEdge/lib/mono/4.5/` on Mac) and copy these 5 DLLs into your `Assets/AkerMcp/Plugins/` folder: `Microsoft.CodeAnalysis.dll`, `Microsoft.CodeAnalysis.CSharp.dll`, `Microsoft.CodeAnalysis.Scripting.dll`, `Microsoft.CodeAnalysis.CSharp.Scripting.dll`, and `System.Reflection.Metadata.dll`.
+### Packaging a Release
+Run `build-package.bat` (Windows) or `./build-package.sh` (Mac/Linux) to automatically compile the DLLs, export the Unity package, and publish the standalone MCP server binaries to the `Build/` folder.
 
 ### Step 2 — Open the Unity project
 
@@ -257,138 +190,52 @@ Click **Start AkerMcp Plugin**.
 
 You'll see a green **Running** status and a pipe name like `aker-mcp-unity-12345`. The plugin is now waiting for the MCP server to connect.
 
-> **Tip:** The plugin must be running *before* you start the server. The server discovers it automatically via a lock file in your system's temp directory.
+> **Tip:** The plugin must be running *before* you start the server. The server discovers it automatically via a lock file i## Connecting an AI Client
 
----
-
-## Connecting an AI Client
-
-The MCP server is a standalone .NET process that the AI client launches. You configure it once, and it connects to the Unity plugin automatically.
+Point your AI client to the standalone executable you extracted in Step 2. 
 
 > **Important:** Make sure the Unity plugin is running (green status in the AkerMcp window) before using any tools from the AI client.
 
 ### Claude Code (CLI)
 
-Run this once to add the server to your Claude Code configuration:
-
 ```bash
-claude mcp add game-engine -- dotnet run --project /absolute/path/to/AkerMCP/Server -c Release --verbosity quiet --nologo
+claude mcp add game-engine -- /absolute/path/to/extracted/AkerMcp.Server
 ```
 
-Or add it manually to your project's `.claude/settings.json`:
+### Claude Desktop / Cursor / Windsurf
+
+Open the MCP settings (or `claude_desktop_config.json`) and add the server:
 
 ```json
 {
   "mcpServers": {
     "game-engine": {
-      "command": "dotnet",
-      "args": ["run", "--project", "/absolute/path/to/AkerMCP/Server", "-c", "Release", "--verbosity", "quiet", "--nologo"]
+      "command": "/absolute/path/to/extracted/AkerMcp.Server",
+      "args": []
     }
   }
 }
 ```
 
-Verify it's registered:
-
-```bash
-claude mcp list
-```
-
-### Claude Desktop
-
-Open **Settings → Developer → Edit Config** and add:
-
-```json
-{
-  "mcpServers": {
-    "game-engine": {
-      "command": "dotnet",
-      "args": ["run", "--project", "/absolute/path/to/AkerMCP/Server", "-c", "Release", "--verbosity", "quiet", "--nologo"]
-    }
-  }
-}
-```
-
-Config file location:
-- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
-
-Restart Claude Desktop after saving.
-
-### Cursor
-
-Open **Settings → MCP** and click **+ Add new MCP server**, then choose **command** type:
-
-```json
-{
-  "mcpServers": {
-    "game-engine": {
-      "command": "dotnet",
-      "args": ["run", "--project", "/absolute/path/to/AkerMCP/Server", "-c", "Release", "--verbosity", "quiet", "--nologo"]
-    }
-  }
-}
-```
-
-Or add it directly to `.cursor/mcp.json` in your project root.
-
-### Windsurf
-
-Open **Settings → MCP** and add:
-
-```json
-{
-  "mcpServers": {
-    "game-engine": {
-      "command": "dotnet",
-      "args": ["run", "--project", "/absolute/path/to/AkerMCP/Server", "-c", "Release", "--verbosity", "quiet", "--nologo"]
-    }
-  }
-}
-```
+> **Windows users:** Replace the command path with the full Windows path to the `.exe`, for example `"C:\\Tools\\AkerMcp.Server\\AkerMcp.Server.exe"`. Remember to use double backslashes in JSON!
 
 ### Google Antigravity
 
-Antigravity reads `mcp_config.json` from its user-data directory:
-
-- Windows: `%USERPROFILE%\.gemini\antigravity\mcp_config.json`
-- macOS: `~/.gemini/antigravity/mcp_config.json`
-- Linux: `~/.gemini/antigravity/mcp_config.json`
-
-Add an entry under `mcpServers`:
+Antigravity reads `mcp_config.json` from its user-data directory (`~/.gemini/antigravity/` or `%USERPROFILE%\.gemini\antigravity\`). Add:
 
 ```json
 {
   "mcpServers": {
     "game-engine": {
-      "command": "dotnet",
-      "args": ["run", "--project", "C:/path/to/AkerMCP/Server", "-c", "Release", "--verbosity", "quiet", "--nologo"],
+      "command": "C:/Tools/AkerMcp.Server/AkerMcp.Server.exe",
+      "args": [],
       "type": "stdio"
     }
   }
 }
 ```
 
-Restart Antigravity. The new tools appear automatically.
-
-### VS Code + Copilot
-
-Add to your `.vscode/settings.json` or use the **MCP: Add Server** command:
-
-```json
-{
-  "mcp": {
-    "servers": {
-      "game-engine": {
-        "command": "dotnet",
-        "args": ["run", "--project", "/absolute/path/to/AkerMCP/Server", "-c", "Release", "--verbosity", "quiet", "--nologo"]
-      }
-    }
-  }
-}
-```
-
-> **Windows users:** Replace `/absolute/path/to/AkerMCP/Server` with the full Windows path, e.g. `C:\\Users\\you\\AkerMCP\\Server`. Use double backslashes in JSON.
+> *If you are a developer running from source, you can still use `"command": "dotnet"` and `"args": ["run", "--project", "/path/to/AkerMcp.Server"]` as shown in previous versions of this guide.*
 
 ---
 
