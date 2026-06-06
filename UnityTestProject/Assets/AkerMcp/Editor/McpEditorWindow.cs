@@ -71,20 +71,16 @@ namespace AkerMcp.Unity.Editor
             EditorGUILayout.Space(15);
             EditorGUILayout.HelpBox(
                 "How to connect:\n" +
-                "1. Click 'Start' above\n" +
-                "2. Run: dotnet run --project Server\n" +
-                "   (from the AkerMcp folder)\n" +
-                "3. The server auto-discovers this plugin\n\n" +
-                "Claude Desktop config:\n" +
-                "{\n" +
-                "  \"mcpServers\": {\n" +
-                "    \"game-engine\": {\n" +
-                "      \"command\": \"dotnet\",\n" +
-                "      \"args\": [\"run\", \"--project\", \"/path/to/AkerMcp/Server\", \"-c\", \"Release\", \"--verbosity\", \"quiet\", \"--nologo\"]\n" +
-                "    }\n" +
-                "  }\n" +
-                "}",
+                "1. Click 'Start' above.\n" +
+                "2. Download the standalone MCP server from the GitHub 'Build/' folder.\n" +
+                "3. Configure your AI client (Claude, Cursor, Windsurf, etc.) to point to the downloaded executable.",
                 MessageType.Info);
+
+            EditorGUILayout.Space(5);
+            if (GUILayout.Button("View Setup Instructions on GitHub", GUILayout.Height(25)))
+            {
+                Application.OpenURL("https://github.com/lorenzo-cambiaghi/AkerMCP#connecting-an-ai-client");
+            }
         }
 
         private void OnInspectorUpdate()
