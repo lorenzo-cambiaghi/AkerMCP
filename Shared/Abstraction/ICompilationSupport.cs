@@ -13,6 +13,8 @@ namespace AkerMcp.Shared.Abstraction
     public class CompilationStatus
     {
         public bool IsCompiling { get; set; }
+        // True while the asset pipeline is importing (compilation may follow).
+        public bool IsImporting { get; set; }
         public bool LastCompileSucceeded { get; set; }
         public int ErrorCount { get; set; }
         public int WarningCount { get; set; }

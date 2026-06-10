@@ -27,7 +27,29 @@ namespace AkerMcp.Server
         private const int HeartbeatIntervalMs = 10_000;
         private const int HeartbeatTimeoutMs = 5_000;
 
+        // The engine plugin restarts itself after every Unity domain reload (script
+        // recompilation) and the background retry loop reconnects within ~2-10s.
+        // Tool calls arriving in that window wait instead of failing immediately.
+        private const int ReconnectGraceMs = 20_000;
+        private const int DefaultRequestTimeoutMs = 30_000;
+
+        // Marker prefix so callers (e.g. the refresh_scripts orchestration) can
+        // distinguish "connection dropped mid-call" from ordinary tool errors.
+        public const string EngineDisconnectedPrefix = "[ENGINE_DISCONNECTED]";
+
         public bool IsConnected => _channel != null;
+
+        /// <summary>Polls until the background retry loop re-establishes the connection.</summary>
+        public async Task<bool> WaitForConnection(int timeoutMs, CancellationToken ct)
+        {
+            var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+            while (DateTime.UtcNow < deadline && !ct.IsCancellationRequested)
+            {
+                if (IsConnected) return true;
+                await Task.Delay(250, ct).ConfigureAwait(false);
+            }
+            return IsConnected;
+        }
 
         public async Task<bool> TryConnect(string pipeName, int timeoutMs = 5000, CancellationToken ct = default)
         {
@@ -191,11 +213,23 @@ namespace AkerMcp.Server
             }
         }
 
-        public async Task<ToolResult> ForwardToolCall(string method, JsonElement? arguments, CancellationToken ct)
+        public async Task<ToolResult> ForwardToolCall(string method, JsonElement? arguments, CancellationToken ct,
+            int timeoutMs = DefaultRequestTimeoutMs)
         {
             var channel = _channel;
             if (channel == null)
-                return ToolResult.Error("No engine connected. Start the engine plugin first.");
+            {
+                // Most common cause: Unity is mid domain-reload. Give the retry
+                // loop a chance instead of failing the call (and burning a
+                // model round-trip on a transient state).
+                if (!await WaitForConnection(ReconnectGraceMs, ct).ConfigureAwait(false))
+                    return ToolResult.Error(
+                        $"{EngineDisconnectedPrefix} No engine connected (waited {ReconnectGraceMs / 1000}s). " +
+                        "If Unity is compiling, retry shortly; otherwise check that the AkerMcp plugin is running in the editor.");
+                channel = _channel;
+                if (channel == null)
+                    return ToolResult.Error($"{EngineDisconnectedPrefix} Engine connection dropped again — retry shortly.");
+            }
 
             var payload = arguments.HasValue
                 ? System.Text.Encoding.UTF8.GetBytes(arguments.Value.GetRawText())
@@ -217,7 +251,7 @@ namespace AkerMcp.Server
                 await channel.SendRequest(request, ct).ConfigureAwait(false);
 
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                cts.CancelAfter(30000);
+                cts.CancelAfter(timeoutMs);
                 using var reg = cts.Token.Register(() => tcs.TrySetCanceled());
 
                 var response = await tcs.Task.ConfigureAwait(false);
@@ -231,6 +265,24 @@ namespace AkerMcp.Server
 
                 return ToolResult.Text(resultText);
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw; // caller cancelled — propagate
+            }
+            catch (OperationCanceledException)
+            {
+                // Either the per-call timeout fired or Disconnect() cancelled the
+                // pending request. Disambiguate so the model gets an actionable error.
+                if (!IsConnected)
+                    return ToolResult.Error(
+                        $"{EngineDisconnectedPrefix} Engine disconnected while '{method}' was in flight " +
+                        "(usually a Unity domain reload after script recompilation). It reconnects automatically — retry shortly.");
+                return ToolResult.Error($"Tool '{method}' timed out after {timeoutMs / 1000}s (engine still connected).");
+            }
+            catch (IOException ex)
+            {
+                return ToolResult.Error($"{EngineDisconnectedPrefix} Pipe error during '{method}': {ex.Message}. Retry shortly.");
+            }
             finally
             {
                 _pendingRequests.TryRemove(requestId, out _);
@@ -242,7 +294,13 @@ namespace AkerMcp.Server
         {
             var channel = _channel;
             if (channel == null)
-                return new BinaryToolCallResult { Error = "No engine connected." };
+            {
+                if (!await WaitForConnection(ReconnectGraceMs, ct).ConfigureAwait(false))
+                    return new BinaryToolCallResult { Error = "No engine connected. If Unity is compiling, retry shortly." };
+                channel = _channel;
+                if (channel == null)
+                    return new BinaryToolCallResult { Error = "Engine connection dropped — retry shortly." };
+            }
 
             var payload = arguments.HasValue
                 ? System.Text.Encoding.UTF8.GetBytes(arguments.Value.GetRawText())

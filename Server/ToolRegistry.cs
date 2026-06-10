@@ -204,23 +204,23 @@ Use 'recursive: true' to also delete all children. Paths are case-sensitive.",
                 new ToolAnnotations { DestructiveHint = true });
 
             Register("refresh_scripts",
-                @"Force recompilation of all scripts in the project.
-ALWAYS call this after creating or modifying any .cs file. Then call get_compile_errors to verify.
-Never assume a script change compiled successfully — always verify.
+                @"Compile pending script changes and return the result (blocks until done, including Unity's domain reload — typically 5-60s).
+ALWAYS call this after creating or modifying any .cs file. Works even when the Unity editor is unfocused.
+The result already contains errors and warnings: no separate get_compile_errors call is needed.
 
-Workflow: edit .cs file → refresh_scripts → get_compile_errors → fix if needed → repeat.",
+Workflow: edit .cs files → refresh_scripts → fix any reported errors → repeat.",
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
                         ""wait_for_completion"": { ""type"": ""boolean"", ""description"": ""Wait for compilation to finish before returning (default: true)"" }
                     }
                 }"),
-                (args, ct) => _engine.ForwardToolCall("refresh_scripts", args, ct));
+                HandleRefreshScripts);
 
             Register("get_compile_errors",
-                @"Get current script compilation errors and warnings.
-Always call this after refresh_scripts. Returns file path, line number, column, and error message.
-Use 'errors_only: true' to skip warnings and focus on blockers.",
+                @"Get the result of the last script compilation: status, errors and warnings (file, line, column).
+Note: refresh_scripts already returns this report — only call this to re-check state without recompiling.
+All errors are listed; warnings are capped at 10. Use 'errors_only: true' to skip warnings.",
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -332,6 +332,40 @@ Typical size 150-400 KB, well under model image limits.",
                 }"),
                 HandleTakeScreenshot,
                 new ToolAnnotations { ReadOnlyHint = true });
+        }
+
+        private async Task<ToolResult> HandleRefreshScripts(JsonElement? args, CancellationToken ct)
+        {
+            // The engine answers directly when compilation fails or there is nothing
+            // to compile (no domain reload in either case). On SUCCESS Unity reloads
+            // the script domain, which kills the IPC connection mid-call — so a
+            // disconnect here is the success signal: wait for the plugin to auto-
+            // restart, then fetch the (SessionState-persisted) compile report.
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var result = await _engine.ForwardToolCall("refresh_scripts", args, ct, timeoutMs: 180_000);
+
+            if (!IsDisconnectError(result))
+                return result;
+
+            if (!await _engine.WaitForConnection(120_000, ct).ConfigureAwait(false))
+                return ToolResult.Error(
+                    "Engine disconnected during recompilation and did not reconnect within 2 minutes. " +
+                    "Check the Unity editor (it may show a blocking dialog), then call get_compile_errors.");
+
+            var report = await _engine.ForwardToolCall("get_compile_errors", null, ct);
+            if (report.IsError)
+                return report;
+
+            var text = report.Content.Count > 0 ? report.Content[0].Text : null;
+            return ToolResult.Text(
+                $"Unity recompiled and reloaded the script domain in {sw.Elapsed.TotalSeconds:0.#}s.\n{text}");
+        }
+
+        private static bool IsDisconnectError(ToolResult result)
+        {
+            return result.IsError
+                && result.Content.Count > 0
+                && result.Content[0].Text?.StartsWith(EngineConnection.EngineDisconnectedPrefix) == true;
         }
 
         private async Task<ToolResult> HandleTakeScreenshot(JsonElement? args, CancellationToken ct)

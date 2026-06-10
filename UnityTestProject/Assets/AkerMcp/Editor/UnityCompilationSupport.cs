@@ -11,6 +11,11 @@ namespace AkerMcp.Unity
 {
     public class UnityCompilationSupport : ICompilationSupport
     {
+        // A successful compile triggers a domain reload that wipes this instance.
+        // The last result is persisted in SessionState so get_compile_errors right
+        // after the reload still reports that compile's warnings/outcome.
+        private const string SessionKey = "AkerMcp_LastCompileResult";
+
         private readonly List<CompileMessage> _messages = new List<CompileMessage>();
         private bool _isCompiling;
         private bool _lastCompileSucceeded = true;
@@ -19,6 +24,7 @@ namespace AkerMcp.Unity
 
         public UnityCompilationSupport()
         {
+            RestoreFromSession();
             HookEvents();
         }
 
@@ -34,13 +40,13 @@ namespace AkerMcp.Unity
 
         public void RequestRecompile()
         {
-            _messages.Clear();
-            _isCompiling = true;
+            // Incremental: import changed assets and compile only the affected
+            // assemblies — same effect as giving the editor focus with Auto Refresh on.
+            // (RequestScriptCompilation/CleanBuildCache would force a full rebuild of
+            // every assembly: tens of seconds of editor downtime per micro-change.)
+            AssetDatabase.Refresh();
 
-            AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
-            CompilationPipeline.RequestScriptCompilation(RequestScriptCompilationOptions.CleanBuildCache);
-
-            Debug.Log("[AkerMcp] Script recompilation requested.");
+            Debug.Log("[AkerMcp] Asset refresh requested (incremental script compile).");
         }
 
         public CompilationStatus GetCompilationStatus()
@@ -48,6 +54,7 @@ namespace AkerMcp.Unity
             return new CompilationStatus
             {
                 IsCompiling = _isCompiling || EditorApplication.isCompiling,
+                IsImporting = EditorApplication.isUpdating,
                 LastCompileSucceeded = _lastCompileSucceeded,
                 ErrorCount = _messages.Count(m => m.Type == CompileMessageType.Error),
                 WarningCount = _messages.Count(m => m.Type == CompileMessageType.Warning),
@@ -82,6 +89,8 @@ namespace AkerMcp.Unity
             var errorCount = _messages.Count(m => m.Type == CompileMessageType.Error);
             var warningCount = _messages.Count(m => m.Type == CompileMessageType.Warning);
 
+            SaveToSession();
+
             if (errorCount > 0)
                 Debug.LogWarning($"[AkerMcp] Compilation finished with {errorCount} error(s), {warningCount} warning(s).");
             else
@@ -106,6 +115,53 @@ namespace AkerMcp.Unity
                     });
                 }
             }
+        }
+
+        private void SaveToSession()
+        {
+            try
+            {
+                var snapshot = new SessionSnapshot
+                {
+                    Succeeded = _lastCompileSucceeded,
+                    CompileTimeTicks = _lastCompileTime.Ticks,
+                    Messages = _messages.ToList()
+                };
+                SessionState.SetString(SessionKey, System.Text.Json.JsonSerializer.Serialize(snapshot));
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AkerMcp] Could not persist compile result: {ex.Message}");
+            }
+        }
+
+        private void RestoreFromSession()
+        {
+            try
+            {
+                var json = SessionState.GetString(SessionKey, "");
+                if (string.IsNullOrEmpty(json)) return;
+
+                var snapshot = System.Text.Json.JsonSerializer.Deserialize<SessionSnapshot>(json);
+                if (snapshot == null) return;
+
+                _lastCompileSucceeded = snapshot.Succeeded;
+                _lastCompileTime = new DateTime(snapshot.CompileTimeTicks);
+                _messages.Clear();
+                if (snapshot.Messages != null)
+                    _messages.AddRange(snapshot.Messages);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AkerMcp] Could not restore compile result: {ex.Message}");
+            }
+        }
+
+        private class SessionSnapshot
+        {
+            public bool Succeeded { get; set; }
+            public long CompileTimeTicks { get; set; }
+            public List<CompileMessage> Messages { get; set; } = new List<CompileMessage>();
         }
 
         public void Unhook()

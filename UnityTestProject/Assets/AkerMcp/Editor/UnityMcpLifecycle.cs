@@ -10,8 +10,17 @@ namespace AkerMcp.Unity.Editor
             EditorApplication.quitting += StopIfRunning;
             AssemblyReloadEvents.beforeAssemblyReload += StopIfRunning;
 
-            // Riavvio automatico schedulato all'avvio di Unity e dopo ogni ricompilazione
-            EditorApplication.delayCall += AutoStartIfEnabled;
+            // Riavvio automatico al primo tick dell'editor loop. NON delayCall:
+            // delayCall aspetta un repaint della GUI, che con l'editor sfocato non
+            // arriva mai — il plugin resterebbe fermo dopo ogni ricompilazione in
+            // background finché l'utente non clicca su Unity. update ticka comunque.
+            EditorApplication.update += AutoStartOnce;
+        }
+
+        private static void AutoStartOnce()
+        {
+            EditorApplication.update -= AutoStartOnce;
+            AutoStartIfEnabled();
         }
 
         private static void StopIfRunning()

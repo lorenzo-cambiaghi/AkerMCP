@@ -34,6 +34,14 @@ namespace AkerMcp.Client
             PropertyNameCaseInsensitive = true
         };
 
+        // For tool outputs where null fields are pure noise (e.g. execute results).
+        private readonly JsonSerializerOptions _compactJsonOptions = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            PropertyNameCaseInsensitive = true,
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+        };
+
         public IpcRequestHandler(
             ISceneGraph sceneGraph,
             IEngineCapabilities capabilities,
@@ -98,7 +106,11 @@ namespace AkerMcp.Client
             }
             catch (Exception ex)
             {
-                return IpcResponse.Fail(request.Id, $"{ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+                // Innermost frame only: a full stack trace costs hundreds of tokens
+                // per failed call and the model can't act on engine internals anyway.
+                var frame = ex.StackTrace?.Split('\n').FirstOrDefault()?.Trim();
+                var detail = frame != null ? $" ({frame})" : "";
+                return IpcResponse.Fail(request.Id, $"{ex.GetType().Name}: {ex.Message}{detail}");
             }
         }
 
@@ -162,7 +174,7 @@ namespace AkerMcp.Client
                     if (type != null)
                     {
                         var typeResult = _inspector.InspectType(type, includeMethods, filter);
-                        return JsonSerializer.Serialize(typeResult, _jsonOptions);
+                        return CapOutput(JsonSerializer.Serialize(typeResult, _jsonOptions));
                     }
                     return $"{{\"error\": \"Object not found: {target}\"}}";
                 }
@@ -171,8 +183,18 @@ namespace AkerMcp.Client
                 result.Path = node.Path;
                 result.Components = node.GetComponents().ToList();
                 result.ChildNames = node.Children.Select(c => c.Name).ToList();
-                return JsonSerializer.Serialize(result, _jsonOptions);
+                return CapOutput(JsonSerializer.Serialize(result, _jsonOptions));
             }, ct);
+        }
+
+        // Inspection of large objects/types can produce tens of thousands of tokens.
+        // A truncated payload plus steering advice beats flooding the model context.
+        private static string CapOutput(string json, int maxChars = 30_000)
+        {
+            if (json.Length <= maxChars) return json;
+            return json.Substring(0, maxChars) +
+                   $"\n…TRUNCATED ({json.Length} chars total). " +
+                   "Narrow the inspection with 'filter' (regex on member names), lower 'depth', or omit 'include_methods'.";
         }
 
         private async Task<string> HandleGetProperty(IpcRequest request, CancellationToken ct)
@@ -398,46 +420,94 @@ namespace AkerMcp.Client
             var args = ParseArgs(request);
             var waitForCompletion = !args.TryGetProperty("wait_for_completion", out var w) || w.GetBoolean();
 
-            return await _dispatcher.RunOnMainThread(() =>
+            var before = await _dispatcher.RunOnMainThread(() =>
             {
+                var status = _compilationSupport.GetCompilationStatus();
                 _compilationSupport.RequestRecompile();
+                return status;
+            }, ct);
 
-                if (waitForCompletion)
+            if (!waitForCompletion)
+                return "Recompilation requested (not waiting). Call get_compile_errors once the editor finishes.";
+
+            // Compilation runs on the editor loop; poll from this background thread.
+            // If the compile SUCCEEDS the engine does a domain reload and this
+            // connection dies before a response can be sent — the MCP server detects
+            // the drop, waits for reconnection and reports the outcome itself.
+            // Completing this loop therefore means: errors (no reload happened),
+            // or nothing to compile.
+            var sawCompiling = false;
+            var startGraceDeadline = DateTime.UtcNow.AddSeconds(10);
+            var deadline = DateTime.UtcNow.AddSeconds(150);
+
+            while (DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(250, ct).ConfigureAwait(false);
+                var status = await _dispatcher.RunOnMainThread(
+                    () => _compilationSupport.GetCompilationStatus(), ct);
+
+                if (status.IsCompiling)
                 {
-                    // Compilation starts asynchronously, return current status
-                    var status = _compilationSupport.GetCompilationStatus();
-                    var messages = _compilationSupport.GetCompileMessages().ToList();
-
-                    var errors = messages.Where(m => m.Type == CompileMessageType.Error).ToList();
-                    var warnings = messages.Where(m => m.Type == CompileMessageType.Warning).ToList();
-
-                    var sb = new System.Text.StringBuilder();
-                    sb.AppendLine($"Recompilation requested. Status: {(status.IsCompiling ? "compiling..." : "idle")}");
-                    sb.AppendLine($"Last compile: {status.LastCompileTime}");
-                    sb.AppendLine($"Result: {(status.LastCompileSucceeded ? "SUCCESS" : "FAILED")}");
-
-                    if (errors.Count > 0)
-                    {
-                        sb.AppendLine($"\n=== ERRORS ({errors.Count}) ===");
-                        foreach (var err in errors)
-                            sb.AppendLine($"  {err.File}({err.Line},{err.Column}): {err.Message}");
-                    }
-
-                    if (warnings.Count > 0)
-                    {
-                        sb.AppendLine($"\n=== WARNINGS ({warnings.Count}) ===");
-                        foreach (var warn in warnings)
-                            sb.AppendLine($"  {warn.File}({warn.Line},{warn.Column}): {warn.Message}");
-                    }
-
-                    if (errors.Count == 0 && warnings.Count == 0)
-                        sb.AppendLine("No errors or warnings.");
-
-                    return sb.ToString();
+                    sawCompiling = true;
+                    continue;
                 }
 
-                return "Recompilation requested.";
-            }, ct);
+                if (status.IsImporting)
+                {
+                    // Asset pipeline workers still importing; compilation may start
+                    // only once they finish — keep the no-op grace window open.
+                    startGraceDeadline = DateTime.UtcNow.AddSeconds(10);
+                    continue;
+                }
+
+                if (sawCompiling || status.LastCompileTime != before.LastCompileTime)
+                    break; // a compile ran and finished without a domain reload
+
+                if (DateTime.UtcNow > startGraceDeadline)
+                    return "No script changes detected — nothing to compile. Compile state unchanged since " +
+                           $"{before.LastCompileTime} ({(before.LastCompileSucceeded ? "SUCCESS" : "FAILED")}, " +
+                           $"{before.ErrorCount} errors, {before.WarningCount} warnings).";
+            }
+
+            return await _dispatcher.RunOnMainThread(
+                () => BuildCompileReport(_compilationSupport, errorsOnly: false), ct);
+        }
+
+        private static string BuildCompileReport(ICompilationSupport compilationSupport, bool errorsOnly)
+        {
+            const int maxWarnings = 10;
+
+            var status = compilationSupport.GetCompilationStatus();
+            var messages = compilationSupport.GetCompileMessages().ToList();
+            var errors = messages.Where(m => m.Type == CompileMessageType.Error).ToList();
+            var warnings = messages.Where(m => m.Type == CompileMessageType.Warning).ToList();
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"Compilation {(status.LastCompileSucceeded ? "SUCCEEDED" : "FAILED")} " +
+                          $"at {status.LastCompileTime}: {errors.Count} error(s), {warnings.Count} warning(s).");
+
+            foreach (var err in errors)
+                sb.AppendLine(FormatCompileMessage(err, "error"));
+
+            if (!errorsOnly && warnings.Count > 0)
+            {
+                foreach (var warn in warnings.Take(maxWarnings))
+                    sb.AppendLine(FormatCompileMessage(warn, "warning"));
+                if (warnings.Count > maxWarnings)
+                    sb.AppendLine($"(+{warnings.Count - maxWarnings} more warnings)");
+            }
+
+            return sb.ToString().TrimEnd();
+        }
+
+        private static string FormatCompileMessage(CompileMessage m, string severity)
+        {
+            // Unity's CompilerMessage.message usually already embeds
+            // "file(line,col): severity CSxxxx:" — don't print the location twice.
+            if (!string.IsNullOrEmpty(m.File) &&
+                m.Message.StartsWith(m.File, StringComparison.OrdinalIgnoreCase))
+                return m.Message;
+            return $"{m.File}({m.Line},{m.Column}): {severity}: {m.Message}";
         }
 
         private async Task<string> HandleGetCompileStatus(CancellationToken ct)
@@ -460,35 +530,8 @@ namespace AkerMcp.Client
             var args = ParseArgs(request);
             var errorsOnly = args.TryGetProperty("errors_only", out var eo) && eo.GetBoolean();
 
-            return await _dispatcher.RunOnMainThread(() =>
-            {
-                var messages = _compilationSupport.GetCompileMessages();
-
-                if (errorsOnly)
-                    messages = messages.Where(m => m.Type == CompileMessageType.Error);
-
-                var list = messages.ToList();
-                if (list.Count == 0)
-                    return "No compilation errors or warnings.";
-
-                var sb = new System.Text.StringBuilder();
-                var errors = list.Where(m => m.Type == CompileMessageType.Error).ToList();
-                var warnings = list.Where(m => m.Type == CompileMessageType.Warning).ToList();
-
-                if (errors.Count > 0)
-                {
-                    sb.AppendLine($"=== ERRORS ({errors.Count}) ===");
-                    foreach (var err in errors)
-                        sb.AppendLine($"{err.File}({err.Line},{err.Column}): error: {err.Message}");
-                }
-                if (warnings.Count > 0 && !errorsOnly)
-                {
-                    sb.AppendLine($"=== WARNINGS ({warnings.Count}) ===");
-                    foreach (var warn in warnings)
-                        sb.AppendLine($"{warn.File}({warn.Line},{warn.Column}): warning: {warn.Message}");
-                }
-                return sb.ToString();
-            }, ct);
+            return await _dispatcher.RunOnMainThread(
+                () => BuildCompileReport(_compilationSupport, errorsOnly), ct);
         }
 
         private string HandleGetConsoleLogs(IpcRequest request)
@@ -615,10 +658,10 @@ namespace AkerMcp.Client
             {
                 success = result.Success,
                 returnValue = result.ReturnValue,
-                output = result.Output,
-                error = result.Error,
+                output = string.IsNullOrEmpty(result.Output) ? null : result.Output,
+                error = string.IsNullOrEmpty(result.Error) ? null : result.Error,
                 elapsedMs = Math.Round(result.ElapsedMs, 1)
-            }, _jsonOptions);
+            }, _compactJsonOptions);
         }
 
         private static JsonElement ParseArgs(IpcRequest request)
