@@ -72,7 +72,7 @@ namespace AkerMcp.Unity.Editor
             EditorGUILayout.HelpBox(
                 "How to connect:\n" +
                 "1. Click 'Start' above.\n" +
-                "2. Download the standalone MCP server from the GitHub 'Build/' folder.\n" +
+                "2. Download the standalone MCP server from the GitHub Releases page.\n" +
                 "3. Configure your AI client (Claude, Cursor, Windsurf, etc.) to point to the downloaded executable.",
                 MessageType.Info);
 

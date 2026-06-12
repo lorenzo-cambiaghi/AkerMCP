@@ -38,6 +38,9 @@ UnityTestProject/Assets/AkerMcp/Plugins/*.dll
 sysinfo.txt
 crashlytics-build.properties
 
+# Release artifacts — distributed via GitHub Releases, never committed
+/Build/
+
 # Publish output
 .publish/
 .publish_debug/

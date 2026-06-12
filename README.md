@@ -156,7 +156,7 @@ When combined, your AI gets a **complete global vision**:
 You do not need to install the .NET SDK or compile any code.
 
 ### 1. Unity Setup
-1. Go to the `Build/` folder in this repository and download `AkerMCP.unitypackage`.
+1. Go to the [latest GitHub Release](https://github.com/lorenzo-cambiaghi/AkerMCP/releases/latest) and download `AkerMCP.unitypackage`.
 2. Open your Unity project and double-click the package to import it.
    *(This package already contains all necessary C# scripts, dependencies, and Roslyn compilers).*
 3. **(Optional)** Open the menu **AkerMcp → Setup Test Scene** to create a ready-to-test scene.
@@ -166,8 +166,8 @@ You do not need to install the .NET SDK or compile any code.
    ![AkerMcp Editor Window](docs/images/AkerMcpView.png)
 
 ### 2. MCP Server Setup
-1. Go to the `Build/` folder.
-2. Download the standalone server for your OS (`AkerMcp.Server-*.zip` or `.tar.gz`).
+1. Go to the [latest GitHub Release](https://github.com/lorenzo-cambiaghi/AkerMCP/releases/latest).
+2. Download the standalone server for your OS (`AkerMcp.Server-win-x64.zip`, `-osx-x64.zip`, or `-linux-x64.zip`).
 3. Extract the archive anywhere on your computer.
 
 ---
@@ -288,7 +288,7 @@ If you are modifying the source code and want to push changes to your own Unity 
 If you just want to run the included **UnityTestProject**, run `./copy-dlls.sh` (or `copy-dlls.bat` on Windows) to automatically build and copy all dependencies.
 
 ### Packaging a Release
-Run `build-package.bat` (Windows) or `./build-package.sh` (Mac/Linux) to automatically compile the DLLs, export the Unity package, and publish the standalone MCP server binaries to the `Build/` folder.
+Run `build-package.bat` (Windows) or `./build-package.sh` (Mac/Linux) to automatically compile the DLLs, export the Unity package, and produce the standalone MCP server binaries in the local `Build/` folder (gitignored). Upload the resulting files as assets to a [GitHub Release](https://github.com/lorenzo-cambiaghi/AkerMCP/releases) — binaries are distributed via Releases, not committed to the repository.
 
 ---
 
