@@ -333,10 +333,10 @@ QualitySettings:
     Kepler: 5
     LinuxHeadlessSimulation: 5
     Nintendo Switch: 5
+    Nintendo Switch 2: 5
     PS4: 5
     PS5: 5
     QNX: 5
-    ReservedCFE: 5
     Server: 5
     Standalone: 5
     VisionOS: 5
