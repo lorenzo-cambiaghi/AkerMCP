@@ -21,6 +21,12 @@ namespace AkerMcp.Client
         private readonly List<Task> _activeConnections = new List<Task>();
         private readonly object _connectionsLock = new object();
 
+        // Tracked so Stop() can force-close them: under Unity's Mono the
+        // CancellationToken on WaitForConnectionAsync/ReadAsync is not reliably
+        // honored — disposing the pipe is the only dependable way to unblock.
+        private NamedPipeServerStream? _listeningPipe;
+        private readonly List<NamedPipeServerStream> _activePipes = new List<NamedPipeServerStream>();
+
         protected ClientConfiguration Config { get; } = new ClientConfiguration();
 
         private int ActiveConnectionCount
@@ -73,6 +79,20 @@ namespace AkerMcp.Client
 
             try { _cts?.Cancel(); } catch { }
 
+            // Forza la chiusura delle pipe per sbloccare WaitForConnectionAsync e
+            // le ReceiveRequest in corso (la cancellazione via token non basta su Mono).
+            try { Interlocked.Exchange(ref _listeningPipe, null)?.Dispose(); } catch { }
+            NamedPipeServerStream[] pipes;
+            lock (_connectionsLock)
+            {
+                pipes = _activePipes.ToArray();
+                _activePipes.Clear();
+            }
+            foreach (var pipe in pipes)
+            {
+                try { pipe.Dispose(); } catch { }
+            }
+
             // Aspetta che tutte le connessioni attive si chiudano
             Task[] connections;
             lock (_connectionsLock)
@@ -103,6 +123,7 @@ namespace AkerMcp.Client
                         NamedPipeServerStream.MaxAllowedServerInstances,
                         PipeTransmissionMode.Byte,
                         PipeOptions.Asynchronous);
+                    _listeningPipe = pipeServer;
 
                     Log("Waiting for MCP server connection...");
                     await pipeServer.WaitForConnectionAsync(ct).ConfigureAwait(false);
@@ -111,6 +132,7 @@ namespace AkerMcp.Client
                     // Passa proprietà al task di gestione e rimetti subito in ascolto
                     var connectedPipe = pipeServer;
                     pipeServer = null; // impedisce il dispose nel finally
+                    _listeningPipe = null;
 
                     var connectionTask = Task.Run(() =>
                         HandleSingleConnection(connectedPipe, ct));
@@ -120,6 +142,7 @@ namespace AkerMcp.Client
                         // Rimuovi task completati
                         _activeConnections.RemoveAll(t => t.IsCompleted);
                         _activeConnections.Add(connectionTask);
+                        _activePipes.Add(connectedPipe);
                     }
                 }
                 catch (OperationCanceledException) { break; }
@@ -153,8 +176,16 @@ namespace AkerMcp.Client
                 while (!ct.IsCancellationRequested)
                 {
                     var request = await channel.ReceiveRequest(ct).ConfigureAwait(false);
-                    var response = await _handler!.HandleRequest(request, ct).ConfigureAwait(false);
-                    await channel.SendResponse(response, ct).ConfigureAwait(false);
+
+                    // Gestisci in background così il read loop continua a consumare
+                    // le richieste successive — soprattutto i ping dell'heartbeat del
+                    // server, che altrimenti resterebbero non letti dietro una chiamata
+                    // lunga (>5-15s) facendo scattare il rilevamento "zombie" e la
+                    // disconnessione a metà chiamata. È sicuro: IpcChannel serializza
+                    // le scritture col suo write lock e il server correla le risposte
+                    // per Id, quindi l'ordine di risposta non conta.
+                    var boundChannel = channel;
+                    _ = Task.Run(() => HandleRequestAndRespond(boundChannel, request, ct));
                 }
             }
             catch (EndOfStreamException)
@@ -169,9 +200,34 @@ namespace AkerMcp.Client
             }
             finally
             {
+                lock (_connectionsLock) { _activePipes.Remove(pipe); }
                 try { channel?.Dispose(); } catch { }
                 try { pipe.Dispose(); } catch { }
                 Log($"Client disconnected (remaining: {Math.Max(0, ActiveConnectionCount - 1)})");
+            }
+        }
+
+        private async Task HandleRequestAndRespond(IpcChannel channel, IpcRequest request, CancellationToken ct)
+        {
+            try
+            {
+                var response = await _handler!.HandleRequest(request, ct).ConfigureAwait(false);
+                await channel.SendResponse(response, ct).ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+                // Connessione chiusa mentre la richiesta era in lavorazione:
+                // non c'è più nessuno a cui rispondere.
+            }
+            catch (IOException)
+            {
+                // Pipe rotta a metà risposta — il client è già andato via.
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                if (_running && !ct.IsCancellationRequested)
+                    LogError($"Failed to respond to '{request.Method}': {ex.Message}");
             }
         }
 

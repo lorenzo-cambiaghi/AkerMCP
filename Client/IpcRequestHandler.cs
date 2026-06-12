@@ -176,7 +176,7 @@ namespace AkerMcp.Client
                         var typeResult = _inspector.InspectType(type, includeMethods, filter);
                         return CapOutput(JsonSerializer.Serialize(typeResult, _jsonOptions));
                     }
-                    return $"{{\"error\": \"Object not found: {target}\"}}";
+                    return ErrorJson($"Object not found: {target}");
                 }
 
                 var result = _inspector.Inspect(node.UnderlyingObject, depth, includeMethods, filter);
@@ -206,7 +206,7 @@ namespace AkerMcp.Client
             return await _dispatcher.RunOnMainThread(() =>
             {
                 var node = _sceneGraph.GetNode(objectPath);
-                if (node == null) return $"{{\"error\": \"Object not found: {objectPath}\"}}";
+                if (node == null) return ErrorJson($"Object not found: {objectPath}");
 
                 var value = node.GetProperty(propertyPath);
                 var jsonValue = _serializer.ObjectToJsonElement(value);
@@ -282,7 +282,7 @@ namespace AkerMcp.Client
                         : "{\"result\": null}";
                 }
 
-                return $"{{\"error\": \"Target not found: {target}\"}}";
+                return ErrorJson($"Target not found: {target}");
             }, ct);
         }
 
@@ -594,7 +594,7 @@ namespace AkerMcp.Client
             {
                 var node = _sceneGraph.GetNode(objectPath);
                 if (node == null)
-                    return $"{{\"error\": \"Object not found: {objectPath}\"}}";
+                    return ErrorJson($"Object not found: {objectPath}");
 
                 _editorContext.SetSelection(objectPath);
 
@@ -663,6 +663,12 @@ namespace AkerMcp.Client
                 elapsedMs = Math.Round(result.ElapsedMs, 1)
             }, _compactJsonOptions);
         }
+
+        // Error payloads must go through the serializer: paths/names coming from
+        // the model can contain quotes or backslashes that would break
+        // string-interpolated JSON.
+        private string ErrorJson(string message)
+            => JsonSerializer.Serialize(new { error = message }, _jsonOptions);
 
         private static JsonElement ParseArgs(IpcRequest request)
         {

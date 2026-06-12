@@ -68,6 +68,11 @@ namespace AkerMcp.Server
                 var response = JsonRpcResponse.Success(id, result);
                 await _transport.SendResponse(response, ct).ConfigureAwait(false);
             }
+            catch (MethodNotFoundException ex)
+            {
+                var response = JsonRpcResponse.Fail(id, JsonRpcErrorCodes.MethodNotFound, ex.Message);
+                await _transport.SendResponse(response, ct).ConfigureAwait(false);
+            }
             catch (Exception ex)
             {
                 var response = JsonRpcResponse.Fail(id, JsonRpcErrorCodes.InternalError, ex.Message);
@@ -104,8 +109,13 @@ namespace AkerMcp.Server
                     return await _resourceRegistry.ReadResource(paramsElement.Value, ct).ConfigureAwait(false);
 
                 default:
-                    throw new InvalidOperationException($"Unknown method: {method}");
+                    throw new MethodNotFoundException(method);
             }
+        }
+
+        private sealed class MethodNotFoundException : InvalidOperationException
+        {
+            public MethodNotFoundException(string method) : base($"Unknown method: {method}") { }
         }
 
         private Task HandleNotification(string method, JsonElement message, CancellationToken ct)
@@ -123,13 +133,32 @@ namespace AkerMcp.Server
             return Task.CompletedTask;
         }
 
+        // Wire-compatible protocol revisions this server can speak. The first
+        // entry is the default offered when the client's request is unsupported.
+        private static readonly string[] SupportedProtocolVersions =
+        {
+            McpConstants.ProtocolVersion,
+            "2024-11-05"
+        };
+
         private InitializeResult HandleInitialize(JsonElement? paramsElement)
         {
             StdioTransport.LogInfo("Handling initialize request...");
 
+            // Per MCP spec: echo the client's requested version when supported,
+            // otherwise respond with the latest version we support.
+            string? requested = null;
+            if (paramsElement.HasValue &&
+                paramsElement.Value.TryGetProperty("protocolVersion", out var pv))
+                requested = pv.GetString();
+
+            var negotiated = requested != null && Array.IndexOf(SupportedProtocolVersions, requested) >= 0
+                ? requested
+                : McpConstants.ProtocolVersion;
+
             return new InitializeResult
             {
-                ProtocolVersion = McpConstants.ProtocolVersion,
+                ProtocolVersion = negotiated,
                 ServerInfo = new ImplementationInfo
                 {
                     Name = "AkerMcp",
@@ -137,8 +166,9 @@ namespace AkerMcp.Server
                 },
                 Capabilities = new ServerCapabilities
                 {
-                    Tools = new ToolsCapability { ListChanged = true },
-                    Resources = new ResourcesCapability { Subscribe = false, ListChanged = true }
+                    // We never emit list_changed notifications, so don't advertise them.
+                    Tools = new ToolsCapability { ListChanged = false },
+                    Resources = new ResourcesCapability { Subscribe = false, ListChanged = false }
                 }
             };
         }

@@ -463,7 +463,7 @@ var types = objects
 return string.Join("\n", types);
 ```
 
-> **Note:** The script state persists between calls — variables defined in one `execute` call are available in the next. The evaluator runs on Unity's main thread with full Editor API access.
+> **Note:** Each `execute` call is compiled and run independently — variables do **not** persist between calls, so every script must be self-contained. The evaluator runs on Unity's main thread with full Editor API access; `Debug.Log` output produced during the run is captured and returned in the `output` field.
 
 ### How property paths work
 
@@ -816,13 +816,15 @@ Log("message")              // Debug.Log shortcut
 
 **Pre-imported namespaces**: `System`, `System.Collections.Generic`, `System.Linq`, `UnityEngine`, `UnityEditor`
 
-**State persists between calls.** Variables you define in one `execute` are available in the next:
+**State does NOT persist between calls.** Each script is compiled and run independently — write self-contained scripts:
 
 ```csharp
-// Call 1
+// Wrong — 'player' from a previous call no longer exists
+return player.transform.position;
+
+// Right — re-acquire what you need within the same script
 var player = Find("Player");
-// Call 2
-return player.transform.position;  // still accessible
+return player.transform.position;
 ```
 
 **Return values** are sent back to you. Always `return` a meaningful result:
@@ -836,7 +838,7 @@ return $"Found {count} rigidbodies";
 FindAll<Rigidbody>();  // returns null, you won't know the result
 ```
 
-**Timeout**: Default is 5 seconds. Pass `timeout_ms` for longer operations.
+**Timeout**: Default is 5 seconds. Pass `timeout_ms` for longer operations. Note: the timeout only stops *waiting* — a running script cannot be aborted and keeps running on the engine main thread, so avoid unbounded loops and verify scene state after a timeout.
 
 #### Visual Verification with `take_screenshot`
 

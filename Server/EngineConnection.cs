@@ -322,7 +322,7 @@ namespace AkerMcp.Server
                 await channel.SendRequest(request, ct).ConfigureAwait(false);
 
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                cts.CancelAfter(30000);
+                cts.CancelAfter(DefaultRequestTimeoutMs);
                 using var reg = cts.Token.Register(() => tcs.TrySetCanceled());
 
                 var response = await tcs.Task.ConfigureAwait(false);
@@ -340,6 +340,30 @@ namespace AkerMcp.Server
                 {
                     Bytes = response.Payload,
                     ContentType = response.ContentType
+                };
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw; // caller cancelled — propagate
+            }
+            catch (OperationCanceledException)
+            {
+                if (!IsConnected)
+                    return new BinaryToolCallResult
+                    {
+                        Error = $"{EngineDisconnectedPrefix} Engine disconnected while '{method}' was in flight " +
+                                "(usually a Unity domain reload after script recompilation). It reconnects automatically — retry shortly."
+                    };
+                return new BinaryToolCallResult
+                {
+                    Error = $"'{method}' timed out after {DefaultRequestTimeoutMs / 1000}s (engine still connected)."
+                };
+            }
+            catch (IOException ex)
+            {
+                return new BinaryToolCallResult
+                {
+                    Error = $"{EngineDisconnectedPrefix} Pipe error during '{method}': {ex.Message}. Retry shortly."
                 };
             }
             finally

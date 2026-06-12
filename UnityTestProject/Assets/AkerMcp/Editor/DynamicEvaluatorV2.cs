@@ -53,11 +53,7 @@ namespace AkerMcp.Unity
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 cts.CancelAfter(timeoutMs);
 
-                var result = await _dispatcher.RunOnMainThread(() =>
-                {
-                    _outputCapture.Clear();
-                    return ExecuteInternal(code);
-                }, cts.Token);
+                var result = await _dispatcher.RunOnMainThread(() => ExecuteInternal(code), cts.Token);
 
                 sw.Stop();
                 result.ElapsedMs = sw.Elapsed.TotalMilliseconds;
@@ -69,7 +65,9 @@ namespace AkerMcp.Unity
                 return new CodeExecutionResult
                 {
                     Success = false,
-                    Error = $"Execution timed out after {timeoutMs}ms",
+                    Error = $"Execution timed out after {timeoutMs}ms. The script could NOT be aborted: " +
+                            "it runs on the engine main thread and may still be running or may have completed. " +
+                            "Verify scene state (inspect / get_console_logs) before retrying.",
                     ElapsedMs = sw.Elapsed.TotalMilliseconds
                 };
             }
@@ -85,7 +83,40 @@ namespace AkerMcp.Unity
             }
         }
 
+        private const int MaxCapturedOutputChars = 16_000;
+
         private CodeExecutionResult ExecuteInternal(string code)
+        {
+            // Capture Debug.Log / Log() emitted while the script runs so the model
+            // receives them in the 'output' field. Execution happens on the main
+            // thread, so logMessageReceived fires synchronously within this scope.
+            _outputCapture.Clear();
+            Application.logMessageReceived += CaptureLog;
+            CodeExecutionResult result;
+            try
+            {
+                result = CompileAndRun(code);
+            }
+            finally
+            {
+                Application.logMessageReceived -= CaptureLog;
+            }
+
+            if (_outputCapture.Length > 0)
+                result.Output = _outputCapture.ToString().TrimEnd();
+            return result;
+        }
+
+        private void CaptureLog(string condition, string stackTrace, LogType type)
+        {
+            if (_outputCapture.Length >= MaxCapturedOutputChars)
+                return;
+            _outputCapture.AppendLine(type == LogType.Log ? condition : $"[{type}] {condition}");
+            if (_outputCapture.Length >= MaxCapturedOutputChars)
+                _outputCapture.AppendLine("…output truncated.");
+        }
+
+        private CodeExecutionResult CompileAndRun(string code)
         {
             try
             {

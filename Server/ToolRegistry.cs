@@ -191,12 +191,14 @@ Examples:
 
             Register("delete",
                 @"Remove an object/node from the scene. This action supports undo.
-Use 'recursive: true' to also delete all children. Paths are case-sensitive.",
+By default ('recursive: true') the object AND all its children are deleted.
+Pass 'recursive: false' to delete only this object — its children are preserved and re-parented to the deleted object's parent.
+Paths are case-sensitive.",
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
                         ""object_path"": { ""type"": ""string"", ""description"": ""Path to the object to delete"" },
-                        ""recursive"": { ""type"": ""boolean"", ""description"": ""Delete children recursively"" }
+                        ""recursive"": { ""type"": ""boolean"", ""description"": ""Also delete children (default: true). If false, children are re-parented to the deleted object's parent."" }
                     },
                     ""required"": [""object_path""]
                 }"),
@@ -283,9 +285,11 @@ Available globals (no initialization needed):
 Pre-imported namespaces: System, System.Collections.Generic, System.Linq, UnityEngine, UnityEditor.
 
 Important rules:
-1. Each script execution is independent — variables do not persist between calls.
+1. Each script execution is independent — variables do not persist between calls. Write self-contained scripts.
 2. ALWAYS return a meaningful value at the end of your script (e.g. `return ""Spawned 10 items"";`).
-3. If you need to modify many objects, use this tool instead of calling `set_property` in a loop.",
+3. If you need to modify many objects, use this tool instead of calling `set_property` in a loop.
+4. Console output (Debug.Log / Log) produced during the run is captured and returned in the 'output' field.
+5. The timeout (default 5000ms, override with 'timeout_ms') only stops WAITING: a running script CANNOT be aborted and keeps running on the engine main thread. Avoid unbounded loops; after a timeout, verify scene state before retrying.",
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {

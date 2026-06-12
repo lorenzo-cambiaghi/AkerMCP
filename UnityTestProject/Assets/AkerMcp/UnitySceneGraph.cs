@@ -99,6 +99,22 @@ namespace AkerMcp.Unity
             var go = FindByPath(path);
             if (go == null) return false;
 
+            if (!recursive)
+            {
+                // Preserve children: re-parent them (keeping world position) to the
+                // deleted object's parent before destroying the node itself.
+                var parent = go.transform.parent;
+                for (int i = go.transform.childCount - 1; i >= 0; i--)
+                {
+                    var child = go.transform.GetChild(i);
+#if UNITY_EDITOR
+                    UnityEditor.Undo.SetTransformParent(child, parent, "MCP: Detach child before delete");
+#else
+                    child.SetParent(parent, true);
+#endif
+                }
+            }
+
 #if UNITY_EDITOR
             UnityEditor.Undo.DestroyObjectImmediate(go);
 #else
