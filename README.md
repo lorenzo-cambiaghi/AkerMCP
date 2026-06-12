@@ -288,7 +288,9 @@ If you are modifying the source code and want to push changes to your own Unity 
 If you just want to run the included **UnityTestProject**, run `./copy-dlls.sh` (or `copy-dlls.bat` on Windows) to automatically build and copy all dependencies.
 
 ### Packaging a Release
-Run `build-package.bat` (Windows) or `./build-package.sh` (Mac/Linux) to automatically compile the DLLs, export the Unity package, and produce the standalone MCP server binaries in the local `Build/` folder (gitignored). Upload the resulting files as assets to a [GitHub Release](https://github.com/lorenzo-cambiaghi/AkerMCP/releases) — binaries are distributed via Releases, not committed to the repository.
+On Windows, `.\publish-release.ps1 -Version v1.2.3` does the whole release in one command: builds the packages (Unity must be closed), tags the commit, creates the [GitHub Release](https://github.com/lorenzo-cambiaghi/AkerMCP/releases) and uploads the four artifacts via the GitHub API (auth via `GITHUB_TOKEN` or the stored git credential). Use `-DryRun` to preview, `-SkipBuild` to reuse existing `Build/` output.
+
+Alternatively, run `build-package.bat` (Windows) or `./build-package.sh` (Mac/Linux) to only produce the artifacts in the local `Build/` folder (gitignored), then upload them as release assets manually. Binaries are distributed via Releases, not committed to the repository.
 
 ---
 
