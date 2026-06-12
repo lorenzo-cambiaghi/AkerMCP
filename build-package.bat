@@ -1,5 +1,7 @@
 @echo off
 setlocal
+REM Run from the repo root regardless of the caller's working directory
+cd /d "%~dp0"
 
 echo =======================================================
 echo AkerMCP Unity Package Builder
@@ -7,7 +9,7 @@ echo =======================================================
 
 echo.
 echo [1/4] Ensuring DLLs are compiled and up to date...
-call copy-dlls.bat
+call "%~dp0copy-dlls.bat"
 if errorlevel 1 goto :error
 
 echo.
