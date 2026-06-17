@@ -8,24 +8,49 @@ echo AkerMCP Unity Package Builder
 echo =======================================================
 
 echo.
-echo [1/4] Ensuring DLLs are compiled and up to date...
+echo [1/4] Ensuring sample plugin junction and DLLs are up to date...
+REM The .unitypackage is exported from samples\unity, whose Assets\AkerMcp is a
+REM junction to the canonical plugin (plugins\unity\AkerMcp). Make sure it exists.
+call "%~dp0setup-samples.bat"
+if errorlevel 1 goto :error
 call "%~dp0copy-dlls.bat"
 if errorlevel 1 goto :error
 
 echo.
 echo [2/4] Locating Unity Editor...
-if not defined UNITY_EDITOR_PATH (
-    if exist "C:\Program Files\Unity\Hub\Editor" (
-        for /d %%D in ("C:\Program Files\Unity\Hub\Editor\*") do (
-            set UNITY_EDITOR_PATH=%%D\Editor\Data
-            set UNITY_EXE=%%D\Editor\Unity.exe
-        )
-    )
-) else (
-    REM If UNITY_EDITOR_PATH is manually set to Editor\Data, we need to go up one level to find Unity.exe
+if defined UNITY_EDITOR_PATH (
+    REM If UNITY_EDITOR_PATH is manually set to Editor\Data, go up one level for Unity.exe
     set UNITY_EXE=%UNITY_EDITOR_PATH%\..\Unity.exe
+    goto :have_unity
 )
 
+set "HUB=C:\Program Files\Unity\Hub\Editor"
+
+REM Prefer the editor that matches the project's version (ProjectVersion.txt),
+REM otherwise a newer editor would silently upgrade the project on import.
+set PROJ_VER=
+for /f "tokens=2" %%v in ('findstr /b "m_EditorVersion:" "%~dp0samples\unity\ProjectSettings\ProjectVersion.txt"') do set PROJ_VER=%%v
+
+if exist "%HUB%\%PROJ_VER%\Editor\Unity.exe" (
+    set "UNITY_EDITOR_PATH=%HUB%\%PROJ_VER%\Editor\Data"
+    set "UNITY_EXE=%HUB%\%PROJ_VER%\Editor\Unity.exe"
+    echo Using project-matched editor %PROJ_VER%.
+    goto :have_unity
+)
+
+echo WARNING: Editor %PROJ_VER% (from ProjectVersion.txt) is not installed.
+echo          Falling back to the newest installed editor - this may upgrade the project.
+echo          Set UNITY_EDITOR_PATH to pin a specific editor.
+if exist "%HUB%" (
+    for /d %%D in ("%HUB%\*") do (
+        if exist "%%D\Editor\Unity.exe" (
+            set "UNITY_EDITOR_PATH=%%D\Editor\Data"
+            set "UNITY_EXE=%%D\Editor\Unity.exe"
+        )
+    )
+)
+
+:have_unity
 if not exist "%UNITY_EXE%" (
     echo ERROR: Could not find Unity.exe.
     echo Please set UNITY_EDITOR_PATH to your Unity Editor\Data folder.
@@ -38,7 +63,7 @@ echo [3/4] Exporting AkerMCP.unitypackage...
 echo (NOTE: If Unity is currently open with the test project, this step will fail or skip silently. Please close Unity first!)
 echo.
 
-"%UNITY_EXE%" -quit -batchmode -projectPath "%~dp0UnityTestProject" -exportPackage "Assets/AkerMcp" "%~dp0AkerMCP.unitypackage" -logFile -
+"%UNITY_EXE%" -quit -batchmode -projectPath "%~dp0samples\unity" -exportPackage "Assets/AkerMcp" "%~dp0AkerMCP.unitypackage" -logFile -
 if errorlevel 1 goto :error
 
 if not exist "%~dp0AkerMCP.unitypackage" (

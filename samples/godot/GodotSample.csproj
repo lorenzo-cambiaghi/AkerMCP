@@ -1,0 +1,29 @@
+<Project Sdk="Godot.NET.Sdk/4.4.1">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <!-- Required for Godot 4.2+ editor plugins so the assembly can be reloaded. -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <!--
+    This is only a MINIMAL SAMPLE harness so the AkerMcp Godot addon can be opened
+    in the editor and compiled. The addon source is canonical at
+    plugins/godot/aker_mcp and is surfaced here as samples/godot/addons/aker_mcp
+    via a junction/symlink created by setup-samples.bat / setup-samples.sh.
+
+    The AkerMcp core is consumed straight from source — a Godot project is a real
+    .csproj, so ProjectReference + NuGet "just work" (no DLL copying like Unity).
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\Shared\AkerMcp.Shared.csproj" />
+    <ProjectReference Include="..\..\Client\AkerMcp.Client.csproj" />
+  </ItemGroup>
+
+  <!-- Roslyn scripting engine that powers the `execute` tool. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="4.8.0" />
+  </ItemGroup>
+</Project>

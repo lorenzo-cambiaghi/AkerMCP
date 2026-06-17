@@ -21,19 +21,6 @@ project.lock.json
 .DS_Store
 Thumbs.db
 
-# Unity - Library, Temp, Build
-UnityTestProject/Library/
-UnityTestProject/Temp/
-UnityTestProject/Logs/
-UnityTestProject/UserSettings/
-UnityTestProject/Builds/
-UnityTestProject/MemoryCaptures/
-UnityTestProject/Recordings/
-UnityTestProject/obj/
-
-# Unity - Plugin DLLs (built from source, not vendored)
-UnityTestProject/Assets/AkerMcp/Plugins/*.dll
-
 # Crash reports
 sysinfo.txt
 crashlytics-build.properties
@@ -51,6 +38,33 @@ crashlytics-build.properties
 # Temporary files
 *.txt
 !README.txt
+# Unity records its editor version here — keep it tracked despite the *.txt rule.
+!samples/unity/ProjectSettings/ProjectVersion.txt
 
-# Unity - Plugin DLL meta files
-UnityTestProject/Assets/AkerMcp/Plugins/*.dll.meta
+# Sample harness junctions — the canonical plugin source lives under plugins/.
+# These are recreated by setup-samples.bat / setup-samples.sh and must never be committed.
+samples/unity/Assets/AkerMcp/
+samples/godot/addons/aker_mcp/
+
+# Godot - generated cache and build output (samples)
+samples/godot/.godot/
+samples/godot/.mono/
+samples/godot/*.csproj.user
+samples/godot/*.sln
+
+# Godot plugin DLLs (if ever built into the canonical plugin folder)
+plugins/godot/aker_mcp/.godot/
+
+# Unity sample - Library, Temp, build caches
+samples/unity/Library/
+samples/unity/Temp/
+samples/unity/Logs/
+samples/unity/UserSettings/
+samples/unity/Builds/
+samples/unity/MemoryCaptures/
+samples/unity/Recordings/
+samples/unity/obj/
+
+# Unity plugin DLLs (built from source, not vendored)
+plugins/unity/AkerMcp/Plugins/*.dll
+plugins/unity/AkerMcp/Plugins/*.dll.meta

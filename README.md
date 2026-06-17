@@ -165,6 +165,22 @@ You do not need to install the .NET SDK or compile any code.
 
    ![AkerMcp Editor Window](docs/images/AkerMcpView.png)
 
+### 1b. Godot Setup (alternative to Unity)
+
+AkerMCP ships a **Godot 4.x (.NET/C#) adapter** with the same 14 tools. Because a Godot project is a real `.csproj`, there are no DLLs to copy — references and the Roslyn engine come via NuGet/ProjectReference.
+
+1. Copy the `plugins/godot/aker_mcp` folder into your Godot project's `addons/` folder.
+2. Add the AkerMcp core to your game's `.csproj` (or use the included `samples/godot` project directly — run `setup-samples` first to link the addon):
+   ```xml
+   <ProjectReference Include="path/to/AkerMcp.Shared.csproj" />
+   <ProjectReference Include="path/to/AkerMcp.Client.csproj" />
+   <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="4.8.0" />
+   ```
+   Make sure your project has `<EnableDynamicLoading>true</EnableDynamicLoading>` (required for editor plugins).
+3. Build the C# solution once (**Project → Tools → C#: Create/Build**), then enable the plugin under **Project → Project Settings → Plugins → AkerMcp**.
+
+The plugin auto-starts with the editor and pumps requests on the main thread every frame. Scene paths follow the edited scene root (e.g. `/TestScene/Box`), property paths are case-insensitive (`position.x` resolves to `Position.X`), and screenshots capture the editor's 3D viewport. The standalone MCP server discovers the Godot plugin automatically — no server changes needed.
+
 ### 2. MCP Server Setup
 1. Go to the [latest GitHub Release](https://github.com/lorenzo-cambiaghi/AkerMCP/releases/latest).
 2. Download the standalone server for your OS (`AkerMcp.Server-win-x64.zip`, `-osx-x64.zip`, or `-linux-x64.zip`).
@@ -281,11 +297,11 @@ dotnet publish Shared/AkerMcp.Shared.csproj -c Release -o .publish
 
 ### Step 2 — Unity Plugin Setup
 If you are modifying the source code and want to push changes to your own Unity project:
-1. Copy the `UnityTestProject/Assets/AkerMcp` folder into your own Unity project's `Assets/` folder.
+1. Copy the `plugins/unity/AkerMcp` folder into your own Unity project's `Assets/` folder.
 2. Create `Assets/AkerMcp/Plugins/` and copy all `.dll` files from `.publish/` and `Client/bin/Release/netstandard2.1/`.
 3. Copy the Unity Roslyn Compilers (`Microsoft.CodeAnalysis.dll`, etc.) from your Unity Editor installation (`.../Editor/Data/MonoBleedingEdge/lib/mono/4.5/`) into the `Plugins/` folder.
 
-If you just want to run the included **UnityTestProject**, run `./copy-dlls.sh` (or `copy-dlls.bat` on Windows) to automatically build and copy all dependencies.
+If you just want to run the included sample, run `./setup-samples.sh` (or `setup-samples.bat` on Windows) once to link the plugin into `samples/unity`, then `./copy-dlls.sh` (or `copy-dlls.bat`) to build and copy all dependencies. Open `samples/unity` in Unity.
 
 ### Packaging a Release
 On Windows, `.\publish-release.ps1 -Version v1.2.3` does the whole release in one command: builds the packages (Unity must be closed), tags the commit, creates the [GitHub Release](https://github.com/lorenzo-cambiaghi/AkerMCP/releases) and uploads the four artifacts via the GitHub API (auth via `GITHUB_TOKEN` or the stored git credential). Use `-DryRun` to preview, `-SkipBuild` to reuse existing `Build/` output.
@@ -634,20 +650,38 @@ AkerMCP/
 │   ├── PluginDiscovery.cs              Lock-file based auto-discovery
 │   ├── MainThreadDispatcherBase.cs     Thread-safe queue with TCS pattern
 │   └── ClientConfiguration.cs          Client-side settings
-└── UnityTestProject/                    Unity 6 test project
-    └── Assets/AkerMcp/                  Unity adapter implementation
-        ├── UnitySceneGraph.cs           Scene traversal and node creation
-        ├── UnitySceneNode.cs            Reflection wrapper for GameObjects
-        ├── UnityTypeRegistration.cs     MessagePack types and aliases
-        └── Editor/                      Editor-only tooling
-            ├── DynamicEvaluator.cs      Roslyn-powered C# execution engine
-            ├── McpEditorWindow.cs       Unity Editor UI for MCP server
-            ├── UnityCompilationSupport.cs Script compilation tools
-            ├── UnityEditorContext.cs    Active selection and console logs
-            ├── UnityMainThreadDispatcher.cs Unity main thread marshalling
-            ├── UnityScreenCapture.cs    Game/Scene view render-buffer capture
-            └── UnityMcpPlugin.cs        Plugin entry point
+├── plugins/                            Canonical engine adapters (the shippable plugins)
+│   ├── unity/AkerMcp/                  Unity adapter
+│   │   ├── UnitySceneGraph.cs           Scene traversal and node creation
+│   │   ├── UnitySceneNode.cs            Reflection wrapper for GameObjects
+│   │   ├── UnityTypeRegistration.cs     MessagePack types and aliases
+│   │   └── Editor/                      Editor-only tooling
+│   │       ├── DynamicEvaluatorV2.cs    Roslyn-powered C# execution engine
+│   │       ├── McpEditorWindow.cs       Unity Editor UI for MCP server
+│   │       ├── UnityCompilationSupport.cs Script compilation tools
+│   │       ├── UnityEditorContext.cs    Active selection and console logs
+│   │       ├── UnityMainThreadDispatcher.cs Unity main thread marshalling
+│   │       ├── UnityScreenCapture.cs    Game/Scene view render-buffer capture
+│   │       └── UnityMcpPlugin.cs        Plugin entry point
+│   └── godot/aker_mcp/                 Godot 4.x (.NET) adapter
+│       ├── AkerMcpEditorPlugin.cs       [Tool] EditorPlugin entry + main-thread pump
+│       ├── GodotMcpPlugin.cs            EnginePluginBase subclass
+│       ├── GodotSceneGraph.cs           Edited-scene traversal and node creation
+│       ├── GodotSceneNode.cs            Reflection wrapper for Nodes (no components)
+│       ├── GodotCapabilities.cs         Type resolution and engine metadata
+│       ├── GodotTypeRegistration.cs     Vector/Color/Rect2/Aabb converters
+│       ├── GodotMainThreadDispatcher.cs Queue drained by EditorPlugin._Process
+│       ├── GodotEditorContext.cs        Selection, scene I/O, log buffer
+│       ├── GodotCompilationSupport.cs   `dotnet build` + MSBuild diagnostics
+│       ├── GodotScreenCapture.cs        Editor viewport capture
+│       └── GodotCodeExecutor.cs         Roslyn-powered C# execution engine
+├── samples/                            Minimal harness projects (open in the editor)
+│   ├── unity/                          Unity project; Assets/AkerMcp → junction to plugins/unity/AkerMcp
+│   └── godot/                          Godot project; addons/aker_mcp → junction to plugins/godot/aker_mcp
+└── setup-samples.bat / .sh             Recreates the sample junctions after a clone
 ```
+
+> The plugins under `plugins/` are the canonical, shippable source. The `samples/` projects are thin shells that link the plugin in via a directory junction (created by `setup-samples`), so there is a **single copy** of each adapter — the editor edits it in place. The junctions are gitignored; run `setup-samples` once after cloning.
 
 ---
 
@@ -987,10 +1021,10 @@ Only happens with the OS-level fallback. The engine's main window cannot be loca
 **Unity says "Opening file failed: Access is denied"**
 
 If you downloaded the repository as a ZIP or cloned it on Windows, Unity might complain about `.asset` or `.meta` files being read-only. To fix this:
-1. Right-click the `UnityTestProject` folder in Windows Explorer.
+1. Right-click the `samples\unity` folder in Windows Explorer.
 2. Go to **Properties**.
 3. Uncheck the **Read-only** box and click Apply (apply to all folders, subfolders, and files).
-Alternatively, open Command Prompt and run: `attrib -R "UnityTestProject\*.*" /S /D`
+Alternatively, open Command Prompt and run: `attrib -R "samples\unity\*.*" /S /D`
 
 ---
 

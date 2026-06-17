@@ -3,7 +3,7 @@ setlocal
 REM Run from the repo root regardless of the caller's working directory
 cd /d "%~dp0"
 
-set DEST=UnityTestProject\Assets\AkerMcp\Plugins
+set DEST=plugins\unity\AkerMcp\Plugins
 if not exist "%DEST%" mkdir "%DEST%"
 
 echo Building...

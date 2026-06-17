@@ -37,7 +37,7 @@ $dirty = git status --porcelain
 if ($dirty) { throw "Working tree is not clean - commit or stash first:`n$dirty" }
 
 if (-not $SkipBuild) {
-    if (Test-Path "$repoRoot\UnityTestProject\Temp\UnityLockfile") {
+    if (Test-Path "$repoRoot\samples\unity\Temp\UnityLockfile") {
         throw "Unity has the test project open. Close Unity first (batchmode export will fail)."
     }
 }
