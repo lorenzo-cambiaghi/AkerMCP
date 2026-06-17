@@ -28,6 +28,9 @@ crashlytics-build.properties
 # Release artifacts — distributed via GitHub Releases, never committed
 /Build/
 
+# Transient release-notes file passed to publish-release.ps1 via -Notes
+/release-notes.md
+
 # Publish output
 .publish/
 .publish_debug/
