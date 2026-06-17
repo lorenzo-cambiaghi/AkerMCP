@@ -169,7 +169,7 @@ You do not need to install the .NET SDK or compile any code.
 
 AkerMCP ships a **Godot 4.x (.NET/C#) adapter** with the same 14 tools. Because a Godot project is a real `.csproj`, there are no DLLs to copy — references and the Roslyn engine come via NuGet/ProjectReference.
 
-1. Copy the `plugins/godot/aker_mcp` folder into your Godot project's `addons/` folder.
+1. Download `AkerMcp.Godot-addon.zip` from the [latest Release](https://github.com/lorenzo-cambiaghi/AkerMCP/releases/latest) and extract it so you get `addons/aker_mcp/` in your Godot project (or copy the `plugins/godot/aker_mcp` folder from this repo into your project's `addons/`).
 2. Add the AkerMcp core to your game's `.csproj` (or use the included `samples/godot` project directly — run `setup-samples` first to link the addon):
    ```xml
    <ProjectReference Include="path/to/AkerMcp.Shared.csproj" />
@@ -304,7 +304,9 @@ If you are modifying the source code and want to push changes to your own Unity 
 If you just want to run the included sample, run `./setup-samples.sh` (or `setup-samples.bat` on Windows) once to link the plugin into `samples/unity`, then `./copy-dlls.sh` (or `copy-dlls.bat`) to build and copy all dependencies. Open `samples/unity` in Unity.
 
 ### Packaging a Release
-On Windows, `.\publish-release.ps1 -Version v1.2.3` does the whole release in one command: builds the packages (Unity must be closed), tags the commit, creates the [GitHub Release](https://github.com/lorenzo-cambiaghi/AkerMCP/releases) and uploads the four artifacts via the GitHub API (auth via `GITHUB_TOKEN` or the stored git credential). Use `-DryRun` to preview, `-SkipBuild` to reuse existing `Build/` output.
+On Windows, `.\publish-release.ps1 -Version v1.2.3` does the whole release in one command: builds the packages (Unity must be closed), tags the commit, creates the [GitHub Release](https://github.com/lorenzo-cambiaghi/AkerMCP/releases) and uploads the five artifacts via the GitHub API (auth via `GITHUB_TOKEN` or the stored git credential). Use `-DryRun` to preview, `-SkipBuild` to reuse existing `Build/` output.
+
+The five release artifacts are: `AkerMCP.unitypackage` (Unity plugin), `AkerMcp.Godot-addon.zip` (Godot addon — extract into your project's `addons/`), and the three standalone server builds (`AkerMcp.Server-{win,osx,linux}-x64.zip`).
 
 Alternatively, run `build-package.bat` (Windows) or `./build-package.sh` (Mac/Linux) to only produce the artifacts in the local `Build/` folder (gitignored), then upload them as release assets manually. Binaries are distributed via Releases, not committed to the repository.
 

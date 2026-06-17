@@ -67,6 +67,7 @@ Write-Host "Authenticated as $($who.login)"
 
 $assets = @(
     @{ Name = "AkerMCP.unitypackage";         ContentType = "application/octet-stream" },
+    @{ Name = "AkerMcp.Godot-addon.zip";      ContentType = "application/zip" },
     @{ Name = "AkerMcp.Server-win-x64.zip";   ContentType = "application/zip" },
     @{ Name = "AkerMcp.Server-osx-x64.zip";   ContentType = "application/zip" },
     @{ Name = "AkerMcp.Server-linux-x64.zip"; ContentType = "application/zip" }

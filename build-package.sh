@@ -67,6 +67,10 @@ BUILD_DIR="$(pwd)/Build"
 mkdir -p "$BUILD_DIR"
 mv "$OUTPUT_PATH" "$BUILD_DIR/"
 
+echo "  - Godot addon (aker_mcp)"
+rm -f "$BUILD_DIR/AkerMcp.Godot-addon.zip"
+(cd plugins/godot && zip -r "$BUILD_DIR/AkerMcp.Godot-addon.zip" aker_mcp > /dev/null)
+
 echo "  - Windows (win-x64)"
 dotnet publish Server/AkerMcp.Server.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o "$BUILD_DIR/Server-win-x64" --nologo > /dev/null
 (cd "$BUILD_DIR/Server-win-x64" && tar -czf "$BUILD_DIR/AkerMcp.Server-win-x64.tar.gz" .)
@@ -88,6 +92,7 @@ echo ""
 echo "SUCCESS!"
 echo "All packages have been created in the Build/ directory:"
 echo "  - Build/AkerMCP.unitypackage"
+echo "  - Build/AkerMcp.Godot-addon.zip"
 echo "  - Build/AkerMcp.Server-win-x64.tar.gz"
 echo "  - Build/AkerMcp.Server-osx-x64.tar.gz"
 echo "  - Build/AkerMcp.Server-linux-x64.tar.gz"
