@@ -40,7 +40,8 @@ namespace AkerMcp.StrideAdapter
 
         protected override IBuildManager? CreateBuildManager() => new StrideBuildManager(_session);
 
-        // take_screenshot uses the server's OS-level window fallback (no IScreenCapture).
+        // Real Scene-view capture: read back the editor preview game's back buffer.
+        protected override IScreenCapture? CreateScreenCapture() => new StrideScreenCapture();
 
         protected override void Log(string message)
             => System.Diagnostics.Debug.WriteLine($"[AkerMcp] {message}");

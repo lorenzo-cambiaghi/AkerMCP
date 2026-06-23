@@ -190,6 +190,20 @@ namespace AkerMcp.StrideAdapter
             catch (Exception ex) { Log($"FindActiveEntityEditor failed: {ex.Message}"); return null; }
         }
 
+        /// <summary>The live editor preview Game of the active scene editor, or null.</summary>
+        internal static Game? ActiveEditorGame()
+        {
+            try
+            {
+                var editor = FindActiveEntityEditor();
+                if (editor == null) return null;
+                var controller = GetMemberUpChain(editor, "Controller");
+                if (controller == null) return null;
+                return GetMemberUpChain(controller, "Game") as Game;
+            }
+            catch (Exception ex) { Log($"ActiveEditorGame failed: {ex.Message}"); return null; }
+        }
+
         private static Scene? ContentSceneOf(EntityHierarchyEditorViewModel editor)
         {
             try

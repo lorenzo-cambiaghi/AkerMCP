@@ -71,6 +71,22 @@
       <HintPath>$(StrideBin)\Stride.Engine.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="Stride.Graphics">
+      <HintPath>$(StrideBin)\Stride.Graphics.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Stride">
+      <HintPath>$(StrideBin)\Stride.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Stride.Games">
+      <HintPath>$(StrideBin)\Stride.Games.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Stride.Core.MicroThreading">
+      <HintPath>$(StrideBin)\Stride.Core.MicroThreading.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="Stride.Core.Quantum">
       <HintPath>$(StrideBin)\Stride.Core.Quantum.dll</HintPath>
       <Private>false</Private>
