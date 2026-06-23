@@ -4,25 +4,11 @@
 ![Platform](https://img.shields.io/badge/platform-Any%20C%23%20Engine-lightgrey.svg)
 ![MCP](https://img.shields.io/badge/mcp-compatible-green.svg)
 
-```text
-                                         Aker (Egyptian: ꜣkr) was an
-                                         ancient Egyptian earth god,
-                                         often depicted as two lions
-    /\__/\             /\__/\            seated back-to-back facing
-  (  -.-  )          (  -.-  )           opposite horizons. Named
-  >       <          >       <           Sef and Duau (Yesterday and
-   /      )          (      \            Today), they guarded the
-   \      /          \      /            passage of the sun through the
-    | /    \        /    \ |             underworld, opening the gates
-    | |    )|      |(    | |             for its safe transit.
-  (___)  _//        \\_  (___)
-       _\_/          \_/_                In this architecture, Aker
-                                         serves as the unyielding
-                                         bridge: one face speaking
-                                         JSON-RPC to the LLM, the
-                                         other manipulating the
-                                         engine's main thread via IPC.
-```
+<p align="center">
+  <img src="readmeData/AkerMCP.png" alt="AkerMCP — Aker, the twin lions, bridging the AI and the game engine" width="680">
+</p>
+
+> *Aker (Egyptian: ꜣkr) was an ancient Egyptian earth god, depicted as **two lions seated back-to-back** facing opposite horizons — Sef and Duau (Yesterday and Today) — guarding the sun's safe passage through the underworld. In this architecture, Aker is the bridge: one face speaking **JSON-RPC to the LLM**, the other manipulating the **engine's main thread via IPC**.*
 
 > **Give your AI Assistant (Claude, Cursor, Copilot, Antigravity) the power to directly manipulate any C# Game Engine.**
 
