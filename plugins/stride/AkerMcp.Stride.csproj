@@ -75,6 +75,16 @@
       <HintPath>$(StrideBin)\Stride.Assets.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- Roslyn for the `execute` tool. Referenced from Game Studio's own bin so we
+         bind to the exact assemblies it already loads (no version conflict). -->
+    <Reference Include="Microsoft.CodeAnalysis">
+      <HintPath>$(StrideBin)\Microsoft.CodeAnalysis.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Microsoft.CodeAnalysis.CSharp">
+      <HintPath>$(StrideBin)\Microsoft.CodeAnalysis.CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="Stride.Assets.Presentation">
       <HintPath>$(StrideBin)\Stride.Assets.Presentation.dll</HintPath>
       <Private>false</Private>

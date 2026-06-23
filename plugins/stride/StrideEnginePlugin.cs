@@ -15,6 +15,7 @@ namespace AkerMcp.StrideAdapter
     {
         private readonly SessionViewModel _session;
         private readonly Dispatcher _uiDispatcher;
+        private IMainThreadDispatcher? _dispatcher;
 
         public StrideEnginePlugin(SessionViewModel session, Dispatcher uiDispatcher)
         {
@@ -29,10 +30,13 @@ namespace AkerMcp.StrideAdapter
 
         protected override ISceneGraph CreateSceneGraph() => new StrideSceneGraph(_session);
         protected override IEngineCapabilities CreateCapabilities() => new StrideCapabilities();
-        protected override IMainThreadDispatcher CreateDispatcher() => new StrideMainThreadDispatcher(_uiDispatcher);
+        protected override IMainThreadDispatcher CreateDispatcher() => _dispatcher = new StrideMainThreadDispatcher(_uiDispatcher);
 
-        // Milestone 1 (walking skeleton): no code execution / screenshot / build yet.
-        // These optional capabilities are added once the integration is verified live.
+        // CreateDispatcher runs before this in the base ctor argument list, so _dispatcher is set.
+        protected override ICodeExecutor? CreateCodeExecutor() => new StrideCodeExecutor(_dispatcher!);
+
+        // take_screenshot uses the server's OS-level window fallback (no IScreenCapture).
+        // IBuildManager not implemented yet → build tools report NOT_SUPPORTED.
 
         protected override void Log(string message)
             => System.Diagnostics.Debug.WriteLine($"[AkerMcp] {message}");

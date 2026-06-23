@@ -15,9 +15,8 @@ namespace AkerMcp.StrideAdapter
         public string EngineVersion
             => typeof(Entity).Assembly.GetName().Version?.ToString() ?? "unknown";
 
-        // Milestone 1: read-only walking skeleton. Flipped on as those land.
         public bool SupportsHotReload => false;
-        public bool SupportsCodeExecution => false;
+        public bool SupportsCodeExecution => true;
 
         public StrideCapabilities() => RegisterBuiltinTypes();
 
