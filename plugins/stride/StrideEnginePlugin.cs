@@ -38,8 +38,9 @@ namespace AkerMcp.StrideAdapter
         // CreateDispatcher runs before this in the base ctor argument list, so _dispatcher is set.
         protected override ICodeExecutor? CreateCodeExecutor() => new StrideCodeExecutor(_dispatcher!);
 
+        protected override IBuildManager? CreateBuildManager() => new StrideBuildManager(_session);
+
         // take_screenshot uses the server's OS-level window fallback (no IScreenCapture).
-        // IBuildManager not implemented yet → build tools report NOT_SUPPORTED.
 
         protected override void Log(string message)
             => System.Diagnostics.Debug.WriteLine($"[AkerMcp] {message}");
