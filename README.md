@@ -61,7 +61,8 @@ for (int i = 0; i < 10; i++) {
 
 The **same request, same tools — in Stride Game Studio**. The AI duplicated a sphere into a ring via `execute` (through Stride's asset/Quantum layer, so they're **real, selectable, saved entities** — note `AkerSphere_*` in the Scene hierarchy on the left), then captured the editor itself. Identical workflow, different engine:
 
-![AkerMCP in Action — Stride Game Studio](readmeData/Stride.png)
+<img src="readmeData/Stride.png" alt="AkerMCP in Action — Stride Game Studio" width="1024">
+
 
 *(Curious about the internal technical details? Jump to the [Architecture](#architecture) section).*
 
