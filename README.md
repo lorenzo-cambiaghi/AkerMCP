@@ -57,7 +57,11 @@ for (int i = 0; i < 10; i++) {
     sphere.name = $"Aker_Sphere_{i}";
 }
 ```
-![AkerMCP in Action](docs/images/unity-execution-demo.png)
+![AkerMCP in Action — Unity](docs/images/unity-execution-demo.png)
+
+The **same request, same tools — in Stride Game Studio**. The AI instanced a ring of spheres via `execute` and the screenshot was pulled straight from the editor's Scene view (gizmos and all). Identical workflow, different engine:
+
+![AkerMCP in Action — Stride](docs/images/stride-execution-demo.jpg)
 
 *(Curious about the internal technical details? Jump to the [Architecture](#architecture) section).*
 
