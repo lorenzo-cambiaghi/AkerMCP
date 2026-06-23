@@ -2,69 +2,138 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Reflection;
+using Stride.Assets.Entities;
 using Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.Game;
 using Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.ViewModels;
 using Stride.Core.Assets.Editor.Services;
 using Stride.Core.Assets.Editor.ViewModel;
+using Stride.Core.Presentation.Services;
+using Stride.Core.Quantum;
 using Stride.Engine;
 
 namespace AkerMcp.StrideAdapter
 {
     /// <summary>
-    /// Bridges <see cref="StrideSceneGraph"/> to the live entities of the scene
-    /// currently open in Game Studio (Milestone 2, read-only).
+    /// Bridges <see cref="StrideSceneGraph"/>/<see cref="StrideSceneNode"/> to Game
+    /// Studio's open scene. Reads use the live (game-side) entities of the editor's
+    /// ContentScene; writes go through the ASSET-side model + Quantum so they are
+    /// undoable and persisted (game-side & asset-side share the entity Id).
     ///
-    /// The path from the session to the runtime entities crosses non-public editor
-    /// internals, so it is walked by reflection:
+    /// The route to the editor crosses non-public internals (walked by reflection):
     ///   session.ServiceProvider → IAssetEditorsManager.EditorViewModels (internal)
     ///   → EntityHierarchyEditorViewModel.Controller (protected internal)
-    ///   → controller.Game (EntityHierarchyEditorGame)
-    ///   → game.ContentScene.Entities (public)
-    /// Everything is defensive: any failure yields an empty hierarchy and a line in
-    /// %TEMP%/akermcp-stride.log for diagnosis. MUST run on the WPF/editor thread
-    /// (ISceneGraph calls are already marshalled there by the IPC handlers).
+    ///   → controller.Game → EntityHierarchyEditorGame.ContentScene (public).
+    /// All scene access runs on the WPF/editor thread (marshalled by the IPC handlers).
     /// </summary>
     public static class StrideSceneBridge
     {
-        public static IEnumerable<Entity> GetRootEntities(SessionViewModel session)
+        /// <summary>Set by <see cref="StrideEnginePlugin"/> when a session opens.</summary>
+        public static SessionViewModel? Session;
+
+        // --- reads ---------------------------------------------------------------
+
+        public static IEnumerable<Entity> GetRootEntities()
+        {
+            var editor = FindActiveEntityEditor();
+            if (editor == null) { Log("no active EntityHierarchyEditor"); yield break; }
+
+            var scene = ContentSceneOf(editor);
+            if (scene == null) yield break;
+
+            // The edited scene is a CHILD scene of ContentScene, anchored by a
+            // "Virtual anchor of scene <guid>" marker entity (skipped).
+            foreach (var entity in CollectRoots(scene))
+                yield return entity;
+        }
+
+        // --- writes (Quantum, undoable) -----------------------------------------
+
+        public static void SetEntityProperty(Guid entityId, string propertyPath, object? value)
+        {
+            var session = Session ?? throw new InvalidOperationException("No active Stride session.");
+            var editor = FindActiveEntityEditor() ?? throw new InvalidOperationException("No scene editor is open.");
+
+            if (editor.Asset.Asset is not EntityHierarchyAssetBase asset)
+                throw new InvalidOperationException("The active editor is not a scene/prefab asset.");
+            if (!asset.Hierarchy.Parts.TryGetValue(entityId, out var design))
+                throw new InvalidOperationException($"Entity {entityId} not found in the edited asset.");
+
+            var assetEntity = design.Entity;
+            var (componentSelector, member) = SplitPath(propertyPath);
+            if (member.Contains('.'))
+                throw new NotSupportedException(
+                    $"Nested member '{propertyPath}' is not supported yet — set the whole component member (e.g. 'Transform.Position').");
+
+            var target = ResolveComponent(assetEntity, componentSelector)
+                ?? throw new InvalidOperationException($"Component '{componentSelector}' not found on entity '{assetEntity.Name}'.");
+
+            var node = session.AssetNodeContainer.GetOrCreateNode(target) as IObjectNode
+                ?? throw new InvalidOperationException("Could not resolve a Quantum node for the target component.");
+            var memberNode = node.TryGetChild(member)
+                ?? throw new InvalidOperationException($"Member '{member}' not found on {target.GetType().Name}.");
+
+            var coerced = Coerce(value, memberNode.Type);
+
+            var undo = session.ServiceProvider.Get<IUndoRedoService>();
+            using (var tx = undo.CreateTransaction())
+            {
+                memberNode.Update(coerced);
+                undo.SetName(tx, $"Set {propertyPath} on {assetEntity.Name}");
+            }
+        }
+
+        // --- editor navigation ---------------------------------------------------
+
+        private static EntityHierarchyEditorViewModel? FindActiveEntityEditor()
         {
             try
             {
-                var manager = session.ServiceProvider.Get<IAssetEditorsManager>();
-                if (manager == null) { Log("no IAssetEditorsManager"); yield break; }
+                var manager = Session?.ServiceProvider.Get<IAssetEditorsManager>();
+                if (manager == null) { Log("no IAssetEditorsManager"); return null; }
 
                 var editorsProp = manager.GetType().GetProperty("EditorViewModels",
                     BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance);
                 if (editorsProp?.GetValue(manager) is not IEnumerable editors)
                 {
                     Log("EditorViewModels not found/enumerable");
-                    yield break;
+                    return null;
                 }
 
                 foreach (var editor in editors)
+                    if (editor is EntityHierarchyEditorViewModel ehevm)
+                        return ehevm;
+
+                return null;
+            }
+            catch (Exception ex) { Log($"FindActiveEntityEditor failed: {ex.Message}"); return null; }
+        }
+
+        private static Scene? ContentSceneOf(EntityHierarchyEditorViewModel editor)
+        {
+            try
+            {
+                var controller = GetMemberUpChain(editor, "Controller");
+                if (controller == null) { Log("Controller null"); return null; }
+
+                var game = GetMemberUpChain(controller, "Game");
+                if (game is not EntityHierarchyEditorGame ehGame)
                 {
-                    if (editor is not EntityHierarchyEditorViewModel ehevm) continue;
-
-                    var scene = ContentSceneOf(ehevm);
-                    if (scene == null) continue;
-
-                    // The editor loads the edited scene as a CHILD scene of ContentScene,
-                    // anchored by a "Virtual anchor of scene <guid>" marker entity. Walk the
-                    // whole scene tree and skip those editor-only anchors so we surface the
-                    // user's actual entities.
-                    foreach (var entity in CollectRoots(scene))
-                        yield return entity;
-
-                    // First scene editor with a live ContentScene wins.
-                    yield break;
+                    Log($"Game not EntityHierarchyEditorGame ({game?.GetType().Name ?? "null"})");
+                    return null;
                 }
 
-                Log("no EntityHierarchyEditor with a ContentScene found");
+                var cs = ehGame.ContentScene; // public; null until the scene finishes loading
+                if (cs != null)
+                    Log($"ContentScene: {cs.Entities.Count} entities, {cs.Children.Count} child scenes");
+                return cs;
             }
-            finally { }
+            catch (Exception ex) { Log($"ContentSceneOf failed: {ex.Message}"); return null; }
         }
+
+        // --- helpers -------------------------------------------------------------
 
         private static IEnumerable<Entity> CollectRoots(Scene scene)
         {
@@ -79,27 +148,43 @@ namespace AkerMcp.StrideAdapter
                     yield return e;
         }
 
-        private static Scene? ContentSceneOf(EntityHierarchyEditorViewModel editor)
+        private static (string component, string member) SplitPath(string path)
         {
+            int i = path.IndexOf('.');
+            // No component prefix → treat as a Transform member (e.g. "Position").
+            return i < 0 ? ("Transform", path) : (path.Substring(0, i), path.Substring(i + 1));
+        }
+
+        private static object? ResolveComponent(Entity entity, string selector)
+        {
+            if (selector is "Transform" or "TransformComponent")
+                return entity.Transform;
+
+            foreach (var c in entity.Components)
+            {
+                var n = c.GetType().Name;
+                if (n == selector || n == selector + "Component")
+                    return c;
+            }
+            return null;
+        }
+
+        private static object? Coerce(object? value, Type targetType)
+        {
+            if (value == null) return null;
+            if (targetType.IsInstanceOfType(value)) return value;
+
+            var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
             try
             {
-                // Controller is `protected internal virtual` on GameEditorViewModel
-                // (a base of the entity-hierarchy editor view model).
-                var controller = GetMemberUpChain(editor, "Controller");
-                if (controller == null) { Log("Controller null"); return null; }
-
-                var game = GetMemberUpChain(controller, "Game");
-                if (game is not EntityHierarchyEditorGame ehGame) { Log($"Game not EntityHierarchyEditorGame ({game?.GetType().Name ?? "null"})"); return null; }
-
-                var cs = ehGame.ContentScene; // public; null until the scene finishes loading
-                if (cs != null)
-                    Log($"ContentScene: {cs.Entities.Count} entities, {cs.Children.Count} child scenes");
-                return cs;
+                if (underlying.IsEnum)
+                    return Enum.Parse(underlying, value.ToString() ?? "", ignoreCase: true);
+                return Convert.ChangeType(value, underlying, CultureInfo.InvariantCulture);
             }
-            catch (Exception ex)
+            catch
             {
-                Log($"ContentSceneOf failed: {ex.Message}");
-                return null;
+                // Leave as-is and let Quantum's Update surface a precise type error.
+                return value;
             }
         }
 

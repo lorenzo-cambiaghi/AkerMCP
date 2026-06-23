@@ -21,9 +21,10 @@ namespace AkerMcp.StrideAdapter
             _session = session;
             _uiDispatcher = uiDispatcher;
 
-            // Wire the read-only scene graph to the live editor scene. The provider
-            // is invoked on the editor thread (ISceneGraph calls are marshalled there).
-            StrideSceneGraph.RootEntitiesProvider = () => StrideSceneBridge.GetRootEntities(_session);
+            // Wire the scene bridge to this session. ISceneGraph calls (reads and
+            // Quantum writes) are marshalled onto the editor thread by the IPC handlers.
+            StrideSceneBridge.Session = _session;
+            StrideSceneGraph.RootEntitiesProvider = StrideSceneBridge.GetRootEntities;
         }
 
         protected override ISceneGraph CreateSceneGraph() => new StrideSceneGraph(_session);

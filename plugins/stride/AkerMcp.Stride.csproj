@@ -43,6 +43,14 @@
       <HintPath>$(StrideBin)\Stride.Core.Mathematics.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="Stride.Core.Design">
+      <HintPath>$(StrideBin)\Stride.Core.Design.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Stride.Core.Assets.Quantum">
+      <HintPath>$(StrideBin)\Stride.Core.Assets.Quantum.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="Stride.Core.Assets">
       <HintPath>$(StrideBin)\Stride.Core.Assets.dll</HintPath>
       <Private>false</Private>
@@ -57,6 +65,14 @@
     </Reference>
     <Reference Include="Stride.Engine">
       <HintPath>$(StrideBin)\Stride.Engine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Stride.Core.Quantum">
+      <HintPath>$(StrideBin)\Stride.Core.Quantum.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Stride.Assets">
+      <HintPath>$(StrideBin)\Stride.Assets.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Stride.Assets.Presentation">

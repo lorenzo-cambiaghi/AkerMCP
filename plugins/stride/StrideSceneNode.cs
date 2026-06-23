@@ -68,7 +68,7 @@ namespace AkerMcp.StrideAdapter
         }
 
         public void SetProperty(string propertyPath, object? value)
-            => throw new NotSupportedException("Setting properties is not available yet in the Stride adapter (read-only milestone).");
+            => StrideSceneBridge.SetEntityProperty(_entity.Id, propertyPath, value);
 
         public object? CallMethod(string methodName, object?[]? args)
             => throw new NotSupportedException("Calling methods is not available yet in the Stride adapter (read-only milestone).");
