@@ -80,6 +80,10 @@ echo   - Godot addon (aker_mcp)
 tar -a -c -f "%~dp0Build\AkerMcp.Godot-addon.zip" -C "%~dp0plugins\godot" aker_mcp
 if errorlevel 1 goto :error
 
+echo   - Stride adapter source (build against your Game Studio; see README "1c. Stride Setup")
+tar -a -c -f "%~dp0Build\AkerMcp.Stride-source.zip" --exclude=*/bin/* --exclude=*/obj/* -C "%~dp0plugins" stride
+if errorlevel 1 goto :error
+
 echo   - Windows (win-x64)
 dotnet publish Server\AkerMcp.Server.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o "%~dp0Build\Server-win-x64" --nologo >nul
 tar -a -c -f "%~dp0Build\AkerMcp.Server-win-x64.zip" -C "%~dp0Build\Server-win-x64" .
@@ -102,6 +106,7 @@ echo SUCCESS!
 echo All packages have been created in the Build/ directory:
 echo   - Build/AkerMCP.unitypackage
 echo   - Build/AkerMcp.Godot-addon.zip
+echo   - Build/AkerMcp.Stride-source.zip
 echo   - Build/AkerMcp.Server-win-x64.zip
 echo   - Build/AkerMcp.Server-osx-x64.zip
 echo   - Build/AkerMcp.Server-linux-x64.zip

@@ -68,6 +68,7 @@ Write-Host "Authenticated as $($who.login)"
 $assets = @(
     @{ Name = "AkerMCP.unitypackage";         ContentType = "application/octet-stream" },
     @{ Name = "AkerMcp.Godot-addon.zip";      ContentType = "application/zip" },
+    @{ Name = "AkerMcp.Stride-source.zip";    ContentType = "application/zip" },
     @{ Name = "AkerMcp.Server-win-x64.zip";   ContentType = "application/zip" },
     @{ Name = "AkerMcp.Server-osx-x64.zip";   ContentType = "application/zip" },
     @{ Name = "AkerMcp.Server-linux-x64.zip"; ContentType = "application/zip" }
@@ -83,7 +84,7 @@ foreach ($a in $assets) {
     $path = Join-Path "$repoRoot\Build" $a.Name
     if (-not (Test-Path $path)) { throw "Missing artifact: $path (run without -SkipBuild?)" }
 }
-Write-Host "All 4 artifacts present in Build/"
+Write-Host "All $($assets.Count) artifacts present in Build/"
 
 # --- Release notes -----------------------------------------------------------
 

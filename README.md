@@ -354,7 +354,7 @@ If you just want to run the included sample, run `./setup-samples.sh` (or `setup
 ### Packaging a Release
 On Windows, `.\publish-release.ps1 -Version v1.2.3` does the whole release in one command: builds the packages (Unity must be closed), tags the commit, creates the [GitHub Release](https://github.com/lorenzo-cambiaghi/AkerMCP/releases) and uploads the five artifacts via the GitHub API (auth via `GITHUB_TOKEN` or the stored git credential). Use `-DryRun` to preview, `-SkipBuild` to reuse existing `Build/` output.
 
-The five release artifacts are: `AkerMCP.unitypackage` (Unity plugin), `AkerMcp.Godot-addon.zip` (Godot addon — extract into your project's `addons/`), and the three standalone server builds (`AkerMcp.Server-{win,osx,linux}-x64.zip`).
+The six release artifacts are: `AkerMCP.unitypackage` (Unity plugin), `AkerMcp.Godot-addon.zip` (Godot addon — extract into your project's `addons/`), `AkerMcp.Stride-source.zip` (Stride adapter **source** — build it against your Game Studio per [1c. Stride Setup](#1c-stride-setup); it is not a prebuilt binary because it links your specific Stride editor assemblies), and the three standalone server builds (`AkerMcp.Server-{win,osx,linux}-x64.zip`).
 
 Alternatively, run `build-package.bat` (Windows) or `./build-package.sh` (Mac/Linux) to only produce the artifacts in the local `Build/` folder (gitignored), then upload them as release assets manually. Binaries are distributed via Releases, not committed to the repository.
 
@@ -408,19 +408,37 @@ If you see this, everything is working.
 | `refresh_scripts` | Force script recompilation and return errors/warnings immediately |
 | `get_compile_errors` | Retrieve compilation errors with file path, line, and column |
 | `get_console_logs` | Read engine console entries with level and text filtering |
-| `execute` | Run arbitrary C# code in the engine context (Roslyn) |
+| `execute` | Run arbitrary C# code in the engine context (Roslyn) — no fixed API surface |
+
+### Platform & Build
+
+Engine-neutral build pipeline control (backed by the optional `IBuildManager`; implemented for Unity, Godot and Stride).
+
+| Tool | Description |
+|------|-------------|
+| `list_platforms` | List build platforms the engine knows about, flagged active/buildable |
+| `get_platform_settings` | Read a platform's build/player settings as a key-value map |
+| `set_platform_settings` | Change platform settings (e.g. app id, min SDK, scripting backend) |
+| `switch_build_target` | Make a platform the active build target (handles recompile/reload) |
+| `build_player` | Build the project for a platform (APK/AAB/exe/app bundle) and return a build report |
+
+> Engine differences are handled gracefully: e.g. Godot and Stride have no global active target, so `switch_build_target` reports that and you pass the platform directly to `build_player`.
 
 ### Visual Verification
 
 | Tool | Description |
 |------|-------------|
-| `take_screenshot` | Capture the editor's Game or Scene view and return a JPEG image to the AI |
+| `take_screenshot` | Capture the editor's Scene/Game view (with gizmos) and return a JPEG to the AI |
+| `list_windows` | List visible top-level OS windows (title, process, pid) on the server machine |
+| `capture_window` | Screenshot **any** window matched by a title substring — even occluded, no focus steal |
+
+`list_windows` / `capture_window` are OS-level and engine-independent: they work with no engine connected and can capture external apps (browsers, dashboards, other editors) — useful for debugging and cross-app workflows.
 
 #### How `take_screenshot` works
 
 The tool follows a **hybrid capture strategy** that prefers quality but always succeeds:
 
-1. **Engine-internal path** *(if the adapter implements `IScreenCapture`)* — captures directly from the render buffer. Works even when the editor window is occluded or partially off-screen. Highest quality.
+1. **Engine-internal path** *(implemented by all three adapters)* — captures the Scene view directly from the editor's render buffer **including gizmos** (Unity `GrabPixels`, Godot viewport, Stride editor back-buffer via `Texture.Save`). Works even when the editor window is occluded or partially off-screen. Highest quality.
 2. **OS-level fallback** *(automatic, cross-platform on Windows + macOS)* — captures the engine's main window without stealing foreground focus. Works for any C# engine without requiring adapter code. Per-OS implementation is selected at runtime:
    - **Windows** — Win32 `PrintWindow(PW_RENDERFULLCONTENT)` via `user32.dll`
    - **macOS** — Quartz `CGWindowListCreateImage` via `CoreGraphics.framework` + `ImageIO.framework`. Window discovery: enumerates on-screen windows owned by the engine PID; among those, prefers any whose title contains the engine name (anywhere — matches both "Unity 6000…" and "… Godot Engine") and within that subset picks the largest by area. If no title contains the engine name, falls back to the largest PID-owned window
@@ -436,7 +454,7 @@ Typical output size: **~150-400 KB**, comfortably under Claude API image limits 
 
 ```json
 { "view": "game" }   // default — captures the Game View
-{ "view": "scene" }  // captures the active Scene View (Unity)
+{ "view": "scene" }  // captures the active Scene View with gizmos (Unity / Godot / Stride)
 ```
 
 **Example:**
@@ -451,7 +469,7 @@ Typical output size: **~150-400 KB**, comfortably under Claude API image limits 
 
 #### macOS: Screen Recording permission
 
-On macOS 10.15+, capturing windows from another process requires **Screen Recording permission** for the binary running the AkerMcp server. This affects only the OS-level fallback path — adapters implementing `IScreenCapture` (like the Unity adapter) work without any permission grant.
+On macOS 10.15+, capturing windows from another process requires **Screen Recording permission** for the binary running the AkerMcp server. This affects only the OS-level path (`capture_window` and the `take_screenshot` fallback) — the engine-internal `IScreenCapture` path (implemented by all three engine adapters) works without any permission grant.
 
 **First-time setup:**
 
@@ -715,7 +733,7 @@ AkerMCP/
 │   │       ├── UnityMainThreadDispatcher.cs Unity main thread marshalling
 │   │       ├── UnityScreenCapture.cs    Game/Scene view render-buffer capture
 │   │       └── UnityMcpPlugin.cs        Plugin entry point
-│   └── godot/aker_mcp/                 Godot 4.x (.NET) adapter
+│   ├── godot/aker_mcp/                 Godot 4.x (.NET) adapter
 │       ├── AkerMcpEditorPlugin.cs       [Tool] EditorPlugin entry + main-thread pump
 │       ├── GodotMcpPlugin.cs            EnginePluginBase subclass
 │       ├── GodotSceneGraph.cs           Edited-scene traversal and node creation
@@ -727,7 +745,7 @@ AkerMCP/
 │       ├── GodotCompilationSupport.cs   `dotnet build` + MSBuild diagnostics
 │       ├── GodotScreenCapture.cs        Editor viewport capture
 │       └── GodotCodeExecutor.cs         Roslyn-powered C# execution engine
-│   └── stride/aker_mcp/                Stride (Game Studio) adapter
+│   └── stride/                         Stride (Game Studio) adapter (.csproj + sources)
 │       ├── StrideMcpPlugin.cs           AssetsPlugin entry (Game Studio hook)
 │       ├── StrideEnginePlugin.cs        EnginePluginBase (composed; hosts the IPC server)
 │       ├── StrideSceneGraph.cs          Live edited-scene traversal
@@ -848,6 +866,9 @@ You have access to a C# game engine — **Unity, Godot, or Stride** (all equally
 | `get_console_logs` | You need to read runtime errors, warnings, or debug output |
 | `execute` | You need to run arbitrary C# code (procedural generation, bulk ops, complex logic) |
 | `take_screenshot` | You need to **see** the result of a change (placement, materials, lighting, UI) |
+| `list_platforms` / `get_platform_settings` / `set_platform_settings` | You need to inspect or change build/player settings for a platform |
+| `switch_build_target` / `build_player` | You need to switch the active platform or produce a build (APK/exe/…) |
+| `list_windows` / `capture_window` | You need to screenshot any OS window (incl. external apps), not just the engine |
 
 #### Core Workflow: Inspect → Modify → Verify
 
