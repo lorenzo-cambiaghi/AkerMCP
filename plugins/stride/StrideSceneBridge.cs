@@ -60,27 +60,51 @@ namespace AkerMcp.StrideAdapter
                 throw new InvalidOperationException($"Entity {entityId} not found in the edited asset.");
 
             var assetEntity = design.Entity;
-            var (componentSelector, member) = SplitPath(propertyPath);
-            if (member.Contains('.'))
-                throw new NotSupportedException(
-                    $"Nested member '{propertyPath}' is not supported yet — set the whole component member (e.g. 'Transform.Position').");
+            var (componentSelector, memberPath) = SplitPath(propertyPath);
 
             var target = ResolveComponent(assetEntity, componentSelector)
                 ?? throw new InvalidOperationException($"Component '{componentSelector}' not found on entity '{assetEntity.Name}'.");
 
             var node = session.AssetNodeContainer.GetOrCreateNode(target) as IObjectNode
                 ?? throw new InvalidOperationException("Could not resolve a Quantum node for the target component.");
-            var memberNode = node.TryGetChild(member)
-                ?? throw new InvalidOperationException($"Member '{member}' not found on {target.GetType().Name}.");
 
-            var coerced = Coerce(value, memberNode.Type);
+            // memberPath is "Position" or one level of struct nesting like "Position.X".
+            var segments = memberPath.Split('.');
+            if (segments.Length > 2)
+                throw new NotSupportedException(
+                    $"Only one level of struct nesting is supported (e.g. 'Transform.Position.X'); '{propertyPath}' is deeper.");
+
+            var memberNode = node.TryGetChild(segments[0])
+                ?? throw new InvalidOperationException($"Member '{segments[0]}' not found on {target.GetType().Name}.");
 
             var undo = session.ServiceProvider.Get<IUndoRedoService>();
             using (var tx = undo.CreateTransaction())
             {
-                memberNode.Update(coerced);
+                if (segments.Length == 1)
+                {
+                    memberNode.Update(Coerce(value, memberNode.Type));
+                }
+                else
+                {
+                    // Sub-field of a value-type member (e.g. Vector3.X): read the whole
+                    // struct, mutate the boxed copy by reflection, then write it back.
+                    var boxed = memberNode.Retrieve()
+                        ?? throw new InvalidOperationException($"Cannot read current value of '{segments[0]}'.");
+                    SetStructField(boxed, segments[1], value);
+                    memberNode.Update(boxed);
+                }
                 undo.SetName(tx, $"Set {propertyPath} on {assetEntity.Name}");
             }
+        }
+
+        private static void SetStructField(object boxedStruct, string fieldName, object? value)
+        {
+            var t = boxedStruct.GetType();
+            var f = t.GetField(fieldName, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            if (f != null) { f.SetValue(boxedStruct, Coerce(value, f.FieldType)); return; }
+            var p = t.GetProperty(fieldName, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            if (p != null && p.CanWrite) { p.SetValue(boxedStruct, Coerce(value, p.PropertyType)); return; }
+            throw new InvalidOperationException($"Sub-field '{fieldName}' not found on {t.Name}.");
         }
 
         public static Entity CreateEntity(string name, Guid? parentId)
