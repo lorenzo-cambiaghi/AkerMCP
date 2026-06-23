@@ -283,6 +283,7 @@ Available globals (no initialization needed):
 - `void Log(object message)`: Log to the engine console.
 
 Pre-imported namespaces: System, System.Collections.Generic, System.Linq, UnityEngine, UnityEditor.
+Need another namespace? Just put `using ...;` directives at the TOP of your snippet — they are hoisted to file scope automatically (e.g. `using System.IO;`, `using static UnityEngine.Mathf;`).
 
 Important rules:
 1. Each script execution is independent — variables do not persist between calls. Write self-contained scripts.

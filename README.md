@@ -449,6 +449,8 @@ The `execute` tool runs arbitrary C# code inside the Unity Editor using Roslyn (
 
 **Imported namespaces** (no `using` needed): `System`, `System.Collections.Generic`, `System.Linq`, `UnityEngine`, `UnityEditor`
 
+Need another namespace? Add `using ...;` directives at the **top** of the snippet — they are hoisted to file scope automatically (e.g. `using System.IO;`, `using static UnityEngine.Mathf;`).
+
 **Examples:**
 
 ```csharp
@@ -852,7 +854,7 @@ Create("MyObject")          // Create empty GameObject
 Log("message")              // Debug.Log shortcut
 ```
 
-**Pre-imported namespaces**: `System`, `System.Collections.Generic`, `System.Linq`, `UnityEngine`, `UnityEditor`
+**Pre-imported namespaces**: `System`, `System.Collections.Generic`, `System.Linq`, `UnityEngine`, `UnityEditor`. For anything else, put `using ...;` directives at the top of the snippet — they are hoisted to file scope automatically.
 
 **State does NOT persist between calls.** Each script is compiled and run independently — write self-contained scripts:
 
