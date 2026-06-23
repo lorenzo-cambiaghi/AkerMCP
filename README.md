@@ -26,7 +26,30 @@
 
 > **Give your AI Assistant (Claude, Cursor, Copilot, Antigravity) the power to directly manipulate any C# Game Engine.**
 
-Traditionally, AI coding assistants can only suggest code for you to copy-paste. With **AkerMCP**, you grant your AI the ability to actually *see* and *touch* your game project in real-time. **AkerMCP is 100% C# engine-agnostic**—it works seamlessly with Unity, Godot, Stride, Flax Engine, or any custom C# engine simply by dropping in a lightweight adapter.
+Traditionally, AI coding assistants can only suggest code for you to copy-paste. With **AkerMCP**, you grant your AI the ability to actually *see* and *touch* your game project in real-time.
+
+> ### 🦁🦁 The only MCP that drives **Unity, Godot _and_ Stride** as first-class engines — every tool, full parity, across all three.
+
+The 100% C# engine-agnostic core means the **same** AI workflow — inspect, modify, execute C#, screenshot, build — works *identically* whether you're in the **Unity Editor**, **Godot**, or **Stride Game Studio**, and ports to Flax Engine or any custom C# engine with a lightweight adapter. No other open-source MCP server exposes this breadth of editor control across three different engines.
+
+### 🎮 Supported engines — full feature parity
+
+| Capability | Unity | Godot | Stride |
+|---|:--:|:--:|:--:|
+| Inspect · query · get/set property (incl. nested) | ✅ | ✅ | ✅ |
+| `call_method` · `create` · `delete` (native Undo) | ✅ | ✅ | ✅ |
+| `execute` — arbitrary C# via Roslyn | ✅ | ✅ | ✅ |
+| Selection · console logs · recompile/compile-errors | ✅ | ✅ | ✅ |
+| Scene-view screenshot **with editor gizmos** | ✅ | ✅ | ✅ |
+| Platform/build tools (list · switch · build_player) | ✅ | ✅ | ✅ |
+
+Every row is implemented and verified live in each engine's editor — not a roadmap. Plus engine-independent OS tools (`list_windows` / `capture_window`) to screenshot any window on the machine.
+
+### 🧠 No ceiling: arbitrary C# on the editor's main thread
+
+The structured tools are the convenient path — but the real power is the **`execute`** tool, which compiles and runs **any** C# (via Roslyn) directly against the live editor. That means the *entire* engine + editor API, your own project assemblies, the asset pipeline, the file system — **anything the editor itself can do, the AI can do.** There are effectively **no limits** to what it can accomplish.
+
+In short: AkerMCP gives the AI **eyes** (inspect, query, screenshots) and **hands** (set, create, call, execute, build) to do *whatever you actually need* — not a fixed menu of canned operations, but open-ended capability, identically across every supported engine.
 
 ### 🪄 The "Wow" Factor: Talk to your Engine
 
@@ -105,12 +128,13 @@ No custom tool class needed. No code generation. Just reflection.
 
 ## Features
 
-- **14 Generic Reflection-Based Tools**: Operate on any object or component without custom tool definitions.
-- **Roslyn-Powered Dynamic Execution**: Send arbitrary C# scripts via the `execute` tool to perform complex procedural tasks or bulk operations directly within the Unity Editor.
-- **Visual Verification (`take_screenshot`)**: Hybrid capture pipeline — engine-internal render-buffer capture when available (highest quality, works occluded), with **cross-platform OS-level fallback** (`PrintWindow` on Windows, Quartz `CGWindowListCreateImage` on macOS). Output is auto-resized and JPEG-encoded via ImageSharp to fit AI image limits.
+- **Equal support for every engine — currently Unity, Godot and Stride**: not a Unity tool with side ports. All three are first-class adapters at full feature parity (see the table above); none is the "primary" engine, and there is no comparable multi-engine alternative.
+- **20+ Generic Reflection-Based Tools**: Operate on any object or component without custom tool definitions — the identical tool surface across all engines.
+- **Roslyn-Powered Dynamic Execution**: Send arbitrary C# scripts via the `execute` tool to perform complex procedural tasks or bulk operations directly inside the editor (Unity / Godot / Stride Game Studio).
+- **Visual Verification (`take_screenshot`)**: Engine-internal scene-view capture *with editor gizmos* in all three engines, plus a **cross-platform OS-level fallback** (`PrintWindow` on Windows, Quartz `CGWindowListCreateImage` on macOS) and standalone `list_windows` / `capture_window` tools for any window. Output is auto-resized and JPEG-encoded via ImageSharp to fit AI image limits.
 - **MessagePack IPC Protocol**: High-performance, low-latency binary communication between the standalone MCP Server and the engine plugin.
-- **Robust Type System**: Serializes and deserializes Unity-specific structs (`Vector3`, `Color`, `Bounds`) seamlessly.
-- **Engine-Agnostic Core**: Shared .NET Standard 2.1 core makes it easy to port to Godot, Stride, Flax Engine, or other C# engines by writing a simple adapter.
+- **Robust Type System**: Serializes and deserializes engine structs (`Vector3`, `Color`, `Bounds`, …) seamlessly, case-insensitively, for Unity, Godot and Stride alike.
+- **Engine-Agnostic Core**: A shared .NET Standard 2.1 core; adding a fourth engine (Flax, or any custom C# engine) is just another adapter — the server and tools never change.
 
 ---
 
@@ -153,9 +177,12 @@ When combined, your AI gets a **complete global vision**:
 
 ## Quick Start (Recommended)
 
-You do not need to install the .NET SDK or compile any code.
+Two steps: **(1)** install the adapter for your engine — Unity, Godot, or Stride (they are peers; pick the one you use), then **(2)** run the standalone MCP server, which is identical for all of them and auto-discovers whichever engine is running.
 
-### 1. Unity Setup
+### 1a. Unity Setup
+
+> You do not need to install the .NET SDK or compile any code for Unity.
+
 1. Go to the [latest GitHub Release](https://github.com/lorenzo-cambiaghi/AkerMCP/releases/latest) and download `AkerMCP.unitypackage`.
 2. Open your Unity project and double-click the package to import it.
    *(This package already contains all necessary C# scripts, dependencies, and Roslyn compilers).*
@@ -165,9 +192,9 @@ You do not need to install the .NET SDK or compile any code.
 
    ![AkerMcp Editor Window](docs/images/AkerMcpView.png)
 
-### 1b. Godot Setup (alternative to Unity)
+### 1b. Godot Setup
 
-AkerMCP ships a **Godot 4.x (.NET/C#) adapter** with the same 14 tools. Because a Godot project is a real `.csproj`, there are no DLLs to copy — references and the Roslyn engine come via NuGet/ProjectReference.
+AkerMCP ships a **Godot 4.x (.NET/C#) adapter** with the **same full toolset** as Unity. Because a Godot project is a real `.csproj`, there are no DLLs to copy — references and the Roslyn engine come via NuGet/ProjectReference.
 
 1. Download `AkerMcp.Godot-addon.zip` from the [latest Release](https://github.com/lorenzo-cambiaghi/AkerMCP/releases/latest) and extract it so you get `addons/aker_mcp/` in your Godot project (or copy the `plugins/godot/aker_mcp` folder from this repo into your project's `addons/`).
 2. Add the AkerMcp core to your game's `.csproj` (or use the included `samples/godot` project directly — run `setup-samples` first to link the addon):
@@ -180,6 +207,27 @@ AkerMCP ships a **Godot 4.x (.NET/C#) adapter** with the same 14 tools. Because 
 3. Build the C# solution once (**Project → Tools → C#: Create/Build**), then enable the plugin under **Project → Project Settings → Plugins → AkerMcp**.
 
 The plugin auto-starts with the editor and pumps requests on the main thread every frame. Scene paths follow the edited scene root (e.g. `/TestScene/Box`), property paths are case-insensitive (`position.x` resolves to `Position.X`), and screenshots capture the editor's 3D viewport. The standalone MCP server discovers the Godot plugin automatically — no server changes needed.
+
+### 1c. Stride Setup
+
+AkerMCP ships a **Stride (Game Studio) adapter** with the **same full toolset** — including undoable edits via Stride's Quantum graph, `execute` (Roslyn), real Scene-view screenshots (editor back-buffer, with gizmos), and the platform/build tools (`dotnet build` per executable project).
+
+> Stride support runs as a Game Studio editor plugin. Game Studio has no third-party plugin discovery yet, so the current setup builds the adapter against your Stride and loads it via a small one-time hook — it is more involved than Unity/Godot.
+
+1. Build **Stride Game Studio** from source (the adapter references its editor assemblies). See the [Stride build docs](https://github.com/stride3d/stride).
+2. Add a drop-in plugin loader to `Stride.GameStudio/Program.cs` (right after the built-in plugins are registered) so Game Studio loads any adapter placed in an `AkerMcpPlugins` folder next to `Stride.GameStudio.exe`:
+   ```csharp
+   var akerPluginsDir = System.IO.Path.Combine(System.AppContext.BaseDirectory, "AkerMcpPlugins");
+   if (System.IO.Directory.Exists(akerPluginsDir))
+       foreach (var dll in System.IO.Directory.GetFiles(akerPluginsDir, "*.dll"))
+           try { foreach (var t in System.Reflection.Assembly.LoadFrom(dll).GetTypes())
+                     if (!t.IsAbstract && typeof(AssetsPlugin).IsAssignableFrom(t) && t.GetConstructor(System.Type.EmptyTypes) != null)
+                         AssetsPlugin.RegisterPlugin(t); }
+           catch { /* skip incompatible DLLs */ }
+   ```
+3. Build + deploy the adapter into Game Studio with `setup-stride.ps1` (set `-StrideBin` to your Game Studio build output), then launch Game Studio and **open a project + scene** — the plugin starts the pipe server when a project opens.
+
+The standalone MCP server then discovers the Stride engine automatically — same as Unity/Godot.
 
 ### 2. MCP Server Setup
 1. Go to the [latest GitHub Release](https://github.com/lorenzo-cambiaghi/AkerMCP/releases/latest).
@@ -679,6 +727,19 @@ AkerMCP/
 │       ├── GodotCompilationSupport.cs   `dotnet build` + MSBuild diagnostics
 │       ├── GodotScreenCapture.cs        Editor viewport capture
 │       └── GodotCodeExecutor.cs         Roslyn-powered C# execution engine
+│   └── stride/aker_mcp/                Stride (Game Studio) adapter
+│       ├── StrideMcpPlugin.cs           AssetsPlugin entry (Game Studio hook)
+│       ├── StrideEnginePlugin.cs        EnginePluginBase (composed; hosts the IPC server)
+│       ├── StrideSceneGraph.cs          Live edited-scene traversal
+│       ├── StrideSceneNode.cs           Reflection wrapper for Entities + components
+│       ├── StrideSceneBridge.cs         Quantum writes (undo) + editor-game access
+│       ├── StrideCapabilities.cs        Type resolution and engine metadata
+│       ├── StrideMainThreadDispatcher.cs WPF Dispatcher marshalling
+│       ├── StrideEditorContext.cs       Selection + GlobalLogger console capture
+│       ├── StrideCompilationSupport.cs  `dotnet build` + MSBuild diagnostics
+│       ├── StrideScreenCapture.cs       Scene-view back-buffer capture (Texture.Save)
+│       ├── StrideBuildManager.cs        Platform/build (executable projects)
+│       └── StrideCodeExecutor.cs        Roslyn-powered C# execution engine
 ├── samples/                            Minimal harness projects (open in the editor)
 │   ├── unity/                          Unity project; Assets/AkerMcp → junction to plugins/unity/AkerMcp
 │   └── godot/                          Godot project; addons/aker_mcp → junction to plugins/godot/aker_mcp
@@ -738,7 +799,7 @@ TypeRegistry.Instance.RegisterCustomSerializer<Vector3>(
 
 ## AI Integration Rules
 
-AkerMCP embeds comprehensive usage instructions **directly into each tool's description** served via the MCP protocol. This means any AI client (Claude, Cursor, Copilot, Antigravity) automatically learns how to use all 14 tools correctly — including property path syntax, the Inspect → Modify → Verify workflow, Roslyn execution globals, compilation verification, and visual verification via screenshots — **with zero configuration**.
+AkerMCP embeds comprehensive usage instructions **directly into each tool's description** served via the MCP protocol. This means any AI client (Claude, Cursor, Copilot, Antigravity) automatically learns how to use all the tools correctly — including property path syntax, the Inspect → Modify → Verify workflow, Roslyn execution globals, compilation verification, and visual verification via screenshots — **with zero configuration**.
 
 ### Optional: Boost with a rules file
 
@@ -767,7 +828,7 @@ Copy everything inside the block below into your rules file:
 
 #### AkerMCP — AI Integration Rules
 
-You have access to a Unity (or Godot, Stride, Flax) game engine via the `game-engine` MCP server. This gives you 14 tools to inspect, query, modify, script, and visually verify the active scene — all from the editor.
+You have access to a C# game engine — **Unity, Godot, or Stride** (all equally supported) — via the `game-engine` MCP server. This gives you 20+ tools to inspect, query, modify, script, and visually verify the active scene, plus platform/build control — all from the editor. The `execute` tool runs arbitrary C# (Roslyn) against the live editor, so there is effectively no limit to what you can do.
 
 #### Available Tools (quick reference)
 
