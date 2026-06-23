@@ -43,9 +43,9 @@ Imagine asking your AI:
 > *"Hey, make the Player character 20% bigger, turn all enemy materials red, and spawn 50 trees scattered across the ground plane."*
 
 - **Without AkerMCP:** The AI writes a custom script, explains where to put it, you switch to Unity, attach it, press play, and hope it works.
-- **With AkerMCP:** The AI just does it. Instantly. Right inside your Unity Editor. You watch the scene change before your eyes.
+- **With AkerMCP:** The AI just does it. Instantly. Right inside your editor — Unity, Godot, or Stride. You watch the scene change before your eyes.
 
-AkerMCP acts as a seamless bridge. It allows AI agents to inspect your scene hierarchy, modify GameObjects, and even execute complex procedural C# scripts on the fly. No more manual repetitive clicking in the inspector—just tell your AI what you want to achieve.
+AkerMCP acts as a seamless bridge. It allows AI agents to inspect your scene hierarchy, modify objects, and even execute complex procedural C# scripts on the fly. No more manual repetitive clicking in the inspector—just tell your AI what you want to achieve.
 
 **Example:** *"Spawn 10 spheres in a circle with a radius of 10"*
 ```csharp
@@ -104,7 +104,7 @@ AkerMCP turns the AI from a simple "code generator" into an autonomous Technical
 
 Traditional MCP integrations for game engines ship 100+ hand-written tools — one per operation, one per component type. Every engine update breaks them.
 
-AkerMCP replaces all of that with **14 generic tools** powered by runtime reflection and **Roslyn**. A single `set_property` tool can modify *any* property on *any* object in *any* engine, while the `execute` tool enables complex procedural generation via C# scripts. The `take_screenshot` tool closes the loop, giving the AI a way to *visually verify* what it just changed. The engine-specific adapter provides the necessary layer for interacting directly with the engine's API.
+AkerMCP replaces all of that with **20+ generic tools** powered by runtime reflection and **Roslyn**. A single `set_property` tool can modify *any* property on *any* object in *any* engine, while the `execute` tool enables complex procedural generation via C# scripts. The `take_screenshot` tool closes the loop, giving the AI a way to *visually verify* what it just changed. The engine-specific adapter provides the necessary layer for interacting directly with the engine's API.
 
 ```
 AI: "Set the player's position to (10, 0, 5)"
@@ -362,7 +362,7 @@ Once both the Unity plugin and an AI client are running, you can verify the conn
 "Inspect the scene hierarchy"
 ```
 
-You should get back a tree of GameObjects with their components:
+You should get back a tree of objects with their components:
 
 ```
 Player  [Transform, Rigidbody]
@@ -389,7 +389,7 @@ If you see this, everything is working.
 | `query` | Find objects by type name, name pattern, tag, or property values |
 | `create` | Add a new object to the scene with optional initial properties |
 | `delete` | Remove an object from the scene (supports undo) |
-| `select` | Select a GameObject in the editor — highlights it in the Hierarchy and Inspector |
+| `select` | Select an object in the editor — highlights it in the hierarchy and inspector |
 | `get_selection` | Get the currently selected object with its components, properties, and children |
 
 ### Development Workflow
@@ -483,7 +483,7 @@ On macOS 10.15+, capturing windows from another process requires **Screen Record
 
 ### Dynamic Code Execution (`execute`)
 
-The `execute` tool runs arbitrary C# code inside the Unity Editor using Roslyn (`Microsoft.CodeAnalysis.CSharp.Scripting`). This is the most powerful tool — it can do anything the Unity Editor API allows.
+The `execute` tool runs arbitrary C# code inside the live editor — **Unity, Godot, or Stride** — using Roslyn. This is the most powerful tool: it can do anything that engine's editor API allows, with no fixed tool surface.
 
 **What it enables:**
 
@@ -492,9 +492,9 @@ The `execute` tool runs arbitrary C# code inside the Unity Editor using Roslyn (
 - Asset manipulation (create materials, import textures, modify prefabs)
 - Complex queries that go beyond what `query` supports
 - Editor automation (menu items, build pipeline, custom importers)
-- Anything you can do in a Unity Editor script
+- Anything you can do in an editor script for that engine
 
-**Built-in globals** available in your code:
+**Built-in globals** available in your code *(shown for the Unity adapter; the Godot and Stride adapters expose equivalent globals over their own `Node` / `Entity` types)*:
 
 | Global | Type | Description |
 |--------|------|-------------|
@@ -504,11 +504,11 @@ The `execute` tool runs arbitrary C# code inside the Unity Editor using Roslyn (
 | `Create(name)` | `GameObject` | Create a new empty GameObject |
 | `Log(message)` | `void` | Log to the Unity console |
 
-**Imported namespaces** (no `using` needed): `System`, `System.Collections.Generic`, `System.Linq`, `UnityEngine`, `UnityEditor`
+**Imported namespaces** (no `using` needed): `System`, `System.Collections.Generic`, `System.Linq`, plus the engine's namespaces — `UnityEngine`/`UnityEditor` (Unity), `Godot` (Godot), `Stride.Engine`/`Stride.Core.Mathematics` (Stride).
 
-Need another namespace? Add `using ...;` directives at the **top** of the snippet — they are hoisted to file scope automatically (e.g. `using System.IO;`, `using static UnityEngine.Mathf;`).
+Need another namespace? Add `using ...;` directives at the **top** of the snippet — they are hoisted to file scope automatically (e.g. `using System.IO;`).
 
-**Examples:**
+**Examples** (Unity-flavored; the same patterns apply with each engine's API):
 
 ```csharp
 // Create a grid of cubes
@@ -655,7 +655,7 @@ JSON examples:
                              │ JSON-RPC 2.0 / stdio
                   ┌──────────▼───────────┐
                   │    AkerMCP Server    │   .NET 8 console process
-                  │   14 MCP tools       │
+                  │   20+ MCP tools      │
                   │    5 MCP resources   │
                   └──────────┬───────────┘
                              │ Named Pipe + MessagePack
@@ -693,7 +693,7 @@ AkerMCP/
 │   └── Ipc/                             Named pipe channel, binary framing
 ├── Server/                              AkerMcp.Server (net8.0 console app)
 │   ├── McpServer.cs                     JSON-RPC dispatcher, MCP lifecycle
-│   ├── ToolRegistry.cs                  14 generic tool definitions
+│   ├── ToolRegistry.cs                  20+ generic tool definitions
 │   ├── ResourceRegistry.cs              5 resource definitions
 │   ├── EngineConnection.cs              IPC client to engine plugin
 │   ├── StdioTransport.cs                stdin/stdout transport
@@ -843,13 +843,13 @@ You have access to a C# game engine — **Unity, Godot, or Stride** (all equally
 
 | Tool | Use when... |
 |------|-------------|
-| `inspect` | You need to see what's on a GameObject — components, properties, children |
+| `inspect` | You need to see what's on an object — components, properties, children |
 | `get_property` | You know the exact path and want a single value |
 | `set_property` | You want to change one property with undo support |
 | `call_method` | You need to invoke a method (e.g. `SetActive`, `AddForce`) |
 | `query` | You need to find objects by type, name pattern, or tag |
-| `create` | You need to add a new GameObject to the scene |
-| `delete` | You need to remove a GameObject (destructive, has undo) |
+| `create` | You need to add a new object to the scene |
+| `delete` | You need to remove an object (destructive, has undo) |
 | `select` | You want to highlight an object in Unity's Hierarchy/Inspector |
 | `get_selection` | You want to know what the user currently has selected |
 | `refresh_scripts` | You just wrote or modified a `.cs` file and need to trigger recompilation |
@@ -917,17 +917,17 @@ MeshRenderer.material.color → Color
 
 #### Writing `execute` Scripts
 
-**Available globals** (no setup needed):
+**Available globals** (no setup needed) — shown for the Unity adapter; Godot and Stride expose equivalents over their own `Node` / `Entity` types:
 
 ```csharp
-selectedObject              // Currently selected GameObject (or null)
-Find("Player")              // GameObject.Find shortcut
-FindAll<Rigidbody>()        // Find all components of a type
-Create("MyObject")          // Create empty GameObject
-Log("message")              // Debug.Log shortcut
+selectedObject              // Currently selected object (or null)
+Find("Player")              // find by name
+FindAll<Rigidbody>()        // find all components/nodes of a type
+Create("MyObject")          // create an empty object
+Log("message")              // log to the engine console
 ```
 
-**Pre-imported namespaces**: `System`, `System.Collections.Generic`, `System.Linq`, `UnityEngine`, `UnityEditor`. For anything else, put `using ...;` directives at the top of the snippet — they are hoisted to file scope automatically.
+**Pre-imported namespaces**: `System`, `System.Collections.Generic`, `System.Linq`, plus the engine's namespaces (`UnityEngine`/`UnityEditor`, or `Godot`, or `Stride.Engine`/`Stride.Core.Mathematics`). For anything else, put `using ...;` directives at the top of the snippet — they are hoisted to file scope automatically.
 
 **State does NOT persist between calls.** Each script is compiled and run independently — write self-contained scripts:
 
