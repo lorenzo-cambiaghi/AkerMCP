@@ -10,12 +10,12 @@ echo.
 REM --- Godot ----------------------------------------------------------------
 if exist "samples\godot\addons\aker_mcp" rmdir "samples\godot\addons\aker_mcp"
 if not exist "samples\godot\addons" mkdir "samples\godot\addons"
-mklink /J "samples\godot\addons\aker_mcp" "plugins\godot\aker_mcp"
+mklink /J "samples\godot\addons\aker_mcp" "plugins\godot"
 if errorlevel 1 goto :error
 
 REM --- Unity ----------------------------------------------------------------
 if exist "samples\unity\Assets\AkerMcp" rmdir "samples\unity\Assets\AkerMcp"
-mklink /J "samples\unity\Assets\AkerMcp" "plugins\unity\AkerMcp"
+mklink /J "samples\unity\Assets\AkerMcp" "plugins\unity"
 if errorlevel 1 goto :error
 
 echo.

@@ -56,7 +56,7 @@ samples/godot/*.csproj.user
 samples/godot/*.sln
 
 # Godot plugin DLLs (if ever built into the canonical plugin folder)
-plugins/godot/aker_mcp/.godot/
+plugins/godot/.godot/
 
 # Unity sample - Library, Temp, build caches
 samples/unity/Library/
@@ -69,5 +69,5 @@ samples/unity/Recordings/
 samples/unity/obj/
 
 # Unity plugin DLLs (built from source, not vendored)
-plugins/unity/AkerMcp/Plugins/*.dll
-plugins/unity/AkerMcp/Plugins/*.dll.meta
+plugins/unity/Plugins/*.dll
+plugins/unity/Plugins/*.dll.meta

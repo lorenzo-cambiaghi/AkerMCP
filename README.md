@@ -196,7 +196,7 @@ Two steps: **(1)** install the adapter for your engine — Unity, Godot, or Stri
 
 AkerMCP ships a **Godot 4.x (.NET/C#) adapter** with the **same full toolset** as Unity. Because a Godot project is a real `.csproj`, there are no DLLs to copy — references and the Roslyn engine come via NuGet/ProjectReference.
 
-1. Download `AkerMcp.Godot-addon.zip` from the [latest Release](https://github.com/lorenzo-cambiaghi/AkerMCP/releases/latest) and extract it so you get `addons/aker_mcp/` in your Godot project (or copy the `plugins/godot/aker_mcp` folder from this repo into your project's `addons/`).
+1. Download `AkerMcp.Godot-addon.zip` from the [latest Release](https://github.com/lorenzo-cambiaghi/AkerMCP/releases/latest) and extract it so you get `addons/aker_mcp/` in your Godot project (or copy this repo's `plugins/godot` folder into your project as `addons/aker_mcp`).
 2. Add the AkerMcp core to your game's `.csproj` (or use the included `samples/godot` project directly — run `setup-samples` first to link the addon):
    ```xml
    <ProjectReference Include="path/to/AkerMcp.Shared.csproj" />
@@ -345,7 +345,7 @@ dotnet publish Shared/AkerMcp.Shared.csproj -c Release -o .publish
 
 ### Step 2 — Unity Plugin Setup
 If you are modifying the source code and want to push changes to your own Unity project:
-1. Copy the `plugins/unity/AkerMcp` folder into your own Unity project's `Assets/` folder.
+1. Copy this repo's `plugins/unity` folder into your own Unity project as `Assets/AkerMcp`.
 2. Create `Assets/AkerMcp/Plugins/` and copy all `.dll` files from `.publish/` and `Client/bin/Release/netstandard2.1/`.
 3. Copy the Unity Roslyn Compilers (`Microsoft.CodeAnalysis.dll`, etc.) from your Unity Editor installation (`.../Editor/Data/MonoBleedingEdge/lib/mono/4.5/`) into the `Plugins/` folder.
 
@@ -721,7 +721,7 @@ AkerMCP/
 │   ├── MainThreadDispatcherBase.cs     Thread-safe queue with TCS pattern
 │   └── ClientConfiguration.cs          Client-side settings
 ├── plugins/                            Canonical engine adapters (the shippable plugins)
-│   ├── unity/AkerMcp/                  Unity adapter
+│   ├── unity/                          Unity adapter (→ Assets/AkerMcp in-project)
 │   │   ├── UnitySceneGraph.cs           Scene traversal and node creation
 │   │   ├── UnitySceneNode.cs            Reflection wrapper for GameObjects
 │   │   ├── UnityTypeRegistration.cs     MessagePack types and aliases
@@ -733,7 +733,7 @@ AkerMCP/
 │   │       ├── UnityMainThreadDispatcher.cs Unity main thread marshalling
 │   │       ├── UnityScreenCapture.cs    Game/Scene view render-buffer capture
 │   │       └── UnityMcpPlugin.cs        Plugin entry point
-│   ├── godot/aker_mcp/                 Godot 4.x (.NET) adapter
+│   ├── godot/                          Godot 4.x (.NET) adapter (→ addons/aker_mcp in-project)
 │       ├── AkerMcpEditorPlugin.cs       [Tool] EditorPlugin entry + main-thread pump
 │       ├── GodotMcpPlugin.cs            EnginePluginBase subclass
 │       ├── GodotSceneGraph.cs           Edited-scene traversal and node creation
@@ -759,8 +759,8 @@ AkerMCP/
 │       ├── StrideBuildManager.cs        Platform/build (executable projects)
 │       └── StrideCodeExecutor.cs        Roslyn-powered C# execution engine
 ├── samples/                            Minimal harness projects (open in the editor)
-│   ├── unity/                          Unity project; Assets/AkerMcp → junction to plugins/unity/AkerMcp
-│   └── godot/                          Godot project; addons/aker_mcp → junction to plugins/godot/aker_mcp
+│   ├── unity/                          Unity project; Assets/AkerMcp → junction to plugins/unity
+│   └── godot/                          Godot project; addons/aker_mcp → junction to plugins/godot
 └── setup-samples.bat / .sh             Recreates the sample junctions after a clone
 ```
 

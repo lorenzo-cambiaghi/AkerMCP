@@ -1,6 +1,6 @@
 ; Engine configuration file.
 ; Godot 4.4 (.NET / C#)
-; Minimal sample harness for the AkerMcp addon (canonical source: plugins/godot/aker_mcp).
+; Minimal sample harness for the AkerMcp addon (canonical source: plugins/godot).
 
 config_version=5
 

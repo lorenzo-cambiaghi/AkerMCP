@@ -8,7 +8,7 @@ echo ""
 
 echo "[1/4] Ensuring sample plugin symlink and DLLs are up to date..."
 # The .unitypackage is exported from samples/unity, whose Assets/AkerMcp is a
-# symlink to the canonical plugin (plugins/unity/AkerMcp). Make sure it exists.
+# symlink to the canonical plugin (plugins/unity). Make sure it exists.
 ./setup-samples.sh
 ./copy-dlls.sh
 
@@ -68,8 +68,23 @@ mkdir -p "$BUILD_DIR"
 mv "$OUTPUT_PATH" "$BUILD_DIR/"
 
 echo "  - Godot addon (aker_mcp)"
+# Canonical source is flat (plugins/godot/*); stage it under aker_mcp/ for distribution.
 rm -f "$BUILD_DIR/AkerMcp.Godot-addon.zip"
-(cd plugins/godot && zip -r "$BUILD_DIR/AkerMcp.Godot-addon.zip" aker_mcp > /dev/null)
+rm -rf "$BUILD_DIR/_godot_stage"
+mkdir -p "$BUILD_DIR/_godot_stage/aker_mcp"
+cp -r plugins/godot/. "$BUILD_DIR/_godot_stage/aker_mcp/"
+rm -rf "$BUILD_DIR/_godot_stage/aker_mcp/.godot"
+(cd "$BUILD_DIR/_godot_stage" && zip -r "$BUILD_DIR/AkerMcp.Godot-addon.zip" aker_mcp > /dev/null)
+rm -rf "$BUILD_DIR/_godot_stage"
+
+echo "  - Stride adapter source (build against your Game Studio; see README \"1c. Stride Setup\")"
+rm -f "$BUILD_DIR/AkerMcp.Stride-source.zip"
+rm -rf "$BUILD_DIR/_stride_stage"
+mkdir -p "$BUILD_DIR/_stride_stage/stride"
+cp -r plugins/stride/. "$BUILD_DIR/_stride_stage/stride/"
+rm -rf "$BUILD_DIR/_stride_stage/stride/bin" "$BUILD_DIR/_stride_stage/stride/obj"
+(cd "$BUILD_DIR/_stride_stage" && zip -r "$BUILD_DIR/AkerMcp.Stride-source.zip" stride > /dev/null)
+rm -rf "$BUILD_DIR/_stride_stage"
 
 echo "  - Windows (win-x64)"
 dotnet publish Server/AkerMcp.Server.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o "$BUILD_DIR/Server-win-x64" --nologo > /dev/null
@@ -93,6 +108,7 @@ echo "SUCCESS!"
 echo "All packages have been created in the Build/ directory:"
 echo "  - Build/AkerMCP.unitypackage"
 echo "  - Build/AkerMcp.Godot-addon.zip"
+echo "  - Build/AkerMcp.Stride-source.zip"
 echo "  - Build/AkerMcp.Server-win-x64.tar.gz"
 echo "  - Build/AkerMcp.Server-osx-x64.tar.gz"
 echo "  - Build/AkerMcp.Server-linux-x64.tar.gz"

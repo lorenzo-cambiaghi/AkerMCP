@@ -77,8 +77,15 @@ if not exist "%~dp0Build" mkdir "%~dp0Build"
 move /Y "%~dp0AkerMCP.unitypackage" "%~dp0Build\" >nul
 
 echo   - Godot addon (aker_mcp)
-tar -a -c -f "%~dp0Build\AkerMcp.Godot-addon.zip" -C "%~dp0plugins\godot" aker_mcp
+REM The canonical source is now flat (plugins\godot\*). The distributed addon
+REM must still be a top-level "aker_mcp\" folder, so stage a copy under that name.
+if exist "%~dp0Build\_godot_stage" rmdir /s /q "%~dp0Build\_godot_stage"
+mkdir "%~dp0Build\_godot_stage\aker_mcp"
+xcopy "%~dp0plugins\godot\*" "%~dp0Build\_godot_stage\aker_mcp\" /E /I /Y /Q >nul
 if errorlevel 1 goto :error
+tar -a -c -f "%~dp0Build\AkerMcp.Godot-addon.zip" --exclude=*/.godot/* -C "%~dp0Build\_godot_stage" aker_mcp
+if errorlevel 1 goto :error
+rmdir /s /q "%~dp0Build\_godot_stage"
 
 echo   - Stride adapter source (build against your Game Studio; see README "1c. Stride Setup")
 tar -a -c -f "%~dp0Build\AkerMcp.Stride-source.zip" --exclude=*/bin/* --exclude=*/obj/* -C "%~dp0plugins" stride

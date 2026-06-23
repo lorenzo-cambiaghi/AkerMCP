@@ -11,7 +11,7 @@
   <!--
     This is only a MINIMAL SAMPLE harness so the AkerMcp Godot addon can be opened
     in the editor and compiled. The addon source is canonical at
-    plugins/godot/aker_mcp and is surfaced here as samples/godot/addons/aker_mcp
+    plugins/godot and is surfaced here as samples/godot/addons/aker_mcp
     via a junction/symlink created by setup-samples.bat / setup-samples.sh.
 
     The AkerMcp core is consumed straight from source — a Godot project is a real

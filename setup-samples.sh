@@ -9,11 +9,11 @@ echo "Linking sample harnesses to the canonical plugin sources..."
 # --- Godot ------------------------------------------------------------------
 mkdir -p samples/godot/addons
 rm -rf samples/godot/addons/aker_mcp
-ln -s ../../../plugins/godot/aker_mcp samples/godot/addons/aker_mcp
+ln -s ../../../plugins/godot samples/godot/addons/aker_mcp
 
 # --- Unity ------------------------------------------------------------------
 mkdir -p samples/unity/Assets
 rm -rf samples/unity/Assets/AkerMcp
-ln -s ../../../plugins/unity/AkerMcp samples/unity/Assets/AkerMcp
+ln -s ../../../plugins/unity samples/unity/Assets/AkerMcp
 
 echo "Done. You can now open samples/godot or samples/unity in their editors."
