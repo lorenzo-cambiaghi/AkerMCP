@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    AkerMcp adapter for the Stride game engine (Game Studio editor plugin).
+
+    Unlike Unity (prebuilt DLLs) and Godot (project source), Stride's editor
+    assemblies are NOT on NuGet, so we reference them straight from a local
+    build of the Stride source tree. Point StrideBin at the output folder of a
+    `Stride.GameStudio` build (Debug or Release). Override on the command line:
+        dotnet build -p:StrideBin="D:\stride\...\bin\Release\net10.0-windows"
+
+    The Stride DLLs are NOT copied to our output (Private=false): they already
+    live next to Game Studio. Only our own assembly + AkerMcp.* + their NuGet
+    deps are emitted, to be dropped into Game Studio's plugin folder.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>AkerMcp.StrideAdapter</RootNamespace>
+    <AssemblyName>AkerMcp.Stride</AssemblyName>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(StrideBin)' == ''">
+    <StrideBin>C:\prjUnity\DedalMCP\stride\sources\editor\Stride.GameStudio\bin\Debug\net10.0-windows</StrideBin>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Shared\AkerMcp.Shared.csproj" />
+    <ProjectReference Include="..\..\Client\AkerMcp.Client.csproj" />
+  </ItemGroup>
+
+  <!-- Stride editor/runtime assemblies, referenced from the local build output. -->
+  <ItemGroup>
+    <Reference Include="Stride.Core">
+      <HintPath>$(StrideBin)\Stride.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Stride.Core.Mathematics">
+      <HintPath>$(StrideBin)\Stride.Core.Mathematics.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Stride.Core.Assets">
+      <HintPath>$(StrideBin)\Stride.Core.Assets.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Stride.Core.Assets.Editor">
+      <HintPath>$(StrideBin)\Stride.Core.Assets.Editor.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Stride.Engine">
+      <HintPath>$(StrideBin)\Stride.Engine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>
