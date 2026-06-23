@@ -59,6 +59,10 @@
       <HintPath>$(StrideBin)\Stride.Core.Presentation.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="Stride.Core.Presentation.Wpf">
+      <HintPath>$(StrideBin)\Stride.Core.Presentation.Wpf.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="Stride.Core.Assets.Editor">
       <HintPath>$(StrideBin)\Stride.Core.Assets.Editor.dll</HintPath>
       <Private>false</Private>

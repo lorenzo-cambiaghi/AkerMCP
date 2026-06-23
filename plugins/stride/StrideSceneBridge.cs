@@ -166,7 +166,7 @@ namespace AkerMcp.StrideAdapter
 
         // --- editor navigation ---------------------------------------------------
 
-        private static EntityHierarchyEditorViewModel? FindActiveEntityEditor()
+        internal static EntityHierarchyEditorViewModel? FindActiveEntityEditor()
         {
             try
             {

@@ -15,7 +15,7 @@ namespace AkerMcp.StrideAdapter
         public string EngineVersion
             => typeof(Entity).Assembly.GetName().Version?.ToString() ?? "unknown";
 
-        public bool SupportsHotReload => false;
+        public bool SupportsHotReload => true;
         public bool SupportsCodeExecution => true;
 
         public StrideCapabilities() => RegisterBuiltinTypes();

@@ -71,7 +71,22 @@ namespace AkerMcp.StrideAdapter
             => StrideSceneBridge.SetEntityProperty(_entity.Id, propertyPath, value);
 
         public object? CallMethod(string methodName, object?[]? args)
-            => throw new NotSupportedException("Calling methods is not available yet in the Stride adapter (read-only milestone).");
+        {
+            const BindingFlags flags = BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase;
+            var invoker = new AkerMcp.Shared.Reflection.MethodInvoker();
+
+            // Try the entity itself, then any component that exposes the method
+            // (in Stride most callable behaviour lives on components).
+            if (_entity.GetType().GetMethod(methodName, flags) != null)
+                return invoker.Invoke(_entity, methodName, args);
+
+            foreach (var component in _entity.Components)
+                if (component.GetType().GetMethod(methodName, flags) != null)
+                    return invoker.Invoke(component, methodName, args);
+
+            throw new PropertyPathException(
+                $"Method '{methodName}' not found on '{Name}' or its components.");
+        }
 
         public IEnumerable<ComponentInfo> GetComponents()
         {
