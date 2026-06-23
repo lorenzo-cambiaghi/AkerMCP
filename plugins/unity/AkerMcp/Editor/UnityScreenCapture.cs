@@ -97,8 +97,13 @@ namespace AkerMcp.Unity
             }
             if (grab == null) return null;
 
-            // Force the panel to repaint so the grabbed framebuffer is current.
-            sv.Repaint();
+            // Force a SYNCHRONOUS repaint so the grabbed framebuffer reflects the current
+            // scene rather than a stale frame. sv.Repaint() only queues a repaint, so right
+            // after a domain reload GrabPixels could capture geometry that renders during the
+            // SceneView's render pass (e.g. GPU-instanced terrain) before it has drawn.
+            // RepaintImmediately is internal, so reflect for it; fall back to the queued path.
+            if (!TryRepaintImmediately(guiView))
+                sv.Repaint();
 
             RenderTexture? rt = null;
             Texture2D? tex = null;
@@ -131,6 +136,25 @@ namespace AkerMcp.Unity
                 if (tex != null) Object.DestroyImmediate(tex);
                 if (rt != null) Object.DestroyImmediate(rt);
             }
+        }
+
+        // Invokes the view's internal RepaintImmediately() (declared on GUIView) to render
+        // the panel synchronously. Walks the base-type chain since it's an inherited
+        // non-public member. Returns false if the API can't be found.
+        private static bool TryRepaintImmediately(object guiView)
+        {
+            for (var t = guiView.GetType(); t != null; t = t.BaseType)
+            {
+                var m = t.GetMethod("RepaintImmediately",
+                    BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly,
+                    null, System.Type.EmptyTypes, null);
+                if (m != null)
+                {
+                    m.Invoke(guiView, null);
+                    return true;
+                }
+            }
+            return false;
         }
 
         // Mirrors the texture left-to-right in place (rows kept, columns reversed).
