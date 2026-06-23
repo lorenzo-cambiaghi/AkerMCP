@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Microsoft.Win32.SafeHandles;
@@ -22,6 +23,17 @@ namespace AkerMcp.Server.Platform.Mac
     internal sealed class MacScreenCapture : IPlatformScreenCapture
     {
         public void Initialize() { /* no-op on macOS */ }
+
+        // Generic window listing/by-title capture is not yet implemented on macOS
+        // (the engine-window fallback below covers the main use case). Graceful stubs
+        // so the list_windows/capture_window tools report cleanly rather than crash.
+        public IReadOnlyList<WindowSummary> ListWindows() => new List<WindowSummary>();
+
+        public byte[]? CaptureWindowByTitle(string titleSubstring, out string? error)
+        {
+            error = "capture_window by title is not yet implemented on macOS.";
+            return null;
+        }
 
         public byte[]? CaptureMainWindow(int pid, string titlePrefix, out string? error)
         {

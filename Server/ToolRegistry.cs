@@ -410,6 +410,65 @@ Example: { ""platform"": ""Android"", ""output_path"": ""Build/game.apk"", ""dev
                 }"),
                 HandleBuildPlayer,
                 new ToolAnnotations { DestructiveHint = true });
+
+            Register("list_windows",
+                @"List the visible top-level windows on the machine running the server (title, process name, pid).
+OS-level — works regardless of whether an engine is connected. Use it to find a window title to pass to capture_window.",
+                ParseSchema(@"{ ""type"": ""object"", ""properties"": {} }"),
+                HandleListWindows,
+                new ToolAnnotations { ReadOnlyHint = true });
+
+            Register("capture_window",
+                @"Capture a screenshot of ANY visible window on the machine running the server, matched by a case-insensitive substring of its title. Returns a JPEG.
+Useful for capturing external apps/tools (browsers, editors, dashboards), not just the game engine. Call list_windows first to discover titles.
+The first visible window whose title contains the substring is captured (occluded windows are captured too, without stealing focus).
+
+Example: { ""title"": ""Game Studio"" }",
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""title"": { ""type"": ""string"", ""description"": ""Substring of the target window's title (case-insensitive)"" }
+                    },
+                    ""required"": [""title""]
+                }"),
+                HandleCaptureWindow,
+                new ToolAnnotations { ReadOnlyHint = true });
+        }
+
+        private Task<ToolResult> HandleListWindows(JsonElement? args, CancellationToken ct)
+        {
+            var capture = PlatformScreenCapture.Current;
+            if (capture == null)
+                return Task.FromResult(ToolResult.Error(PlatformScreenCapture.UnsupportedPlatformMessage));
+            var json = JsonSerializer.Serialize(new { windows = capture.ListWindows() }, _jsonOptions);
+            return Task.FromResult(ToolResult.Text(json));
+        }
+
+        private Task<ToolResult> HandleCaptureWindow(JsonElement? args, CancellationToken ct)
+        {
+            var capture = PlatformScreenCapture.Current;
+            if (capture == null)
+                return Task.FromResult(ToolResult.Error(PlatformScreenCapture.UnsupportedPlatformMessage));
+
+            string? title = null;
+            if (args is JsonElement a && a.ValueKind == JsonValueKind.Object && a.TryGetProperty("title", out var t))
+                title = t.GetString();
+            if (string.IsNullOrWhiteSpace(title))
+                return Task.FromResult(ToolResult.Error("Missing required 'title' (window title substring)."));
+
+            var raw = capture.CaptureWindowByTitle(title, out var err);
+            if (raw == null)
+                return Task.FromResult(ToolResult.Error(err ?? "Window capture failed."));
+
+            byte[] outBytes;
+            try { outBytes = ImageProcessor.NormalizeToJpeg(raw); }
+            catch (Exception ex) { return Task.FromResult(ToolResult.Error($"Image processing failed: {ex.Message}")); }
+
+            var base64 = Convert.ToBase64String(outBytes);
+            return Task.FromResult(new ToolResult
+            {
+                Content = new List<ContentItem> { ContentItem.FromImage(base64, "image/jpeg") }
+            });
         }
 
         private async Task<ToolResult> HandleSwitchBuildTarget(JsonElement? args, CancellationToken ct)
