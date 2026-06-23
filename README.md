@@ -59,9 +59,9 @@ for (int i = 0; i < 10; i++) {
 ```
 ![AkerMCP in Action — Unity](docs/images/unity-execution-demo.png)
 
-The **same request, same tools — in Stride Game Studio**. The AI instanced a ring of spheres via `execute` and the screenshot was pulled straight from the editor's Scene view (gizmos and all). Identical workflow, different engine:
+The **same request, same tools — in Stride Game Studio**. The AI duplicated a sphere into a ring via `execute` (through Stride's asset/Quantum layer, so they're **real, selectable, saved entities** — note `AkerSphere_*` in the Scene hierarchy on the left), then captured the editor itself. Identical workflow, different engine:
 
-![AkerMCP in Action — Stride](docs/images/stride-execution-demo.jpg)
+![AkerMCP in Action — Stride Game Studio](readmeData/Stride.png)
 
 *(Curious about the internal technical details? Jump to the [Architecture](#architecture) section).*
 
