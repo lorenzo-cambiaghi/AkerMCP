@@ -6,6 +6,8 @@ using System.Globalization;
 using System.IO;
 using System.Reflection;
 using Stride.Assets.Entities;
+using Stride.Core.Assets;
+using Stride.Core.Assets.Quantum;
 using Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.Game;
 using Stride.Assets.Presentation.AssetEditors.EntityHierarchyEditor.ViewModels;
 using Stride.Core.Assets.Editor.Services;
@@ -53,11 +55,7 @@ namespace AkerMcp.StrideAdapter
 
         public static void SetEntityProperty(Guid entityId, string propertyPath, object? value)
         {
-            var session = Session ?? throw new InvalidOperationException("No active Stride session.");
-            var editor = FindActiveEntityEditor() ?? throw new InvalidOperationException("No scene editor is open.");
-
-            if (editor.Asset.Asset is not EntityHierarchyAssetBase asset)
-                throw new InvalidOperationException("The active editor is not a scene/prefab asset.");
+            var (session, _, asset) = RequireSceneContext();
             if (!asset.Hierarchy.Parts.TryGetValue(entityId, out var design))
                 throw new InvalidOperationException($"Entity {entityId} not found in the edited asset.");
 
@@ -84,6 +82,63 @@ namespace AkerMcp.StrideAdapter
                 undo.SetName(tx, $"Set {propertyPath} on {assetEntity.Name}");
             }
         }
+
+        public static Entity CreateEntity(string name, Guid? parentId)
+        {
+            var (session, editor, asset) = RequireSceneContext();
+            var graph = HierarchyGraph(editor);
+
+            Entity? parent = null;
+            if (parentId is Guid pid)
+            {
+                if (!asset.Hierarchy.Parts.TryGetValue(pid, out var pdesign))
+                    throw new InvalidOperationException($"Parent entity {pid} not found in the edited asset.");
+                parent = pdesign.Entity;
+            }
+
+            var entity = new Entity { Name = name };
+            var design = new EntityDesign(entity);
+            var collection = new AssetPartCollection<EntityDesign, Entity>();
+            collection.Add(design);
+            int index = parent == null ? asset.Hierarchy.RootParts.Count : parent.Transform.Children.Count;
+
+            var undo = session.ServiceProvider.Get<IUndoRedoService>();
+            using (var tx = undo.CreateTransaction())
+            {
+                graph.AddPartToAsset(collection, design, parent, index);
+                undo.SetName(tx, $"Create entity {name}");
+            }
+            return entity;
+        }
+
+        public static bool DeleteEntity(Guid entityId)
+        {
+            var (session, editor, asset) = RequireSceneContext();
+            if (!asset.Hierarchy.Parts.TryGetValue(entityId, out var design))
+                return false;
+
+            var graph = HierarchyGraph(editor);
+            var undo = session.ServiceProvider.Get<IUndoRedoService>();
+            using (var tx = undo.CreateTransaction())
+            {
+                graph.RemovePartFromAsset(design); // removes the entity and its subtree
+                undo.SetName(tx, $"Delete entity {design.Entity.Name}");
+            }
+            return true;
+        }
+
+        private static (SessionViewModel session, EntityHierarchyEditorViewModel editor, EntityHierarchyAssetBase asset) RequireSceneContext()
+        {
+            var session = Session ?? throw new InvalidOperationException("No active Stride session.");
+            var editor = FindActiveEntityEditor() ?? throw new InvalidOperationException("No scene editor is open.");
+            if (editor.Asset.Asset is not EntityHierarchyAssetBase asset)
+                throw new InvalidOperationException("The active editor is not a scene/prefab asset.");
+            return (session, editor, asset);
+        }
+
+        private static AssetCompositeHierarchyPropertyGraph<EntityDesign, Entity> HierarchyGraph(EntityHierarchyEditorViewModel editor)
+            => editor.Asset.PropertyGraph as AssetCompositeHierarchyPropertyGraph<EntityDesign, Entity>
+               ?? throw new InvalidOperationException("Asset property graph is not an entity hierarchy graph.");
 
         // --- editor navigation ---------------------------------------------------
 

@@ -61,10 +61,25 @@ namespace AkerMcp.StrideAdapter
         }
 
         public ISceneNode CreateNode(string type, string? name, string? parentPath)
-            => throw new NotSupportedException("Scene editing is not available yet in the Stride adapter (read-only milestone).");
+        {
+            Guid? parentId = null;
+            if (!string.IsNullOrEmpty(parentPath))
+            {
+                var parent = FindByPath(parentPath)
+                    ?? throw new InvalidOperationException($"Parent not found: {parentPath}");
+                parentId = parent.Id;
+            }
+            // 'type' is currently ignored — a plain Entity is created; add components via set_property later.
+            var entity = StrideSceneBridge.CreateEntity(name ?? "Entity", parentId);
+            return new StrideSceneNode(entity);
+        }
 
         public bool DeleteNode(string path, bool recursive = true)
-            => throw new NotSupportedException("Scene editing is not available yet in the Stride adapter (read-only milestone).");
+        {
+            // Stride's RemovePartFromAsset removes the entity together with its subtree.
+            var entity = FindByPath(path);
+            return entity != null && StrideSceneBridge.DeleteEntity(entity.Id);
+        }
 
         public int GetTotalNodeCount()
         {
