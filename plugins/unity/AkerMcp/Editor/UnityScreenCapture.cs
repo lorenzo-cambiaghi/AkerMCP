@@ -118,9 +118,15 @@ namespace AkerMcp.Unity
                 tex = new Texture2D(w, h, TextureFormat.RGB24, false);
                 tex.ReadPixels(new Rect(0, 0, w, h), 0, 0);
 
-                // GrabPixels' readback comes out mirrored left-to-right (UI text reads
-                // backwards); flip it horizontally so the image matches what's on screen.
-                FlipHorizontal(tex);
+                // The GrabPixels readback orientation follows the graphics API's UV convention.
+                // On APIs where UV starts at the top (D3D11/D3D12/Metal/consoles,
+                // graphicsUVStartsAtTop == true) the readback is already correct — verified on
+                // Windows/D3D11, no flip needed. On OpenGL/GLES (== false) the framebuffer
+                // readback is vertically mirrored, so flip it. (A previous unconditional
+                // FlipHorizontal was wrong: it mirrored an already-correct image left-to-right,
+                // making UI text read backwards and left-docked panels appear on the right.)
+                if (!SystemInfo.graphicsUVStartsAtTop)
+                    FlipVertical(tex);
                 tex.Apply();
 
                 return tex.EncodeToPNG();
@@ -157,20 +163,20 @@ namespace AkerMcp.Unity
             return false;
         }
 
-        // Mirrors the texture left-to-right in place (rows kept, columns reversed).
-        private static void FlipHorizontal(Texture2D tex)
+        // Mirrors the texture top-to-bottom in place (whole rows swapped). Used to correct the
+        // RenderTexture readback on graphics APIs whose UV origin is at the bottom (OpenGL/GLES).
+        private static void FlipVertical(Texture2D tex)
         {
             int w = tex.width, h = tex.height;
             var px = tex.GetPixels32();
-            for (int y = 0; y < h; y++)
+            var tmp = new Color32[w];
+            for (int y = 0; y < h / 2; y++)
             {
-                int row = y * w;
-                for (int x = 0; x < w / 2; x++)
-                {
-                    int a = row + x;
-                    int b = row + (w - 1 - x);
-                    (px[a], px[b]) = (px[b], px[a]);
-                }
+                int top = y * w;
+                int bot = (h - 1 - y) * w;
+                System.Array.Copy(px, top, tmp, 0, w);
+                System.Array.Copy(px, bot, px, top, w);
+                System.Array.Copy(tmp, 0, px, bot, w);
             }
             tex.SetPixels32(px);
         }
