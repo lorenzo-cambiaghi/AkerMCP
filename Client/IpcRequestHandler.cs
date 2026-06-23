@@ -20,6 +20,7 @@ namespace AkerMcp.Client
         private readonly ICompilationSupport? _compilationSupport;
         private readonly ICodeExecutor? _codeExecutor;
         private readonly IScreenCapture? _screenCapture;
+        private readonly IBuildManager? _buildManager;
         private readonly IEngineCapabilities _capabilities;
         private readonly IMainThreadDispatcher _dispatcher;
         private readonly PropertyPathResolver _pathResolver;
@@ -51,7 +52,8 @@ namespace AkerMcp.Client
             IEditorContext? editorContext = null,
             ICompilationSupport? compilationSupport = null,
             ICodeExecutor? codeExecutor = null,
-            IScreenCapture? screenCapture = null)
+            IScreenCapture? screenCapture = null,
+            IBuildManager? buildManager = null)
         {
             _sceneGraph = sceneGraph;
             _capabilities = capabilities;
@@ -62,6 +64,7 @@ namespace AkerMcp.Client
             _compilationSupport = compilationSupport;
             _codeExecutor = codeExecutor;
             _screenCapture = screenCapture;
+            _buildManager = buildManager;
             _pathResolver = new PropertyPathResolver();
             _inspector = new ReflectionInspector();
             _methodInvoker = new MethodInvoker();
@@ -99,6 +102,11 @@ namespace AkerMcp.Client
                     IpcConstants.Methods.GetSelection => await HandleGetSelection(ct),
                     IpcConstants.Methods.Execute => await HandleExecute(request, ct),
                     IpcConstants.Methods.GetWindowInfo => HandleGetWindowInfo(),
+                    IpcConstants.Methods.ListPlatforms => await HandleListPlatforms(ct),
+                    IpcConstants.Methods.GetPlatformSettings => await HandleGetPlatformSettings(request, ct),
+                    IpcConstants.Methods.SetPlatformSettings => await HandleSetPlatformSettings(request, ct),
+                    IpcConstants.Methods.SwitchBuildTarget => await HandleSwitchBuildTarget(request, ct),
+                    IpcConstants.Methods.BuildPlayer => await HandleBuildPlayer(request, ct),
                     _ => throw new InvalidOperationException($"Unknown method: {request.Method}")
                 };
 
@@ -663,6 +671,71 @@ namespace AkerMcp.Client
                 elapsedMs = Math.Round(result.ElapsedMs, 1)
             }, _compactJsonOptions);
         }
+
+        private async Task<string> HandleListPlatforms(CancellationToken ct)
+        {
+            if (_buildManager == null) return BuildNotSupportedJson();
+            return await _dispatcher.RunOnMainThread(() =>
+                JsonSerializer.Serialize(new { platforms = _buildManager.GetPlatforms() }, _jsonOptions), ct);
+        }
+
+        private async Task<string> HandleGetPlatformSettings(IpcRequest request, CancellationToken ct)
+        {
+            if (_buildManager == null) return BuildNotSupportedJson();
+            var args = ParseArgs(request);
+            var platform = args.GetProperty("platform").GetString()!;
+            return await _dispatcher.RunOnMainThread(() =>
+                JsonSerializer.Serialize(_buildManager.GetPlatformSettings(platform), _compactJsonOptions), ct);
+        }
+
+        private async Task<string> HandleSetPlatformSettings(IpcRequest request, CancellationToken ct)
+        {
+            if (_buildManager == null) return BuildNotSupportedJson();
+            var args = ParseArgs(request);
+            var platform = args.GetProperty("platform").GetString()!;
+            var values = new Dictionary<string, string>();
+            if (args.TryGetProperty("settings", out var s) && s.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var p in s.EnumerateObject())
+                    values[p.Name] = p.Value.ValueKind == JsonValueKind.String
+                        ? (p.Value.GetString() ?? "")
+                        : p.Value.GetRawText();
+            }
+            return await _dispatcher.RunOnMainThread(() =>
+                JsonSerializer.Serialize(_buildManager.SetPlatformSettings(platform, values), _compactJsonOptions), ct);
+        }
+
+        private async Task<string> HandleSwitchBuildTarget(IpcRequest request, CancellationToken ct)
+        {
+            if (_buildManager == null) return BuildNotSupportedJson();
+            var args = ParseArgs(request);
+            var platform = args.GetProperty("platform").GetString()!;
+            return await _dispatcher.RunOnMainThread(() =>
+                JsonSerializer.Serialize(_buildManager.SwitchPlatform(platform), _compactJsonOptions), ct);
+        }
+
+        private async Task<string> HandleBuildPlayer(IpcRequest request, CancellationToken ct)
+        {
+            if (_buildManager == null) return BuildNotSupportedJson();
+            var args = ParseArgs(request);
+            var req = new BuildRequest
+            {
+                Platform = args.GetProperty("platform").GetString()!,
+                OutputPath = args.GetProperty("output_path").GetString()!,
+                Development = args.TryGetProperty("development", out var dev) && dev.GetBoolean(),
+                Scenes = args.TryGetProperty("scenes", out var sc) && sc.ValueKind == JsonValueKind.Array
+                    ? sc.EnumerateArray().Select(e => e.GetString() ?? "").Where(x => x.Length > 0).ToArray()
+                    : null
+            };
+            return await _dispatcher.RunOnMainThread(() =>
+                JsonSerializer.Serialize(_buildManager.Build(req), _compactJsonOptions), ct);
+        }
+
+        private string BuildNotSupportedJson()
+            => JsonSerializer.Serialize(new
+            {
+                error = "Platform/build operations not available. Engine plugin does not provide an IBuildManager."
+            }, _jsonOptions);
 
         // Error payloads must go through the serializer: paths/names coming from
         // the model can contain quotes or backslashes that would break

@@ -337,6 +337,110 @@ Typical size 150-400 KB, well under model image limits.",
                 }"),
                 HandleTakeScreenshot,
                 new ToolAnnotations { ReadOnlyHint = true });
+
+            Register("list_platforms",
+                @"List the build platforms the engine knows about (e.g. Android, iOS, Windows).
+Each entry is flagged whether it is the active build target and whether it can be built on this machine.
+Call this first to discover valid platform names for the other platform/build tools.",
+                ParseSchema(@"{ ""type"": ""object"", ""properties"": {} }"),
+                (args, ct) => _engine.ForwardToolCall(IpcConstants.Methods.ListPlatforms, args, ct),
+                new ToolAnnotations { ReadOnlyHint = true });
+
+            Register("get_platform_settings",
+                @"Read a platform's build/player settings as a flat key-value map.
+ALWAYS call this before set_platform_settings to discover the available keys and current values — keys differ per engine.
+
+Example: { ""platform"": ""Android"" }",
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""platform"": { ""type"": ""string"", ""description"": ""Platform name (see list_platforms)"" }
+                    },
+                    ""required"": [""platform""]
+                }"),
+                (args, ct) => _engine.ForwardToolCall(IpcConstants.Methods.GetPlatformSettings, args, ct),
+                new ToolAnnotations { ReadOnlyHint = true });
+
+            Register("set_platform_settings",
+                @"Set one or more of a platform's build/player settings. Pass only the keys you want to change.
+Unknown keys are reported back in 'unknownKeys' (not fatal). Verify with get_platform_settings afterwards.
+
+Example: { ""platform"": ""Android"", ""settings"": { ""applicationIdentifier"": ""com.acme.game"", ""minSdkVersion"": ""24"" } }",
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""platform"": { ""type"": ""string"", ""description"": ""Platform name (see list_platforms)"" },
+                        ""settings"": { ""type"": ""object"", ""description"": ""Key-value settings to apply (keys from get_platform_settings)"" }
+                    },
+                    ""required"": [""platform"", ""settings""]
+                }"),
+                (args, ct) => _engine.ForwardToolCall(IpcConstants.Methods.SetPlatformSettings, args, ct));
+
+            Register("switch_build_target",
+                @"Make a platform the active build target.
+This can trigger a script recompile + domain reload and BLOCKS until done (like refresh_scripts) — typically a few seconds to a minute.
+Switch the target before building for a different platform.
+
+Example: { ""platform"": ""Android"" }",
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""platform"": { ""type"": ""string"", ""description"": ""Platform to activate (see list_platforms)"" }
+                    },
+                    ""required"": [""platform""]
+                }"),
+                HandleSwitchBuildTarget,
+                new ToolAnnotations { DestructiveHint = true });
+
+            Register("build_player",
+                @"Build the project for a platform (produces an APK/AAB/exe/app bundle, etc.). LONG-RUNNING — can take minutes.
+Returns a build report: result, error count, warning count, output path and artifact size.
+Make sure the platform is the active build target first (switch_build_target) and that its settings are correct (set_platform_settings).
+
+Example: { ""platform"": ""Android"", ""output_path"": ""Build/game.apk"", ""development"": false }",
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""platform"": { ""type"": ""string"", ""description"": ""Platform to build for (see list_platforms)"" },
+                        ""output_path"": { ""type"": ""string"", ""description"": ""Output file or directory for the build artifact"" },
+                        ""development"": { ""type"": ""boolean"", ""description"": ""Development/debug build (default: false)"" },
+                        ""scenes"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Optional explicit scene/level list; engine default if omitted"" }
+                    },
+                    ""required"": [""platform"", ""output_path""]
+                }"),
+                HandleBuildPlayer,
+                new ToolAnnotations { DestructiveHint = true });
+        }
+
+        private async Task<ToolResult> HandleSwitchBuildTarget(JsonElement? args, CancellationToken ct)
+        {
+            // Switching the active target can recompile scripts and reload the domain,
+            // which drops the IPC connection mid-call. Mirror refresh_scripts: treat the
+            // disconnect as success, wait for the plugin to come back, then report state.
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var result = await _engine.ForwardToolCall(
+                IpcConstants.Methods.SwitchBuildTarget, args, ct, timeoutMs: 300_000);
+
+            if (!IsDisconnectError(result))
+                return result;
+
+            if (!await _engine.WaitForConnection(180_000, ct).ConfigureAwait(false))
+                return ToolResult.Error(
+                    "Engine disconnected while switching build target and did not reconnect within 3 minutes. " +
+                    "Check the editor (it may show a blocking dialog), then call list_platforms.");
+
+            var report = await _engine.ForwardToolCall(IpcConstants.Methods.ListPlatforms, null, ct);
+            var text = report.Content.Count > 0 ? report.Content[0].Text : null;
+            return ToolResult.Text(
+                $"Build target switch completed (engine reloaded in {sw.Elapsed.TotalSeconds:0.#}s).\n{text}");
+        }
+
+        private Task<ToolResult> HandleBuildPlayer(JsonElement? args, CancellationToken ct)
+        {
+            // Builds are long but do not reload the domain, so a plain forward with a
+            // generous timeout is enough (30 min covers most IL2CPP/Gradle builds).
+            return _engine.ForwardToolCall(
+                IpcConstants.Methods.BuildPlayer, args, ct, timeoutMs: 1_800_000);
         }
 
         private async Task<ToolResult> HandleRefreshScripts(JsonElement? args, CancellationToken ct)

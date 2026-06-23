@@ -51,6 +51,7 @@ namespace AkerMcp.Unity
             return _codeExecutor;
         }
         protected override IScreenCapture? CreateScreenCapture() => new UnityScreenCapture();
+        protected override IBuildManager? CreateBuildManager() => new UnityBuildManager();
 
         protected override void Log(string message) => Debug.Log($"[AkerMcp] {message}");
         protected override void LogError(string message) => Debug.LogError($"[AkerMcp] {message}");

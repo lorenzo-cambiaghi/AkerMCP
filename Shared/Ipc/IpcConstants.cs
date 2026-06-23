@@ -4,8 +4,10 @@ namespace AkerMcp.Shared.Ipc
     {
         public const string PipePrefix = "aker-mcp-";
         public const string DiscoveryDirectory = "aker-mcp";
-        public const string ProtocolVersion = "1.2.0"; // Bump on any IPC schema change
+        public const string ProtocolVersion = "1.3.0"; // Bump on any IPC schema change
         // 1.2.0: added windowTitlePrefix to GetWindowInfo payload (Mac fallback support)
+        // 1.3.0: added platform/build methods (list_platforms, get/set_platform_settings,
+        //        switch_build_target, build_player) backed by the optional IBuildManager
 
         public static class Methods
         {
@@ -32,6 +34,13 @@ namespace AkerMcp.Shared.Ipc
             public const string GetSelection = "get_selection";
             public const string TakeScreenshot = "take_screenshot";
             public const string GetWindowInfo = "get_window_info";
+
+            // Platform / build (backed by the optional IBuildManager).
+            public const string ListPlatforms = "list_platforms";
+            public const string GetPlatformSettings = "get_platform_settings";
+            public const string SetPlatformSettings = "set_platform_settings";
+            public const string SwitchBuildTarget = "switch_build_target";
+            public const string BuildPlayer = "build_player";
         }
 
         public static class ErrorCodes

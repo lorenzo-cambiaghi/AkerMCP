@@ -42,6 +42,7 @@ namespace AkerMcp.Client
         protected virtual ICompilationSupport? CreateCompilationSupport() => null;
         protected virtual ICodeExecutor? CreateCodeExecutor() => null;
         protected virtual IScreenCapture? CreateScreenCapture() => null;
+        protected virtual IBuildManager? CreateBuildManager() => null;
 
         protected abstract void Log(string message);
         protected abstract void LogError(string message);
@@ -64,7 +65,8 @@ namespace AkerMcp.Client
                 CreateEditorContext(),
                 CreateCompilationSupport(),
                 CreateCodeExecutor(),
-                CreateScreenCapture());
+                CreateScreenCapture(),
+                CreateBuildManager());
 
             _cts = new CancellationTokenSource();
 

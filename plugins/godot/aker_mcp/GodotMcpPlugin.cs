@@ -49,6 +49,8 @@ namespace AkerMcp.GodotAdapter
 
         protected override IScreenCapture? CreateScreenCapture() => new GodotScreenCapture();
 
+        protected override IBuildManager? CreateBuildManager() => new GodotBuildManager();
+
         protected override void Log(string message) => GD.Print($"[AkerMcp] {message}");
         protected override void LogError(string message) => GD.PrintErr($"[AkerMcp] {message}");
 
