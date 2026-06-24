@@ -203,7 +203,23 @@ The plugin auto-starts with the editor and pumps requests on the main thread eve
 
 AkerMCP ships a **Stride (Game Studio) adapter** with the **same full toolset** — including undoable edits via Stride's Quantum graph, `execute` (Roslyn), real Scene-view screenshots (editor back-buffer, with gizmos), and the platform/build tools (`dotnet build` per executable project).
 
-> Stride support runs as a Game Studio editor plugin. Game Studio has no third-party plugin discovery yet, so the current setup builds the adapter against your Stride and loads it via a small one-time hook — it is more involved than Unity/Godot.
+> Stride support runs as a Game Studio editor plugin. Game Studio has no third-party plugin discovery, so AkerMcp registers itself with one tiny bootstrap. Pick the path that matches how you got Stride.
+
+#### Option A — Stride installed from the Launcher (official binaries, no Stride rebuild) — recommended
+
+A per-launch wrapper injects the plugin **only into the Game Studio process it starts**, via the .NET runtime's `DOTNET_STARTUP_HOOKS`. The variable is never written to your user/machine environment, so it cannot affect any other .NET app; if the plugin DLL is ever missing, the wrapper just launches Game Studio without AkerMcp.
+
+```powershell
+# one-time, from the repo root
+.\install-stride-wrapper.ps1 -GameStudioPath "C:\path\to\Stride.GameStudio.exe"
+# (omit -GameStudioPath to auto-detect a Launcher install)
+```
+
+This builds the adapter against your installed Game Studio, drops it into `<GameStudio>/AkerMcpPlugins`, and creates a **"Stride Game Studio (AkerMCP)"** shortcut (Desktop + Start Menu). Launch Stride from that shortcut and **open a project + scene** — the pipe server starts automatically. Your official Stride shortcut keeps launching Game Studio untouched. Remove everything with `.\install-stride-wrapper.ps1 -Uninstall`.
+
+#### Option B — You build Stride Game Studio from source
+
+The adapter loads in-process via a drop-in loader patched into Game Studio itself (no wrapper needed).
 
 1. Build **Stride Game Studio** from source (the adapter references its editor assemblies). See the [Stride build docs](https://github.com/stride3d/stride).
 2. Add a drop-in plugin loader to `Stride.GameStudio/Program.cs` (right after the built-in plugins are registered) so Game Studio loads any adapter placed in an `AkerMcpPlugins` folder next to `Stride.GameStudio.exe`:
@@ -218,7 +234,7 @@ AkerMCP ships a **Stride (Game Studio) adapter** with the **same full toolset** 
    ```
 3. Build + deploy the adapter into Game Studio with `setup-stride.ps1` (set `-StrideBin` to your Game Studio build output), then launch Game Studio and **open a project + scene** — the plugin starts the pipe server when a project opens.
 
-The standalone MCP server then discovers the Stride engine automatically — same as Unity/Godot.
+Either way, the standalone MCP server then discovers the Stride engine automatically — same as Unity/Godot.
 
 ### 2. MCP Server Setup
 1. Go to the [latest GitHub Release](https://github.com/lorenzo-cambiaghi/AkerMCP/releases/latest).
@@ -345,7 +361,7 @@ If you just want to run the included sample, run `./setup-samples.sh` (or `setup
 ### Packaging a Release
 On Windows, `.\publish-release.ps1 -Version v1.2.3` does the whole release in one command: builds the packages (Unity must be closed), tags the commit, creates the [GitHub Release](https://github.com/lorenzo-cambiaghi/AkerMCP/releases) and uploads the five artifacts via the GitHub API (auth via `GITHUB_TOKEN` or the stored git credential). Use `-DryRun` to preview, `-SkipBuild` to reuse existing `Build/` output.
 
-The six release artifacts are: `AkerMCP.unitypackage` (Unity plugin), `AkerMcp.Godot-addon.zip` (Godot addon — extract into your project's `addons/`), `AkerMcp.Stride-source.zip` (Stride adapter **source** — build it against your Game Studio per [1c. Stride Setup](#1c-stride-setup); it is not a prebuilt binary because it links your specific Stride editor assemblies), and the three standalone server builds (`AkerMcp.Server-{win,osx,linux}-x64.zip`).
+The six release artifacts are: `AkerMCP.unitypackage` (Unity plugin), `AkerMcp.Godot-addon.zip` (Godot addon — extract into your project's `addons/`), `AkerMcp.Stride-source.zip` (Stride adapter **source** + `install-stride-wrapper.ps1` — build it against your Game Studio per [1c. Stride Setup](#1c-stride-setup); it is not a prebuilt binary because it links your specific Stride editor assemblies), and the three standalone server builds (`AkerMcp.Server-{win,osx,linux}-x64.zip`).
 
 Alternatively, run `build-package.bat` (Windows) or `./build-package.sh` (Mac/Linux) to only produce the artifacts in the local `Build/` folder (gitignored), then upload them as release assets manually. Binaries are distributed via Releases, not committed to the repository.
 
@@ -738,6 +754,7 @@ AkerMCP/
 │       └── GodotCodeExecutor.cs         Roslyn-powered C# execution engine
 │   └── stride/                         Stride (Game Studio) adapter (.csproj + sources)
 │       ├── StrideMcpPlugin.cs           AssetsPlugin entry (Game Studio hook)
+│       ├── StrideBootstrap.cs           Idempotent Register() — shared by both loaders
 │       ├── StrideEnginePlugin.cs        EnginePluginBase (composed; hosts the IPC server)
 │       ├── StrideSceneGraph.cs          Live edited-scene traversal
 │       ├── StrideSceneNode.cs           Reflection wrapper for Entities + components
@@ -749,6 +766,10 @@ AkerMCP/
 │       ├── StrideScreenCapture.cs       Scene-view back-buffer capture (Texture.Save)
 │       ├── StrideBuildManager.cs        Platform/build (executable projects)
 │       └── StrideCodeExecutor.cs        Roslyn-powered C# execution engine
+│   ├── stride-startuphook/             DOTNET_STARTUP_HOOKS bootstrap (binary-install path)
+│   │   └── StartupHook.cs               Registers the adapter once Game Studio loads
+│   └── stride-launcher/                Per-launch wrapper (sets the hook for the GS child only)
+│       └── Program.cs                   Starts ../Stride.GameStudio.exe with the hook injected
 ├── samples/                            Minimal harness projects (open in the editor)
 │   ├── unity/                          Unity project; Assets/AkerMcp → junction to plugins/unity
 │   └── godot/                          Godot project; addons/aker_mcp → junction to plugins/godot

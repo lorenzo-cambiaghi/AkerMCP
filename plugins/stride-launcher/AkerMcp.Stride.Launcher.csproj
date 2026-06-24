@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Thin per-launch wrapper around Stride Game Studio.
+
+    Installed into <GameStudio>/AkerMcpPlugins, so its sibling is the hook DLL and
+    its parent folder is Game Studio itself. It starts ../Stride.GameStudio.exe and
+    injects DOTNET_STARTUP_HOOKS ONLY into that child process's environment — the
+    variable is never written to the user/machine environment, so it cannot affect
+    any other .NET process. If the hook DLL is missing it simply launches Game
+    Studio without AkerMcp. WinExe = no console window.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <UseWindowsForms>false</UseWindowsForms>
+    <UseWPF>false</UseWPF>
+    <AssemblyName>AkerMcp.Stride.Launcher</AssemblyName>
+    <RootNamespace>AkerMcp.StrideLauncher</RootNamespace>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+
+</Project>

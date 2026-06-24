@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    .NET runtime startup hook for the AkerMcp Stride adapter.
+
+    Loaded by Game Studio's runtime via the DOTNET_STARTUP_HOOKS environment
+    variable, which the AkerMcp.Stride.Launcher sets ONLY for the Game Studio
+    child process it spawns (never machine/user-wide). This assembly has no
+    compile-time reference to Stride or to the adapter: it locates the editor
+    assembly at runtime and calls AkerMcp.StrideAdapter.StrideBootstrap.Register
+    reflectively, so it loads safely (and does nothing) in any non-Stride process.
+
+    netstandard2.0 keeps it loadable in the editor's .NET 10 runtime with the
+    smallest possible surface.
+  -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>AkerMcp.Stride.StartupHook</AssemblyName>
+    <RootNamespace>AkerMcp.StrideStartupHook</RootNamespace>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+  </PropertyGroup>
+
+</Project>
