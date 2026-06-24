@@ -88,7 +88,7 @@ if errorlevel 1 goto :error
 rmdir /s /q "%~dp0Build\_godot_stage"
 
 echo   - Stride adapter source + install scripts (build against your Game Studio; see README "1c. Stride Setup")
-tar -a -c -f "%~dp0Build\AkerMcp.Stride-source.zip" --exclude=*/bin/* --exclude=*/obj/* -C "%~dp0" plugins/stride plugins/stride-startuphook plugins/stride-launcher install-stride-wrapper.ps1 setup-stride.ps1
+tar -a -c -f "%~dp0Build\AkerMcp.Stride-source.zip" --exclude=*/bin/* --exclude=*/obj/* -C "%~dp0." plugins/stride plugins/stride-startuphook plugins/stride-launcher install-stride-wrapper.ps1 setup-stride.ps1
 if errorlevel 1 goto :error
 
 echo   - Windows (win-x64)
