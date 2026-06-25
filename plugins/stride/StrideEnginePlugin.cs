@@ -44,6 +44,7 @@ namespace AkerMcp.StrideAdapter
         protected override IScreenCapture? CreateScreenCapture() => new StrideScreenCapture();
 
         protected override ISpriteImporter? CreateSpriteImporter() => new StrideSpriteImporter();
+        protected override ISceneManager? CreateSceneManager() => new StrideSceneManager();
 
         protected override void Log(string message)
             => System.Diagnostics.Debug.WriteLine($"[AkerMcp] {message}");
