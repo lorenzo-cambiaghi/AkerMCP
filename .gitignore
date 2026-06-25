@@ -71,3 +71,7 @@ samples/unity/obj/
 # Unity plugin DLLs (built from source, not vendored)
 plugins/unity/Plugins/*.dll
 plugins/unity/Plugins/*.dll.meta
+
+# Local demo / recording notes (not for the repo)
+flappy-bird-demo.md
+*.demo.md

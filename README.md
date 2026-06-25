@@ -28,8 +28,14 @@ The 100% C# engine-agnostic core means the **same** AI workflow — inspect, mod
 | Selection · console logs · recompile/compile-errors | ✅ | ✅ | ✅ |
 | Scene-view screenshot **with editor gizmos** | ✅ | ✅ | ✅ |
 | Platform/build tools (list · switch · build_player) | ✅ | ✅ | ✅ |
+| **2D vector placeholders** (`create_sprite`, server-rasterized) | ✅ | ✅ | ✅ |
+| Scene management (`new_scene` · `open_scene` · `save_scene`) | ✅ | ✅ | ✅ |
 
-Every row is implemented and verified live in each engine's editor — not a roadmap. Plus engine-independent OS tools (`list_windows` / `capture_window`) to screenshot any window on the machine.
+Most rows are implemented and verified live in each engine's editor — not a roadmap. Plus engine-independent OS tools (`list_windows` / `capture_window`) to screenshot any window on the machine.
+
+> **Newest additions** — `create_sprite` lets the AI author flat-geometric placeholder art as a vector spec that the **server rasterizes to a PNG** and imports as a real sprite, so it works regardless of the engine's own vector support. Unity & Godot import + place it; Stride persists it as a real `.sdtex` texture asset in the package (plus a runtime preview entity for immediate visibility). Companion authoring tools `new_scene`/`open_scene`/`save_scene` and `write_script` (all three engines) let an AI build a 2D prototype — art, scene and gameplay code — end-to-end from a single prompt.
+>
+> *(The Stride asset-pipeline paths for `create_sprite`/scene tools are build-verified and pending live validation in Game Studio; Unity & Godot are validated.)*
 
 ### 🧠 No ceiling: arbitrary C# on the editor's main thread
 
@@ -122,6 +128,8 @@ No custom tool class needed. No code generation. Just reflection.
 - **Equal support for every engine — currently Unity, Godot and Stride**: not a Unity tool with side ports. All three are first-class adapters at full feature parity (see the table above); none is the "primary" engine, and there is no comparable multi-engine alternative.
 - **20+ Generic Reflection-Based Tools**: Operate on any object or component without custom tool definitions — the identical tool surface across all engines.
 - **Roslyn-Powered Dynamic Execution**: Send arbitrary C# scripts via the `execute` tool to perform complex procedural tasks or bulk operations directly inside the editor (Unity / Godot / Stride Game Studio).
+- **AI-Authored 2D Placeholders (`create_sprite`)**: The AI emits a flat-geometric *shape-spec* (JSON) and the **server** rasterizes it to an RGBA PNG (pure-managed ImageSharp.Drawing) before importing it as a sprite — **engine-agnostic by design**, since the engine receives a ready raster and never needs its own SVG/vector support. Perfect for clean prototype art with zero art skills.
+- **End-to-End Authoring Tools**: `new_scene`/`open_scene`/`save_scene` (scene management) and `write_script` (writes a source file into the project, resolved engine-side) let an AI go from prompt to a playable prototype — scene, art and gameplay code — in one session.
 - **Visual Verification (`take_screenshot`)**: Engine-internal scene-view capture *with editor gizmos* in all three engines, plus a **cross-platform OS-level fallback** (`PrintWindow` on Windows, Quartz `CGWindowListCreateImage` on macOS) and standalone `list_windows` / `capture_window` tools for any window. Output is auto-resized and JPEG-encoded via ImageSharp to fit AI image limits.
 - **MessagePack IPC Protocol**: High-performance, low-latency binary communication between the standalone MCP Server and the engine plugin.
 - **Robust Type System**: Serializes and deserializes engine structs (`Vector3`, `Color`, `Bounds`, …) seamlessly, case-insensitively, for Unity, Godot and Stride alike.
@@ -416,6 +424,34 @@ If you see this, everything is working.
 | `get_compile_errors` | Retrieve compilation errors with file path, line, and column |
 | `get_console_logs` | Read engine console entries with level and text filtering |
 | `execute` | Run arbitrary C# code in the engine context (Roslyn) — no fixed API surface |
+| `write_script` | Write a source file into the project (path relative to the project root, resolved engine-side) — works even if the server runs on a different machine. Pair with `refresh_scripts`. |
+
+### Scene & 2D Authoring
+
+Build a 2D prototype end-to-end — scene, placeholder art, and gameplay — without leaving the AI session.
+
+| Tool | Description |
+|------|-------------|
+| `create_sprite` | Author a flat-geometric **shape-spec** (JSON); the server rasterizes it to an RGBA PNG and imports it as a sprite, optionally placing it in the scene. Engine-agnostic — the engine receives a ready raster |
+| `new_scene` | Create a fresh scene (`two_d: true` sets up an orthographic 2D camera); optionally save it |
+| `open_scene` | Open an existing scene by its engine asset path |
+| `save_scene` | Save the active/edited scene (in place, or to a new path) |
+
+> **Engine support:** all three engines implement these. `create_sprite` imports + places a sprite on **Unity** and **Godot**; on **Stride** it persists a real `.sdtex` texture asset in the package (via the editor's `SessionViewModel`) and also adds a runtime preview entity for immediate visibility. `new_scene`/`open_scene`/`save_scene` work on **Unity** and **Godot** (file-on-disk scenes) and on **Stride** (package-managed `SceneAsset` via the editor). `write_script` works on all three. *(Stride's asset-pipeline paths are build-verified; validate live in Game Studio.)*
+
+**`create_sprite` shape-spec** — drawn in order (painter's): `ellipse`, `rect` (with `rx` for rounded corners), `polygon`, `line`/`polyline`, and `path` (an SVG path-data subset). Each shape takes a `fill` (hex or linear `gradient`), optional `stroke`/`strokeWidth`, and `opacity`. Example (a flat bird placeholder):
+
+```json
+{
+  "name": "bird", "pixels_per_unit": 64, "pivot": {"x":0.5,"y":0.5},
+  "scene_path": "/World", "position": {"x":-3,"y":0,"z":0},
+  "spec": { "width":64, "height":64, "shapes": [
+    {"type":"ellipse","cx":31,"cy":34,"rx":23,"ry":21,"fill":"#FFC107","stroke":"#C98A00","strokeWidth":2},
+    {"type":"polygon","points":[[52,29],[64,33],[52,38]],"fill":"#FF8C00"} ] }
+}
+```
+
+> Keep placeholders flat and geometric — recognizable silhouette over detail. For arbitrary SVG (boolean paths, filters, tracing) a dedicated vector tool would be the right home; `create_sprite` deliberately targets the clean-prototype niche.
 
 ### Platform & Build
 
@@ -714,6 +750,7 @@ AkerMCP/
 │   ├── EngineConnection.cs              IPC client to engine plugin
 │   ├── StdioTransport.cs                stdin/stdout transport
 │   ├── ImageProcessor.cs                Resize + JPEG normalization (cross-platform via ImageSharp)
+│   ├── SpriteRasterizer.cs              shape-spec → RGBA PNG (pure-managed ImageSharp.Drawing) for create_sprite
 │   └── Platform/                        OS-level window capture
 │       ├── IPlatformScreenCapture.cs    Common interface
 │       ├── PlatformScreenCapture.cs     Runtime OS-based factory
@@ -797,6 +834,8 @@ public class MyEnginePlugin : EnginePluginBase
     protected override IAssetManager? CreateAssetManager() => null;
     protected override ICompilationSupport? CreateCompilationSupport() => new MyCompilationSupport();
     protected override IScreenCapture? CreateScreenCapture() => new MyScreenCapture();
+    protected override ISpriteImporter? CreateSpriteImporter() => new MySpriteImporter();
+    protected override ISceneManager? CreateSceneManager() => new MySceneManager();
 
     protected override void Log(string message) { /* ... */ }
     protected override void LogError(string message) { /* ... */ }
@@ -813,6 +852,8 @@ public class MyEnginePlugin : EnginePluginBase
 | `IAssetManager` | Asset search, load, save, delete | No |
 | `ICompilationSupport` | Script recompilation, error retrieval | No |
 | `IScreenCapture` | Engine-internal render-buffer capture (Game/Scene view) | No — falls back to OS-level capture on Windows (`PrintWindow`) and macOS (Quartz). On Linux, this interface is required |
+| `ISpriteImporter` | Import a server-rasterized PNG as a 2D sprite, optionally placing it in the scene (powers `create_sprite`) | No — `create_sprite` reports it as unavailable if absent |
+| `ISceneManager` | Create / open / save scenes (powers `new_scene`/`open_scene`/`save_scene`) | No — the scene tools report it as unavailable if absent |
 
 > **Tip for the macOS OS-level fallback:** `IEngineCapabilities.EngineName` is used as a window-title preference signal — the macOS capture path prefers PID-owned windows whose title *contains* this string (anywhere in the title) to disambiguate the editor's main window from inspector/floating panels. The match is case-insensitive and works for both prefix-style titles (Unity: `"Unity 6000.x …"`) and suffix-style titles (Godot: `"Scene - Project - Godot Engine"`). If no window matches, the largest PID-owned window is used as a fallback, so even a non-matching `EngineName` won't break the capture.
 
