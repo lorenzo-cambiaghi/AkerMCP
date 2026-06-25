@@ -75,6 +75,10 @@
       <HintPath>$(StrideBin)\Stride.Graphics.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="Stride.Rendering">
+      <HintPath>$(StrideBin)\Stride.Rendering.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="Stride">
       <HintPath>$(StrideBin)\Stride.dll</HintPath>
       <Private>false</Private>

@@ -338,6 +338,100 @@ Typical size 150-400 KB, well under model image limits.",
                 HandleTakeScreenshot,
                 new ToolAnnotations { ReadOnlyHint = true });
 
+            Register("create_sprite",
+                @"Create a 2D sprite placeholder from a flat-geometric 'shape-spec' (authored by you as JSON).
+The server rasterizes it to a PNG and imports it into the engine as a sprite — this works on ANY engine
+(Unity/Godot/Stride) because the engine receives a ready raster, not vector data.
+
+HOUSE STYLE: keep placeholders flat, geometric, and clean (recognizable silhouette > detail). This is the
+right look for prototypes — abstract-but-clean beats complex-but-ugly. Great for Flappy Bird, Cut the Rope, etc.
+
+shape-spec format:
+{
+  ""width"": 64, ""height"": 64,           // logical coordinate space
+  ""background"": null,                     // null = transparent (usual for sprites)
+  ""shapes"": [                              // drawn in order (painter's)
+    { ""type"":""ellipse"", ""cx"":32,""cy"":32,""rx"":20,""ry"":18, ""fill"":""#FFCC00"", ""stroke"":""#222"",""strokeWidth"":2 },
+    { ""type"":""rect"", ""x"":4,""y"":4,""w"":56,""h"":56,""rx"":8, ""fill"":<paint> },
+    { ""type"":""polygon"", ""points"":[[x,y],...], ""fill"":""#FF8800"" },
+    { ""type"":""line"", ""points"":[[x,y],...], ""stroke"":""#000"",""strokeWidth"":3 },
+    { ""type"":""path"", ""d"":""M0 0 L10 10 Q.. C.. Z"", ""fill"":""#000"" }
+  ]
+}
+A <paint> is a hex string or a linear gradient:
+  { ""gradient"":""linear"", ""x1"":0,""y1"":0,""x2"":0,""y2"":64, ""stops"":[{""offset"":0,""color"":""#fff""},{""offset"":1,""color"":""#888""}] }
+Optional per-shape ""opacity"" (0..1).
+
+After creating sprites, call take_screenshot to verify how they look.",
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""name"": { ""type"": ""string"", ""description"": ""Asset name (no extension)"" },
+                        ""spec"": { ""type"": ""object"", ""description"": ""The shape-spec (see description)"" },
+                        ""width_px"": { ""type"": ""integer"", ""description"": ""Output width in pixels (default: spec width)"" },
+                        ""height_px"": { ""type"": ""integer"", ""description"": ""Output height in pixels (default: spec height)"" },
+                        ""pixels_per_unit"": { ""type"": ""number"", ""description"": ""Engine pixels-per-unit (default: 100)"" },
+                        ""pivot"": { ""type"": ""object"", ""description"": ""Pivot 0..1, e.g. {\""x\"":0.5,\""y\"":0.5} (default center)"" },
+                        ""filter"": { ""type"": ""string"", ""enum"": [""smooth"", ""point""], ""description"": ""Texture filtering (default: smooth)"" },
+                        ""scene_path"": { ""type"": ""string"", ""description"": ""Optional: place a sprite node under this path after import"" },
+                        ""position"": { ""type"": ""object"", ""description"": ""Optional placement position, e.g. {\""x\"":0,\""y\"":0,\""z\"":0}"" }
+                    },
+                    ""required"": [""name"", ""spec""]
+                }"),
+                HandleCreateSprite);
+
+            Register("new_scene",
+                @"Create a fresh scene in the engine. Use this to start a prototype from a clean slate.
+'two_d: true' (default) sets up a 2D-friendly scene (e.g. orthographic camera, sky background on Unity).
+Pass 'save_path' (engine asset path, e.g. 'Assets/Scenes/Flappy.unity' or 'res://scenes/flappy.tscn') to save it.
+Not available on every engine (e.g. Stride) — it reports so if unsupported.",
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""two_d"": { ""type"": ""boolean"", ""description"": ""2D setup (default: true)"" },
+                        ""save_path"": { ""type"": ""string"", ""description"": ""Optional engine asset path to save the new scene"" }
+                    }
+                }"),
+                (args, ct) => _engine.ForwardToolCall(IpcConstants.Methods.NewScene, args, ct),
+                new ToolAnnotations { DestructiveHint = true });
+
+            Register("open_scene",
+                @"Open an existing scene by its engine asset path (e.g. 'Assets/Scenes/Main.unity' or 'res://scenes/main.tscn').",
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""path"": { ""type"": ""string"", ""description"": ""Engine asset path of the scene to open"" }
+                    },
+                    ""required"": [""path""]
+                }"),
+                (args, ct) => _engine.ForwardToolCall(IpcConstants.Methods.OpenScene, args, ct),
+                new ToolAnnotations { DestructiveHint = true });
+
+            Register("save_scene",
+                @"Save the active/edited scene. Omit 'path' to save in place; pass 'path' to save to a new location.",
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""path"": { ""type"": ""string"", ""description"": ""Optional engine asset path to save to (default: current path)"" }
+                    }
+                }"),
+                (args, ct) => _engine.ForwardToolCall(IpcConstants.Methods.SaveScene, args, ct));
+
+            Register("write_script",
+                @"Write a source file into the engine project (path relative to the project root, e.g.
+'Assets/Scripts/Bird.cs' on Unity, 'scripts/bird.gd' on Godot). Creates intermediate folders.
+The file lands inside the project regardless of where this MCP server runs (it resolves the project root engine-side).
+After writing C# scripts, call refresh_scripts to compile them.",
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""path"": { ""type"": ""string"", ""description"": ""Path relative to the project root (or absolute)"" },
+                        ""content"": { ""type"": ""string"", ""description"": ""Full file contents"" }
+                    },
+                    ""required"": [""path"", ""content""]
+                }"),
+                (args, ct) => _engine.ForwardToolCall(IpcConstants.Methods.WriteScript, args, ct));
+
             Register("list_platforms",
                 @"List the build platforms the engine knows about (e.g. Android, iOS, Windows).
 Each entry is flagged whether it is the active build target and whether it can be built on this machine.
@@ -469,6 +563,54 @@ Example: { ""title"": ""Game Studio"" }",
             {
                 Content = new List<ContentItem> { ContentItem.FromImage(base64, "image/jpeg") }
             });
+        }
+
+        private async Task<ToolResult> HandleCreateSprite(JsonElement? args, CancellationToken ct)
+        {
+            if (args is not JsonElement a || a.ValueKind != JsonValueKind.Object)
+                return ToolResult.Error("Missing arguments.");
+
+            if (!a.TryGetProperty("name", out var nameEl) || nameEl.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(nameEl.GetString()))
+                return ToolResult.Error("Missing required 'name'.");
+            var name = nameEl.GetString()!;
+
+            if (!a.TryGetProperty("spec", out var spec) || spec.ValueKind != JsonValueKind.Object)
+                return ToolResult.Error("Missing required 'spec' (shape-spec object).");
+
+            // Target px defaults to the spec's logical size (1:1), else 128.
+            int specW = spec.TryGetProperty("width", out var sw) && sw.ValueKind == JsonValueKind.Number ? sw.GetInt32() : 128;
+            int specH = spec.TryGetProperty("height", out var sh) && sh.ValueKind == JsonValueKind.Number ? sh.GetInt32() : 128;
+            int width = a.TryGetProperty("width_px", out var wpx) && wpx.ValueKind == JsonValueKind.Number ? wpx.GetInt32() : specW;
+            int height = a.TryGetProperty("height_px", out var hpx) && hpx.ValueKind == JsonValueKind.Number ? hpx.GetInt32() : specH;
+
+            byte[] png;
+            try
+            {
+                png = SpriteRasterizer.RenderToPng(spec, width, height);
+            }
+            catch (Exception ex)
+            {
+                return ToolResult.Error($"Rasterization failed: {ex.Message}");
+            }
+
+            // Build metadata with the snake_case keys the engine handler reads.
+            var metadata = new Dictionary<string, object?> { ["name"] = name };
+            if (a.TryGetProperty("pixels_per_unit", out var ppu) && ppu.ValueKind == JsonValueKind.Number)
+                metadata["pixels_per_unit"] = ppu.GetDouble();
+            if (a.TryGetProperty("filter", out var filt) && filt.ValueKind == JsonValueKind.String)
+                metadata["filter"] = filt.GetString();
+            if (a.TryGetProperty("pivot", out var pivot) && pivot.ValueKind == JsonValueKind.Object)
+                metadata["pivot"] = JsonSerializer.Deserialize<Dictionary<string, double>>(pivot.GetRawText());
+            if (a.TryGetProperty("scene_path", out var sp) && sp.ValueKind == JsonValueKind.String)
+                metadata["scene_path"] = sp.GetString();
+            if (a.TryGetProperty("position", out var pos) && pos.ValueKind == JsonValueKind.Object)
+                metadata["position"] = JsonSerializer.Deserialize<Dictionary<string, double>>(pos.GetRawText());
+
+            var metadataJson = JsonSerializer.Serialize(metadata);
+
+            var result = await _engine.ForwardSpriteImport(metadataJson, png, ct, timeoutMs: 60_000);
+            return result;
         }
 
         private async Task<ToolResult> HandleSwitchBuildTarget(JsonElement? args, CancellationToken ct)

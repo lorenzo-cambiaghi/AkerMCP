@@ -289,6 +289,76 @@ namespace AkerMcp.Server
             }
         }
 
+        /// <summary>
+        /// Sends a request carrying BOTH JSON metadata (Payload) and a raw binary blob
+        /// (Binary) into the engine — the inbound counterpart of ForwardBinaryToolCall.
+        /// Used by create_sprite to ship a server-rasterized PNG to the engine plugin.
+        /// </summary>
+        public async Task<ToolResult> ForwardSpriteImport(
+            string metadataJson, byte[] binary, CancellationToken ct,
+            int timeoutMs = DefaultRequestTimeoutMs)
+        {
+            var channel = _channel;
+            if (channel == null)
+            {
+                if (!await WaitForConnection(ReconnectGraceMs, ct).ConfigureAwait(false))
+                    return ToolResult.Error($"{EngineDisconnectedPrefix} No engine connected. Retry shortly.");
+                channel = _channel;
+                if (channel == null)
+                    return ToolResult.Error($"{EngineDisconnectedPrefix} Engine connection dropped — retry shortly.");
+            }
+
+            var requestId = Interlocked.Increment(ref _nextRequestId);
+            var request = new IpcRequest
+            {
+                Id = requestId,
+                Method = IpcConstants.Methods.ImportSprite,
+                Payload = System.Text.Encoding.UTF8.GetBytes(metadataJson),
+                Binary = binary
+            };
+
+            var tcs = new TaskCompletionSource<IpcResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _pendingRequests[requestId] = tcs;
+
+            try
+            {
+                await channel.SendRequest(request, ct).ConfigureAwait(false);
+
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(timeoutMs);
+                using var reg = cts.Token.Register(() => tcs.TrySetCanceled());
+
+                var response = await tcs.Task.ConfigureAwait(false);
+
+                if (!response.Success)
+                    return ToolResult.Error(response.Error ?? "Unknown engine error");
+
+                var resultText = response.Payload != null
+                    ? System.Text.Encoding.UTF8.GetString(response.Payload)
+                    : "OK";
+                return ToolResult.Text(resultText);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (OperationCanceledException)
+            {
+                if (!IsConnected)
+                    return ToolResult.Error(
+                        $"{EngineDisconnectedPrefix} Engine disconnected while importing sprite. Retry shortly.");
+                return ToolResult.Error($"import_sprite timed out after {timeoutMs / 1000}s (engine still connected).");
+            }
+            catch (IOException ex)
+            {
+                return ToolResult.Error($"{EngineDisconnectedPrefix} Pipe error during import_sprite: {ex.Message}. Retry shortly.");
+            }
+            finally
+            {
+                _pendingRequests.TryRemove(requestId, out _);
+            }
+        }
+
         public async Task<BinaryToolCallResult> ForwardBinaryToolCall(
             string method, JsonElement? arguments, CancellationToken ct)
         {

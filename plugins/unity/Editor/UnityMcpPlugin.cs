@@ -52,6 +52,8 @@ namespace AkerMcp.Unity
         }
         protected override IScreenCapture? CreateScreenCapture() => new UnityScreenCapture();
         protected override IBuildManager? CreateBuildManager() => new UnityBuildManager();
+        protected override ISpriteImporter? CreateSpriteImporter() => new UnitySpriteImporter();
+        protected override ISceneManager? CreateSceneManager() => new UnitySceneManager();
 
         protected override void Log(string message) => Debug.Log($"[AkerMcp] {message}");
         protected override void LogError(string message) => Debug.LogError($"[AkerMcp] {message}");

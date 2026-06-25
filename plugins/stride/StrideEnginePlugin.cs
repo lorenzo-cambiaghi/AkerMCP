@@ -43,6 +43,8 @@ namespace AkerMcp.StrideAdapter
         // Real Scene-view capture: read back the editor preview game's back buffer.
         protected override IScreenCapture? CreateScreenCapture() => new StrideScreenCapture();
 
+        protected override ISpriteImporter? CreateSpriteImporter() => new StrideSpriteImporter();
+
         protected override void Log(string message)
             => System.Diagnostics.Debug.WriteLine($"[AkerMcp] {message}");
 

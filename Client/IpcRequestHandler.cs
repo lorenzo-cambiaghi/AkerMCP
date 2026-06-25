@@ -21,6 +21,8 @@ namespace AkerMcp.Client
         private readonly ICodeExecutor? _codeExecutor;
         private readonly IScreenCapture? _screenCapture;
         private readonly IBuildManager? _buildManager;
+        private readonly ISpriteImporter? _spriteImporter;
+        private readonly ISceneManager? _sceneManager;
         private readonly IEngineCapabilities _capabilities;
         private readonly IMainThreadDispatcher _dispatcher;
         private readonly PropertyPathResolver _pathResolver;
@@ -53,7 +55,9 @@ namespace AkerMcp.Client
             ICompilationSupport? compilationSupport = null,
             ICodeExecutor? codeExecutor = null,
             IScreenCapture? screenCapture = null,
-            IBuildManager? buildManager = null)
+            IBuildManager? buildManager = null,
+            ISpriteImporter? spriteImporter = null,
+            ISceneManager? sceneManager = null)
         {
             _sceneGraph = sceneGraph;
             _capabilities = capabilities;
@@ -65,6 +69,8 @@ namespace AkerMcp.Client
             _codeExecutor = codeExecutor;
             _screenCapture = screenCapture;
             _buildManager = buildManager;
+            _spriteImporter = spriteImporter;
+            _sceneManager = sceneManager;
             _pathResolver = new PropertyPathResolver();
             _inspector = new ReflectionInspector();
             _methodInvoker = new MethodInvoker();
@@ -78,6 +84,11 @@ namespace AkerMcp.Client
                 // Binary response paths bypass the string-based switch
                 if (request.Method == IpcConstants.Methods.TakeScreenshot)
                     return await HandleTakeScreenshot(request, ct);
+
+                // Inbound-binary path: carries raw PNG bytes in request.Binary and
+                // needs to report NOT_SUPPORTED when the engine lacks ISpriteImporter.
+                if (request.Method == IpcConstants.Methods.ImportSprite)
+                    return await HandleImportSprite(request, ct);
 
                 var result = request.Method switch
                 {
@@ -102,6 +113,10 @@ namespace AkerMcp.Client
                     IpcConstants.Methods.GetSelection => await HandleGetSelection(ct),
                     IpcConstants.Methods.Execute => await HandleExecute(request, ct),
                     IpcConstants.Methods.GetWindowInfo => HandleGetWindowInfo(),
+                    IpcConstants.Methods.NewScene => await HandleNewScene(request, ct),
+                    IpcConstants.Methods.OpenScene => await HandleOpenScene(request, ct),
+                    IpcConstants.Methods.SaveScene => await HandleSaveScene(request, ct),
+                    IpcConstants.Methods.WriteScript => await HandleWriteScript(request, ct),
                     IpcConstants.Methods.ListPlatforms => await HandleListPlatforms(ct),
                     IpcConstants.Methods.GetPlatformSettings => await HandleGetPlatformSettings(request, ct),
                     IpcConstants.Methods.SetPlatformSettings => await HandleSetPlatformSettings(request, ct),
@@ -146,6 +161,47 @@ namespace AkerMcp.Client
             return IpcResponse.Binary(request.Id, bytes, contentType);
         }
 
+        private async Task<IpcResponse> HandleImportSprite(IpcRequest request, CancellationToken ct)
+        {
+            if (_spriteImporter == null)
+                return IpcResponse.FailWithCode(request.Id,
+                    IpcConstants.ErrorCodes.NotSupported,
+                    "Engine does not implement ISpriteImporter.");
+
+            if (request.Binary == null || request.Binary.Length == 0)
+                return IpcResponse.Fail(request.Id, "import_sprite called without image bytes (request.Binary empty).");
+
+            var args = ParseArgs(request);
+
+            var importReq = new SpriteImportRequest
+            {
+                Name = args.TryGetProperty("name", out var n) ? (n.GetString() ?? "sprite") : "sprite",
+                Png = request.Binary,
+                PixelsPerUnit = args.TryGetProperty("pixels_per_unit", out var ppu) ? (float)ppu.GetDouble() : 100f,
+                Filter = args.TryGetProperty("filter", out var f) ? (f.GetString() ?? "smooth") : "smooth",
+                ScenePath = args.TryGetProperty("scene_path", out var sp) ? sp.GetString() : null,
+            };
+
+            if (args.TryGetProperty("pivot", out var pivot) && pivot.ValueKind == JsonValueKind.Object)
+            {
+                if (pivot.TryGetProperty("x", out var px)) importReq.PivotX = (float)px.GetDouble();
+                if (pivot.TryGetProperty("y", out var py)) importReq.PivotY = (float)py.GetDouble();
+            }
+
+            if (args.TryGetProperty("position", out var pos) && pos.ValueKind == JsonValueKind.Object)
+            {
+                if (pos.TryGetProperty("x", out var x)) importReq.PosX = (float)x.GetDouble();
+                if (pos.TryGetProperty("y", out var y)) importReq.PosY = (float)y.GetDouble();
+                if (pos.TryGetProperty("z", out var z)) importReq.PosZ = (float)z.GetDouble();
+            }
+
+            var result = await _dispatcher.RunOnMainThread(
+                () => _spriteImporter.ImportSprite(importReq), ct);
+
+            return IpcResponse.Ok(request.Id,
+                Encoding.UTF8.GetBytes(JsonSerializer.Serialize(result, _compactJsonOptions)));
+        }
+
         private string HandleGetWindowInfo()
         {
             var process = System.Diagnostics.Process.GetCurrentProcess();
@@ -161,6 +217,64 @@ namespace AkerMcp.Client
                 // main window from its other windows (e.g. inspector palettes).
                 windowTitlePrefix = _capabilities.EngineName
             }, _jsonOptions);
+        }
+
+        private async Task<string> HandleNewScene(IpcRequest request, CancellationToken ct)
+        {
+            if (_sceneManager == null) return ErrorJson("Scene management not available on this engine.");
+            var args = ParseArgs(request);
+            bool twoD = !args.TryGetProperty("two_d", out var t) || t.GetBoolean();
+            string? savePath = args.TryGetProperty("save_path", out var sp) ? sp.GetString() : null;
+            return await _dispatcher.RunOnMainThread(
+                () => JsonSerializer.Serialize(_sceneManager.NewScene(twoD, savePath), _compactJsonOptions), ct);
+        }
+
+        private async Task<string> HandleOpenScene(IpcRequest request, CancellationToken ct)
+        {
+            if (_sceneManager == null) return ErrorJson("Scene management not available on this engine.");
+            var args = ParseArgs(request);
+            var path = args.GetProperty("path").GetString()!;
+            return await _dispatcher.RunOnMainThread(
+                () => JsonSerializer.Serialize(_sceneManager.OpenScene(path), _compactJsonOptions), ct);
+        }
+
+        private async Task<string> HandleSaveScene(IpcRequest request, CancellationToken ct)
+        {
+            if (_sceneManager == null) return ErrorJson("Scene management not available on this engine.");
+            var args = ParseArgs(request);
+            string? path = args.TryGetProperty("path", out var p) ? p.GetString() : null;
+            return await _dispatcher.RunOnMainThread(
+                () => JsonSerializer.Serialize(_sceneManager.SaveScene(path), _compactJsonOptions), ct);
+        }
+
+        private async Task<string> HandleWriteScript(IpcRequest request, CancellationToken ct)
+        {
+            if (_editorContext == null)
+                return ErrorJson("Editor context not available; cannot resolve the project path.");
+
+            var args = ParseArgs(request);
+            var rel = args.GetProperty("path").GetString()!;
+            var content = args.TryGetProperty("content", out var c) ? (c.GetString() ?? "") : "";
+
+            return await _dispatcher.RunOnMainThread(() =>
+            {
+                // GetProjectPath returns a directory on Unity/Godot but the .sln file on
+                // Stride — normalize to a directory either way.
+                var root = _editorContext.GetProjectPath();
+                if (System.IO.File.Exists(root))
+                    root = System.IO.Path.GetDirectoryName(root) ?? root;
+
+                var full = System.IO.Path.IsPathRooted(rel)
+                    ? rel
+                    : System.IO.Path.Combine(root, rel);
+
+                var dir = System.IO.Path.GetDirectoryName(full);
+                if (!string.IsNullOrEmpty(dir))
+                    System.IO.Directory.CreateDirectory(dir);
+                System.IO.File.WriteAllText(full, content);
+
+                return JsonSerializer.Serialize(new { written = true, path = full }, _compactJsonOptions);
+            }, ct);
         }
 
         private async Task<string> HandleInspect(IpcRequest request, CancellationToken ct)

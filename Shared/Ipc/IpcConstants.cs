@@ -4,10 +4,14 @@ namespace AkerMcp.Shared.Ipc
     {
         public const string PipePrefix = "aker-mcp-";
         public const string DiscoveryDirectory = "aker-mcp";
-        public const string ProtocolVersion = "1.3.0"; // Bump on any IPC schema change
+        public const string ProtocolVersion = "1.5.0"; // Bump on any IPC schema change
         // 1.2.0: added windowTitlePrefix to GetWindowInfo payload (Mac fallback support)
         // 1.3.0: added platform/build methods (list_platforms, get/set_platform_settings,
         //        switch_build_target, build_player) backed by the optional IBuildManager
+        // 1.4.0: added import_sprite + IpcRequest.Binary (inbound image bytes) backed by
+        //        the optional ISpriteImporter
+        // 1.5.0: added scene management (new_scene/open_scene/save_scene) backed by the
+        //        optional ISceneManager, and write_script (engine-side project-rooted file write)
 
         public static class Methods
         {
@@ -34,6 +38,11 @@ namespace AkerMcp.Shared.Ipc
             public const string GetSelection = "get_selection";
             public const string TakeScreenshot = "take_screenshot";
             public const string GetWindowInfo = "get_window_info";
+            public const string ImportSprite = "import_sprite";
+            public const string NewScene = "new_scene";
+            public const string OpenScene = "open_scene";
+            public const string SaveScene = "save_scene";
+            public const string WriteScript = "write_script";
 
             // Platform / build (backed by the optional IBuildManager).
             public const string ListPlatforms = "list_platforms";

@@ -13,6 +13,12 @@ namespace AkerMcp.Shared.Ipc
 
         [Key(2)]
         public byte[]? Payload { get; set; }
+
+        // Optional raw binary blob carried INTO the engine (e.g. a PNG to import as a
+        // sprite). Payload stays the JSON metadata; Binary is the bytes. Mirrors how
+        // IpcResponse separates Payload from ContentType for outbound binary.
+        [Key(3)]
+        public byte[]? Binary { get; set; }
     }
 
     [MessagePackObject]

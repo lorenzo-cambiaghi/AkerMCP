@@ -51,6 +51,10 @@ namespace AkerMcp.GodotAdapter
 
         protected override IBuildManager? CreateBuildManager() => new GodotBuildManager();
 
+        protected override ISpriteImporter? CreateSpriteImporter() => new GodotSpriteImporter();
+
+        protected override ISceneManager? CreateSceneManager() => new GodotSceneManager();
+
         protected override void Log(string message) => GD.Print($"[AkerMcp] {message}");
         protected override void LogError(string message) => GD.PrintErr($"[AkerMcp] {message}");
 
