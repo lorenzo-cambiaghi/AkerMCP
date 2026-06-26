@@ -75,3 +75,4 @@ plugins/unity/Plugins/*.dll.meta
 # Local demo / recording notes (not for the repo)
 flappy-bird-demo.md
 *.demo.md
+out/
