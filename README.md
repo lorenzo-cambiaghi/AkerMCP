@@ -35,7 +35,7 @@ Most rows are implemented and verified live in each engine's editor — not a ro
 
 > **Newest additions** — `create_sprite` lets the AI author flat-geometric placeholder art as a vector spec that the **server rasterizes to a PNG** and imports as a real sprite, so it works regardless of the engine's own vector support. Unity & Godot import + place it; Stride persists it as a real `.sdtex` texture asset in the package (plus a runtime preview entity for immediate visibility). Companion authoring tools `new_scene`/`open_scene`/`save_scene` and `write_script` (all three engines) let an AI build a 2D prototype — art, scene and gameplay code — end-to-end from a single prompt.
 >
-> *(Verified live in Game Studio: `create_sprite` persists and surfaces a real `.sdtex` texture asset and places a runtime sprite entity in an open scene; `new_scene` creates and opens a scene. One known Stride caveat: `take_screenshot` can time out depending on the editor preview state — a pre-existing limitation, unrelated to asset creation.)*
+> *(Verified live in Game Studio: `create_sprite` persists and surfaces a real `.sdtex` texture asset and places a runtime sprite entity in an open scene; `new_scene` creates and opens a scene. On Stride, `take_screenshot` is served by the OS-level window fallback — Game Studio only ticks its embedded editor game on demand, so the internal readback can't reliably run during MCP use; just keep Game Studio non-minimized.)*
 
 ### 🧠 No ceiling: arbitrary C# on the editor's main thread
 
@@ -474,6 +474,7 @@ Engine-neutral build pipeline control (backed by the optional `IBuildManager`; i
 | `take_screenshot` | Capture the editor's Scene/Game view (with gizmos) and return a JPEG to the AI |
 | `list_windows` | List visible top-level OS windows (title, process, pid) on the server machine |
 | `capture_window` | Screenshot **any** window matched by a title substring — even occluded, no focus steal |
+| `focus_window` | Bring **any** window (matched by title substring) to the foreground, restoring it if minimized |
 
 `list_windows` / `capture_window` are OS-level and engine-independent: they work with no engine connected and can capture external apps (browsers, dashboards, other editors) — useful for debugging and cross-app workflows.
 

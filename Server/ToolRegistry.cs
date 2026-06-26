@@ -527,6 +527,38 @@ Example: { ""title"": ""Game Studio"" }",
                 }"),
                 HandleCaptureWindow,
                 new ToolAnnotations { ReadOnlyHint = true });
+
+            Register("focus_window",
+                @"Bring a window to the foreground on the machine running the server, matched by a case-insensitive substring of its title. Restores the window first if it is minimized.
+Use this before capturing an editor whose internal screenshot needs the window in the foreground (e.g. Stride Game Studio), or to surface any app. Call list_windows first to discover titles.
+
+Example: { ""title"": ""Game Studio"" }",
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""title"": { ""type"": ""string"", ""description"": ""Substring of the target window's title (case-insensitive)"" }
+                    },
+                    ""required"": [""title""]
+                }"),
+                HandleFocusWindow);
+        }
+
+        private Task<ToolResult> HandleFocusWindow(JsonElement? args, CancellationToken ct)
+        {
+            var capture = PlatformScreenCapture.Current;
+            if (capture == null)
+                return Task.FromResult(ToolResult.Error(PlatformScreenCapture.UnsupportedPlatformMessage));
+
+            string? title = null;
+            if (args is JsonElement a && a.ValueKind == JsonValueKind.Object && a.TryGetProperty("title", out var t))
+                title = t.GetString();
+            if (string.IsNullOrWhiteSpace(title))
+                return Task.FromResult(ToolResult.Error("Missing required 'title' (window title substring)."));
+
+            var ok = capture.FocusWindowByTitle(title, out var err);
+            return Task.FromResult(ok
+                ? ToolResult.Text($"Brought window matching '{title}' to the foreground.")
+                : ToolResult.Error(err ?? "Failed to focus the window."));
         }
 
         private Task<ToolResult> HandleListWindows(JsonElement? args, CancellationToken ct)
@@ -690,16 +722,21 @@ Example: { ""title"": ""Game Studio"" }",
 
             if (rawImage == null)
             {
-                // If real failure (not NOT_SUPPORTED), propagate
-                if (engineResult.ErrorCode != IpcConstants.ErrorCodes.NotSupported)
-                    return ToolResult.Error($"Screenshot failed: {engineResult.Error ?? "unknown error"}");
-
-                // Strategy 2: OS-level fallback
+                // Fall back to OS-level capture whenever the engine returned no image —
+                // not only when it's NOT_SUPPORTED, but also when the internal capture
+                // FAILED or TIMED OUT. (Stride's embedded editor game pauses its loop
+                // when Game Studio isn't the foreground window, so the back-buffer
+                // readback never runs — exactly the situation during MCP use. OS-level
+                // PrintWindow captures background/occluded windows, so it still works.)
                 var capture = PlatformScreenCapture.Current;
                 if (capture == null)
-                    return ToolResult.Error(PlatformScreenCapture.UnsupportedPlatformMessage);
+                    return ToolResult.Error(
+                        engineResult.ErrorCode == IpcConstants.ErrorCodes.NotSupported
+                            ? PlatformScreenCapture.UnsupportedPlatformMessage
+                            : $"Screenshot failed: {engineResult.Error ?? "unknown error"}");
 
-                StdioTransport.LogInfo("Engine has no IScreenCapture; using OS-level fallback.");
+                StdioTransport.LogInfo(
+                    $"Engine capture returned no image ({engineResult.ErrorCode ?? engineResult.Error ?? "null"}); using OS-level fallback.");
 
                 var windowText = await _engine.ForwardResourceRead(
                     IpcConstants.Methods.GetWindowInfo, ct);

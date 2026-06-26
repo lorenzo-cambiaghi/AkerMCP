@@ -9,14 +9,15 @@ using Stride.Graphics;
 namespace AkerMcp.StrideAdapter
 {
     /// <summary>
-    /// Captures the actual Scene view of the active Game Studio editor by reading
-    /// back the editor preview game's back buffer and encoding it to PNG via
-    /// <see cref="Texture.Save(CommandList, Stream, ImageFileType)"/>.
+    /// Captures the Scene view by reading back the editor preview game's back buffer.
     ///
-    /// The readback must run on the game thread (the immediate CommandList is only
-    /// valid there), so we schedule it via the game's ScriptSystem and block the
-    /// caller until it completes. The editor preview is the "scene" view; Stride's
-    /// editor has no separate game view, so both viewTypes map to it.
+    /// IMPORTANT: Game Studio only ticks the embedded editor game when it needs to render
+    /// a frame (user interaction / a dirty scene) — NOT merely when the window is focused
+    /// (verified: focusing the window does not resume the script loop). So a scheduled
+    /// readback only runs if the editor happens to be actively rendering. We therefore try
+    /// the internal capture with a short timeout (clean scene-only image when it works) and
+    /// otherwise return null so the Server falls back to OS-level window capture, which is
+    /// the reliable path during MCP use.
     /// </summary>
     public class StrideScreenCapture : IScreenCapture
     {
@@ -27,8 +28,8 @@ namespace AkerMcp.StrideAdapter
 
             var tcs = new TaskCompletionSource<byte[]?>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-            // Run on the game thread: the immediate-context CommandList and a valid
-            // back buffer are only available there.
+            // The immediate-context CommandList and a valid back buffer are only available
+            // on the game thread, so schedule the readback there.
             game.Script.AddTask(async () =>
             {
                 try
@@ -42,7 +43,7 @@ namespace AkerMcp.StrideAdapter
                 }
                 catch (Exception ex)
                 {
-                    Diag($"capture failed: {ex.Message}");
+                    Diag($"capture failed: {ex.GetType().Name}: {ex.Message}");
                     tcs.TrySetResult(null);
                 }
                 await Task.CompletedTask;
@@ -50,7 +51,9 @@ namespace AkerMcp.StrideAdapter
 
             try
             {
-                if (!tcs.Task.Wait(8000)) { Diag("capture timed out"); return null; }
+                // Fail fast: if the editor isn't actively rendering, the task won't run.
+                // Let the Server's OS-level fallback take over rather than stalling.
+                if (!tcs.Task.Wait(3000)) { Diag("capture task did not run (editor idle); using OS-level fallback"); return null; }
             }
             catch (Exception ex) { Diag($"wait failed: {ex.Message}"); return null; }
 
