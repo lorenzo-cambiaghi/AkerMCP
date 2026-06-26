@@ -35,6 +35,15 @@ namespace AkerMcp.Server.Platform
         /// <returns>PNG-encoded bytes, or null on failure (window not found, denied permission, etc).</returns>
         byte[]? CaptureMainWindow(int pid, string titlePrefix, out string? error);
 
+        /// <summary>
+        /// Bring the first visible top-level window whose title contains
+        /// <paramref name="titleSubstring"/> (case-insensitive) to the foreground,
+        /// restoring it first if it is minimized.
+        /// </summary>
+        /// <returns>true on success; false (with <paramref name="error"/> set) if no
+        /// window matched or the OS refused the foreground change.</returns>
+        bool FocusWindowByTitle(string titleSubstring, out string? error);
+
         /// <summary>One-time process initialization (e.g. DPI awareness on Windows).</summary>
         void Initialize();
     }

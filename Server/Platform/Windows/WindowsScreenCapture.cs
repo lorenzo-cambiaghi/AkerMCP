@@ -48,6 +48,16 @@ namespace AkerMcp.Server.Platform.Windows
         [DllImport("user32.dll")]
         private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
+        // Window-focus interop (used by FocusWindowByTitle).
+        private const int SW_RESTORE = 9;
+        [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
+        [DllImport("user32.dll")] private static extern bool BringWindowToTop(IntPtr hWnd);
+        [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+        [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hWnd);
+        [DllImport("user32.dll")] private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+        [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
+
         [StructLayout(LayoutKind.Sequential)]
         private struct RECT { public int Left, Top, Right, Bottom; }
 
@@ -140,6 +150,68 @@ namespace AkerMcp.Server.Platform.Windows
                 return null;
             }
             return CaptureHwnd(match, out error);
+        }
+
+        public bool FocusWindowByTitle(string titleSubstring, out string? error)
+        {
+            error = null;
+            if (string.IsNullOrWhiteSpace(titleSubstring))
+            {
+                error = "A non-empty 'title' substring is required.";
+                return false;
+            }
+
+            var hWnd = FindWindowByTitle(titleSubstring);
+            if (hWnd == IntPtr.Zero)
+            {
+                error = $"No visible window with a title containing '{titleSubstring}' was found.";
+                return false;
+            }
+
+            if (IsIconic(hWnd)) ShowWindow(hWnd, SW_RESTORE);
+
+            // Work around Windows' foreground lock by briefly attaching our input queue
+            // to the current foreground window's thread.
+            var foreground = GetForegroundWindow();
+            uint foreThread = GetWindowThreadProcessId(foreground, out _);
+            uint thisThread = GetCurrentThreadId();
+            bool attached = foreThread != 0 && foreThread != thisThread
+                            && AttachThreadInput(foreThread, thisThread, true);
+            try
+            {
+                BringWindowToTop(hWnd);
+                if (!SetForegroundWindow(hWnd) && GetForegroundWindow() != hWnd)
+                {
+                    error = "The OS refused to change the foreground window (foreground lock).";
+                    return false;
+                }
+                return true;
+            }
+            finally
+            {
+                if (attached) AttachThreadInput(foreThread, thisThread, false);
+            }
+        }
+
+        private static IntPtr FindWindowByTitle(string titleSubstring)
+        {
+            IntPtr match = IntPtr.Zero;
+            EnumWindows((hWnd, _) =>
+            {
+                if (!IsWindowVisible(hWnd)) return true;
+                int len = GetWindowTextLength(hWnd);
+                if (len <= 0) return true;
+
+                var sb = new StringBuilder(len + 1);
+                GetWindowText(hWnd, sb, sb.Capacity);
+                if (sb.ToString().IndexOf(titleSubstring, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    match = hWnd;
+                    return false;
+                }
+                return true;
+            }, IntPtr.Zero);
+            return match;
         }
 
         private static byte[]? CaptureHwnd(IntPtr hWnd, out string? error)

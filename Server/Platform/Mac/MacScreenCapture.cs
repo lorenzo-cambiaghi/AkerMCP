@@ -29,6 +29,12 @@ namespace AkerMcp.Server.Platform.Mac
         // so the list_windows/capture_window tools report cleanly rather than crash.
         public IReadOnlyList<WindowSummary> ListWindows() => new List<WindowSummary>();
 
+        public bool FocusWindowByTitle(string titleSubstring, out string? error)
+        {
+            error = "Focusing windows is not yet implemented on macOS.";
+            return false;
+        }
+
         public byte[]? CaptureWindowByTitle(string titleSubstring, out string? error)
         {
             error = "capture_window by title is not yet implemented on macOS.";
