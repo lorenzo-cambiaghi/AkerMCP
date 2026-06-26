@@ -99,12 +99,24 @@ namespace AkerMcp.StrideAdapter
             var assetItem = new AssetItem(location, texAsset);
 
             var undo = session.ServiceProvider.Get<IUndoRedoService>();
+            AssetViewModel avm;
             using (var tx = undo.CreateTransaction())
             {
-                var avm = package.CreateAsset(dir, assetItem, true, null);
+                avm = package.CreateAsset(dir, assetItem, true, null);
                 undo.SetName(tx, $"Create sprite texture {name}");
-                return avm.Url;
             }
+
+            // Surface the new asset in the UI — without NotifyAssetPropertiesChanged the
+            // asset exists in the session model but the asset view doesn't refresh, so it
+            // looks like nothing was created (the scene path got away with it only because
+            // OpenAssetEditorWindow forced a refresh).
+            Diag($"texture asset created: url='{avm.Url}', dir='{dir.Path}', dirAssets={dir.Assets.Count()}, pkg='{package.Name}'");
+            try { session.NotifyAssetPropertiesChanged(new[] { avm }); }
+            catch (Exception ex) { Diag("NotifyAssetPropertiesChanged failed: " + ex.Message); }
+            try { session.ActiveAssetView?.SelectAssets(new[] { avm }); }
+            catch (Exception ex) { Diag("SelectAssets failed: " + ex.Message); }
+
+            return avm.Url;
         }
 
         private static string UniqueName(DirectoryBaseViewModel dir, string baseName)
