@@ -53,6 +53,15 @@ namespace AkerMcp.Server
 
             supersample = Math.Clamp(supersample, 1, 4);
 
+            // Guard against OOM: a large target × supersample can blow up the render
+            // buffer (4096 × 4 = 16384² ≈ 4 GB). Drop the SSAA factor for big targets so
+            // the render canvas never exceeds ~4096 on a side.
+            const int maxRenderDimension = 4096;
+            while (supersample > 1 &&
+                   ((long)targetWidth * supersample > maxRenderDimension ||
+                    (long)targetHeight * supersample > maxRenderDimension))
+                supersample--;
+
             // Logical coordinate space the AI authored in (defaults to the target size).
             double specW = GetDouble(spec, "width", targetWidth);
             double specH = GetDouble(spec, "height", targetHeight);

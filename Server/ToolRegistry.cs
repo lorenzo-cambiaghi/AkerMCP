@@ -579,10 +579,11 @@ Example: { ""title"": ""Game Studio"" }",
                 return ToolResult.Error("Missing required 'spec' (shape-spec object).");
 
             // Target px defaults to the spec's logical size (1:1), else 128.
-            int specW = spec.TryGetProperty("width", out var sw) && sw.ValueKind == JsonValueKind.Number ? sw.GetInt32() : 128;
-            int specH = spec.TryGetProperty("height", out var sh) && sh.ValueKind == JsonValueKind.Number ? sh.GetInt32() : 128;
-            int width = a.TryGetProperty("width_px", out var wpx) && wpx.ValueKind == JsonValueKind.Number ? wpx.GetInt32() : specW;
-            int height = a.TryGetProperty("height_px", out var hpx) && hpx.ValueKind == JsonValueKind.Number ? hpx.GetInt32() : specH;
+            // Read as double then round, so specs that use floats (e.g. "width": 64.0) don't throw.
+            int specW = ReadDim(spec, "width", 128);
+            int specH = ReadDim(spec, "height", 128);
+            int width = ReadDim(a, "width_px", specW);
+            int height = ReadDim(a, "height_px", specH);
 
             byte[] png;
             try
@@ -767,6 +768,17 @@ Example: { ""title"": ""Game Studio"" }",
                 },
                 Handler = handler
             };
+        }
+
+        // Reads a numeric dimension as a rounded int, tolerating float JSON values.
+        private static int ReadDim(JsonElement obj, string name, int fallback)
+        {
+            if (obj.ValueKind == JsonValueKind.Object
+                && obj.TryGetProperty(name, out var v)
+                && v.ValueKind == JsonValueKind.Number
+                && v.TryGetDouble(out var d))
+                return (int)System.Math.Round(d);
+            return fallback;
         }
 
         private static JsonElement ParseSchema(string json)
