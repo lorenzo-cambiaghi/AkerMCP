@@ -35,7 +35,7 @@ Most rows are implemented and verified live in each engine's editor — not a ro
 
 > **Newest additions** — `create_sprite` lets the AI author flat-geometric placeholder art as a vector spec that the **server rasterizes to a PNG** and imports as a real sprite, so it works regardless of the engine's own vector support. Unity & Godot import + place it; Stride persists it as a real `.sdtex` texture asset in the package (plus a runtime preview entity for immediate visibility). Companion authoring tools `new_scene`/`open_scene`/`save_scene` and `write_script` (all three engines) let an AI build a 2D prototype — art, scene and gameplay code — end-to-end from a single prompt.
 >
-> *(The Stride asset-pipeline paths for `create_sprite`/scene tools are build-verified and pending live validation in Game Studio; Unity & Godot are validated.)*
+> *(Verified live in Game Studio: `create_sprite` persists and surfaces a real `.sdtex` texture asset and places a runtime sprite entity in an open scene; `new_scene` creates and opens a scene. One known Stride caveat: `take_screenshot` can time out depending on the editor preview state — a pre-existing limitation, unrelated to asset creation.)*
 
 ### 🧠 No ceiling: arbitrary C# on the editor's main thread
 
@@ -437,7 +437,7 @@ Build a 2D prototype end-to-end — scene, placeholder art, and gameplay — wit
 | `open_scene` | Open an existing scene by its engine asset path |
 | `save_scene` | Save the active/edited scene (in place, or to a new path) |
 
-> **Engine support:** all three engines implement these. `create_sprite` imports + places a sprite on **Unity** and **Godot**; on **Stride** it persists a real `.sdtex` texture asset in the package (via the editor's `SessionViewModel`) and also adds a runtime preview entity for immediate visibility. `new_scene`/`open_scene`/`save_scene` work on **Unity** and **Godot** (file-on-disk scenes) and on **Stride** (package-managed `SceneAsset` via the editor). `write_script` works on all three. *(Stride's asset-pipeline paths are build-verified; validate live in Game Studio.)*
+> **Engine support:** all three engines implement these. `create_sprite` imports + places a sprite on **Unity** and **Godot**; on **Stride** it persists a real `.sdtex` texture asset in the package (via the editor's `SessionViewModel`) and also adds a runtime preview entity for immediate visibility. `new_scene`/`open_scene`/`save_scene` work on **Unity** and **Godot** (file-on-disk scenes) and on **Stride** (package-managed `SceneAsset` via the editor). `write_script` works on all three. *(Stride's `create_sprite` + scene creation are verified live in Game Studio.)*
 
 **`create_sprite` shape-spec** — drawn in order (painter's): `ellipse`, `rect` (with `rx` for rounded corners), `polygon`, `line`/`polyline`, and `path` (an SVG path-data subset). Each shape takes a `fill` (hex or linear `gradient`), optional `stroke`/`strokeWidth`, and `opacity`. Example (a flat bird placeholder):
 
