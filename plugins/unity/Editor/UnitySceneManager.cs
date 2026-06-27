@@ -17,7 +17,7 @@ namespace AkerMcp.Unity
     {
         public SceneResult NewScene(bool twoD, string? savePath)
         {
-            var scene = EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, NewSceneSetupMode.Single);
+            var scene = EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, NewSceneMode.Single);
 
             if (twoD)
             {
