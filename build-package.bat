@@ -71,6 +71,11 @@ if not exist "%~dp0AkerMCP.unitypackage" (
     goto :error
 )
 
+REM Unity's batchmode export rewrites samples\unity\ProjectSettings\EditorBuildSettings.asset
+REM as a harmless side effect. Revert it so the export doesn't leave the working tree dirty
+REM (publish-release.ps1's preflight requires a clean tree). No-op if not a git checkout.
+git -C "%~dp0." checkout -- samples/unity/ProjectSettings/EditorBuildSettings.asset >nul 2>nul
+
 echo.
 echo [4/4] Publishing standalone Server binaries...
 if not exist "%~dp0Build" mkdir "%~dp0Build"
@@ -93,15 +98,21 @@ if errorlevel 1 goto :error
 
 echo   - Windows (win-x64)
 dotnet publish Server\AkerMcp.Server.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o "%~dp0Build\Server-win-x64" --nologo >nul
+if errorlevel 1 ( echo ERROR: win-x64 server publish failed. & goto :error )
 tar -a -c -f "%~dp0Build\AkerMcp.Server-win-x64.zip" -C "%~dp0Build\Server-win-x64" .
+if errorlevel 1 ( echo ERROR: win-x64 zip failed. & goto :error )
 
 echo   - macOS (osx-x64)
 dotnet publish Server\AkerMcp.Server.csproj -c Release -r osx-x64 --self-contained true -p:PublishSingleFile=true -o "%~dp0Build\Server-osx-x64" --nologo >nul
+if errorlevel 1 ( echo ERROR: osx-x64 server publish failed. & goto :error )
 tar -a -c -f "%~dp0Build\AkerMcp.Server-osx-x64.zip" -C "%~dp0Build\Server-osx-x64" .
+if errorlevel 1 ( echo ERROR: osx-x64 zip failed. & goto :error )
 
 echo   - Linux (linux-x64)
 dotnet publish Server\AkerMcp.Server.csproj -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -o "%~dp0Build\Server-linux-x64" --nologo >nul
+if errorlevel 1 ( echo ERROR: linux-x64 server publish failed. & goto :error )
 tar -a -c -f "%~dp0Build\AkerMcp.Server-linux-x64.zip" -C "%~dp0Build\Server-linux-x64" .
+if errorlevel 1 ( echo ERROR: linux-x64 zip failed. & goto :error )
 
 REM Clean up intermediate folders
 rmdir /s /q "%~dp0Build\Server-win-x64"
