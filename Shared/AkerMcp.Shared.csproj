@@ -6,7 +6,7 @@
     <RootNamespace>AkerMcp.Shared</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="MessagePack" Version="3.1.3" />
+    <PackageReference Include="MessagePack" Version="3.1.7" />
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
   </ItemGroup>
 </Project>
