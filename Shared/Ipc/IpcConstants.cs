@@ -4,7 +4,7 @@ namespace AkerMcp.Shared.Ipc
     {
         public const string PipePrefix = "aker-mcp-";
         public const string DiscoveryDirectory = "aker-mcp";
-        public const string ProtocolVersion = "1.5.0"; // Bump on any IPC schema change
+        public const string ProtocolVersion = "1.6.0"; // Bump on any IPC schema change
         // 1.2.0: added windowTitlePrefix to GetWindowInfo payload (Mac fallback support)
         // 1.3.0: added platform/build methods (list_platforms, get/set_platform_settings,
         //        switch_build_target, build_player) backed by the optional IBuildManager
@@ -12,6 +12,11 @@ namespace AkerMcp.Shared.Ipc
         //        the optional ISpriteImporter
         // 1.5.0: added scene management (new_scene/open_scene/save_scene) backed by the
         //        optional ISceneManager, and write_script (engine-side project-rooted file write)
+        // 1.6.0: added the runtime loop — play control (enter_play/exit_play/set_play_pause/
+        //        play_step/get_play_state) backed by the optional IPlayModeController, and
+        //        send_input backed by the optional IInputSimulator (with an OS-level fallback);
+        //        plus import_sound (create_sound) backed by the optional ISoundImporter — a
+        //        server-synthesized WAV shipped over the inbound binary channel like import_sprite
 
         public static class Methods
         {
@@ -50,6 +55,17 @@ namespace AkerMcp.Shared.Ipc
             public const string SetPlatformSettings = "set_platform_settings";
             public const string SwitchBuildTarget = "switch_build_target";
             public const string BuildPlayer = "build_player";
+
+            // Runtime loop: play control (optional IPlayModeController) + input (optional IInputSimulator).
+            public const string EnterPlay = "enter_play";
+            public const string ExitPlay = "exit_play";
+            public const string SetPlayPause = "set_play_pause";
+            public const string PlayStep = "play_step";
+            public const string GetPlayState = "get_play_state";
+            public const string SendInput = "send_input";
+
+            // Procedural audio: import a server-synthesized WAV (optional ISoundImporter).
+            public const string ImportSound = "import_sound";
         }
 
         public static class ErrorCodes

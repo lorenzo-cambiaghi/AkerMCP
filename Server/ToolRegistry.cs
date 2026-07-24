@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -380,6 +381,66 @@ After creating sprites, call take_screenshot to verify how they look.",
                 }"),
                 HandleCreateSprite);
 
+            Register("create_sound",
+                @"Create a placeholder sound effect from a small procedural 'sound-spec' (jsfxr-style, authored by you).
+The server SYNTHESIZES a WAV and imports it as an audio clip — engine-agnostic, like create_sprite. Perfect for the
+flap/jump/score/hit/pickup SFX that make a prototype feel real (a silent prototype feels broken).
+
+sound-spec fields (all optional except pick a wave + freq):
+  wave: ""square""|""saw""|""sine""|""triangle""|""noise""   freq: start Hz   freq_sweep: Hz added per second (negative = down)
+  attack/sustain/decay: envelope seconds   duration: total seconds (scales the envelope)   volume: 0..1
+  vibrato_depth: 0..1   vibrato_rate: Hz
+Recipes: jump = square, freq 480, freq_sweep +1200, short. coin = square, freq 900 then 1200 (two calls) or freq_sweep up.
+hit/explosion = noise, freq 200, decay ~0.25. laser = saw, freq 1200, freq_sweep -3000.
+
+Example (jump): { ""name"":""jump"", ""spec"":{ ""wave"":""square"",""freq"":480,""freq_sweep"":1400,""attack"":0.005,""sustain"":0.02,""decay"":0.12,""volume"":0.5 } }
+Optionally place a source: add ""scene_path"", ""position"", ""volume"", ""loop"", ""auto_play"" (for looping music/ambience) at the top level.",
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""name"": { ""type"": ""string"" },
+                        ""spec"": {
+                            ""type"": ""object"",
+                            ""properties"": {
+                                ""wave"": { ""type"": ""string"", ""enum"": [""square"", ""saw"", ""sine"", ""triangle"", ""noise""] },
+                                ""freq"": { ""type"": ""number"" },
+                                ""freq_sweep"": { ""type"": ""number"" },
+                                ""attack"": { ""type"": ""number"" }, ""sustain"": { ""type"": ""number"" }, ""decay"": { ""type"": ""number"" },
+                                ""duration"": { ""type"": ""number"" }, ""volume"": { ""type"": ""number"" },
+                                ""vibrato_depth"": { ""type"": ""number"" }, ""vibrato_rate"": { ""type"": ""number"" },
+                                ""sample_rate"": { ""type"": ""integer"" }
+                            }
+                        },
+                        ""scene_path"": { ""type"": ""string"" },
+                        ""position"": { ""type"": ""object"" },
+                        ""volume"": { ""type"": ""number"" },
+                        ""loop"": { ""type"": ""boolean"" },
+                        ""auto_play"": { ""type"": ""boolean"" }
+                    },
+                    ""required"": [""name"", ""spec""]
+                }"),
+                HandleCreateSound);
+
+            Register("add_primitive",
+                @"Drop in a VETTED gameplay behaviour instead of hand-writing (and debugging) it — cuts the
+write_script -> refresh_scripts -> fix loop. The server writes the known-good source for the connected engine;
+you then add the component and set its public fields.
+
+Call with no args to LIST the catalog. Then add_primitive { ""id"": ""..."" } writes it (override 'path' if you like).
+Unity primitives assume the legacy Input Manager is available (Active Input Handling = Both or Input Manager).
+Catalog ids: platformer_controller_2d, auto_runner_2d, camera_follow_2d, killzone_2d, score_overlay.
+
+After it writes: call refresh_scripts, then attach the component (execute: obj.AddComponent<T>()) and configure the
+returned fields via set_property/execute.",
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""id"": { ""type"": ""string"", ""description"": ""primitive id (omit to list the catalog)"" },
+                        ""path"": { ""type"": ""string"", ""description"": ""optional target file path (defaults per primitive)"" }
+                    }
+                }"),
+                HandleAddPrimitive);
+
             Register("new_scene",
                 @"Create a fresh scene in the engine. Use this to start a prototype from a clean slate.
 'two_d: true' (default) sets up a 2D-friendly scene (e.g. orthographic camera, sky background on Unity).
@@ -541,6 +602,204 @@ Example: { ""title"": ""Game Studio"" }",
                     ""required"": [""title""]
                 }"),
                 HandleFocusWindow);
+
+            // ---- Runtime loop: run the game, observe it, drive it ----
+
+            Register("enter_play",
+                @"Start the project running so you can verify it actually PLAYS — not just how it looks statically.
+For a game engine this enters Play Mode / runs the scene; for an animation editor it plays the timeline.
+
+The runtime loop: enter_play -> (send_input to drive it) -> capture_sequence / get_property to observe -> exit_play.
+
+Notes:
+- Unity: entering Play Mode reloads the domain and briefly drops the connection; this tool waits for the
+  auto-reconnect and reports the settled state — no action needed. take_screenshot('game') shows the running game.
+- Godot: the game runs in a SEPARATE window — screenshot it with capture_window (by its title), not take_screenshot.
+- Returns NOT_SUPPORTED on engines without play control.",
+                ParseSchema(@"{ ""type"": ""object"", ""properties"": {} }"),
+                HandleEnterPlay);
+
+            Register("exit_play",
+                @"Stop play/playback and return to edit mode (Unity may reload the domain — handled automatically).
+Always exit_play when you finish verifying, so the editor is left in a clean editable state.",
+                ParseSchema(@"{ ""type"": ""object"", ""properties"": {} }"),
+                HandleExitPlay);
+
+            Register("set_play_pause",
+                @"Pause (true) or resume (false) an in-progress play/playback. Pause before play_step to inspect frame by frame.",
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""paused"": { ""type"": ""boolean"", ""description"": ""true = pause, false = resume (default: true)"" }
+                    }
+                }"),
+                HandleSetPlayPause);
+
+            Register("play_step",
+                @"Advance play/playback while paused, to inspect a jump arc or collision frame by frame.
+SkelForge steps N whole animation frames exactly. On Unity each call reliably advances ONE frame per editor
+tick — multi-frame stepping is best-effort, so call play_step repeatedly and confirm progress with get_play_state.",
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""frames"": { ""type"": ""integer"", ""description"": ""Frames to advance (default: 1)"" }
+                    }
+                }"),
+                HandlePlayStep);
+
+            Register("get_play_state",
+                @"Report whether the project is playing, paused, the current time, and the clip duration (if any).
+Read-only. Use it to confirm enter_play took effect and to watch time advance while running.",
+                ParseSchema(@"{ ""type"": ""object"", ""properties"": {} }"),
+                HandleGetPlayState,
+                new ToolAnnotations { ReadOnlyHint = true });
+
+            Register("capture_sequence",
+                @"Capture SEVERAL screenshots at an interval and return them as a strip — so you can see MOTION, not just one pose.
+Call this WHILE the project is playing (enter_play first, and don't pause): a moving game/animation is what makes the
+frames differ. Great for verifying a jump arc, a scroll, a spawn, a collision, or an animation cycle.
+
+- count: number of frames (1-8, default 4). interval_ms: gap between frames (0-3000, default 500).
+- view: 'game' (default) or 'scene'.
+- window_title: capture THIS OS window each frame instead of the editor viewport — use it for a SEPARATE-WINDOW
+  game (Godot/Stride) by passing the game window's title; without it, Godot/Stride strips show the editor, not the game.",
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""count"": { ""type"": ""integer"", ""description"": ""Frames to capture (1-8, default 4)"" },
+                        ""interval_ms"": { ""type"": ""integer"", ""description"": ""Milliseconds between frames (0-3000, default 500)"" },
+                        ""view"": { ""type"": ""string"", ""enum"": [""game"", ""scene""], ""description"": ""Editor view to capture (default 'game')"" },
+                        ""window_title"": { ""type"": ""string"", ""description"": ""Capture this OS window (title substring) each frame — for a separate-window game"" }
+                    }
+                }"),
+                HandleCaptureSequence,
+                new ToolAnnotations { ReadOnlyHint = true });
+
+            Register("send_input",
+                @"Inject synthetic input into the RUNNING game to test interactive mechanics (jump, move, click).
+Call enter_play first. Provide an ordered 'events' array; each event is a key, a mouse button, a mouse move, or a
+named engine action.
+
+Event shapes:
+- { ""type"":""key"", ""key"":""Space"", ""hold_ms"":60 }            press+release after 60ms (omit hold_ms and set 'pressed' for explicit down/up)
+- { ""type"":""key"", ""key"":""Right"", ""pressed"":true }          key down (send a matching pressed:false later to release)
+- { ""type"":""mouse_button"", ""button"":""left"", ""hold_ms"":50 }
+- { ""type"":""mouse_move"", ""x"":960, ""y"":540 }   x/y are pixels, top-left origin. NOTE: the OS-level path maps them to
+     the PRIMARY monitor only, so a windowed game on a secondary monitor / away from the origin may be unreachable — prefer
+     keyboard input for OS-level (Godot/Stride) targets. Unity's in-process path uses game-view pixels.
+Canonical keys: Space, Enter, Escape, Tab, Up/Down/Left/Right, A-Z, 0-9, Shift, Ctrl, Alt.
+
+Delivery: engine-internal injection when available (Unity drives the new Input System directly), otherwise OS-level
+to the focused game window. IMPORTANT: on Godot/Stride the game is a SEPARATE window, so pass 'window_title' with
+the game window's title — otherwise the OS-level path focuses the EDITOR and input goes there. On Unity the game
+runs in the editor's Game View, so no window_title is needed. (The 'action' event type is reserved but not yet
+injectable — drive the key/mouse controls the action is bound to instead.)",
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""events"": {
+                            ""type"": ""array"",
+                            ""description"": ""Ordered list of input events"",
+                            ""items"": {
+                                ""type"": ""object"",
+                                ""properties"": {
+                                    ""type"": { ""type"": ""string"", ""enum"": [""key"", ""mouse_button"", ""mouse_move"", ""action""] },
+                                    ""key"": { ""type"": ""string"" },
+                                    ""button"": { ""type"": ""string"", ""enum"": [""left"", ""right"", ""middle""] },
+                                    ""action"": { ""type"": ""string"" },
+                                    ""pressed"": { ""type"": ""boolean"" },
+                                    ""x"": { ""type"": ""number"" },
+                                    ""y"": { ""type"": ""number"" },
+                                    ""hold_ms"": { ""type"": ""number"" }
+                                }
+                            }
+                        },
+                        ""window_title"": { ""type"": ""string"", ""description"": ""OS-level path only: title substring of the window to focus before injecting"" }
+                    },
+                    ""required"": [""events""]
+                }"),
+                HandleSendInput);
+
+            Register("sample_state",
+                @"Read live RUNTIME values from the running game — the honest way to verify a mechanic, instead of guessing from pixels.
+Call it while playing (after enter_play). Provide 'probes' as { name: ""C# expression"" }; each expression is evaluated in the
+engine (via the same Roslyn host as 'execute'), so use engine-appropriate API. Prefer SCALAR expressions (numbers/bools/strings).
+
+Examples (Unity): { ""probes"": { ""birdY"": ""Find(\""Bird\"").transform.position.y"", ""score"": ""GameManager.Instance.Score"" } }
+Returns each name's value (or a per-probe error).",
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""probes"": { ""type"": ""object"", ""additionalProperties"": { ""type"": ""string"" },
+                            ""description"": ""map of name -> C# expression evaluated in the engine"" }
+                    },
+                    ""required"": [""probes""]
+                }"),
+                HandleSampleState,
+                new ToolAnnotations { ReadOnlyHint = true });
+
+            Register("assert_state",
+                @"Assert RUNTIME conditions against real engine values and get a structured PASS/FAIL — the reliable alternative to
+inferring 'did it work?' from a screenshot. Call during play. Each assertion evaluates a C# 'expression' in the engine and
+compares it with 'op' to 'value'. Polls until all pass or 'timeout_ms' elapses — ideal for 'becomes true' conditions
+(e.g. isGrounded after a jump lands, score increments after passing a pipe).
+
+ops: '=='  '!='  '<'  '<='  '>'  '>='  'approx' (|a-b|<=1e-3)  'truthy'  'falsy'.
+Example: { ""assertions"": [ { ""expression"": ""Find(\""Bird\"").GetComponent<Rigidbody2D>().velocity.y"", ""op"": ""<"", ""value"": 0, ""label"": ""bird falls under gravity"" } ], ""timeout_ms"": 1500 }",
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""assertions"": {
+                            ""type"": ""array"",
+                            ""items"": {
+                                ""type"": ""object"",
+                                ""properties"": {
+                                    ""expression"": { ""type"": ""string"" },
+                                    ""op"": { ""type"": ""string"", ""enum"": [""=="", ""!="", ""<"", ""<="", "">"", "">="", ""approx"", ""truthy"", ""falsy""] },
+                                    ""value"": {},
+                                    ""label"": { ""type"": ""string"" }
+                                },
+                                ""required"": [""expression"", ""op""]
+                            }
+                        },
+                        ""timeout_ms"": { ""type"": ""integer"", ""description"": ""Poll until all pass or this elapses (default 0 = check once)"" },
+                        ""poll_ms"": { ""type"": ""integer"", ""description"": ""Poll interval (default 250)"" }
+                    },
+                    ""required"": [""assertions""]
+                }"),
+                HandleAssertState,
+                new ToolAnnotations { ReadOnlyHint = true });
+
+            Register("playtest",
+                @"Run and VERIFY a prototype in ONE call — the closed-loop way to answer 'does the mechanic work?'.
+Drives the game and observes it SERVER-SIDE, so input lands at a precise moment relative to capture/assert (no
+multi-round-trip lag between separate tool calls, which otherwise misses fast transients like a jump arc).
+
+Flow: enter_play -> run 'steps' in order -> check final 'criteria' -> exit_play. Returns ONE verdict (PASS/FAIL),
+a timeline log, the captured frames (a motion strip), and structured assertion/sample evidence.
+
+Each step is ONE of:
+- { ""input"": { ""events"": [ { ""type"":""key"",""key"":""Space"",""hold_ms"":60 } ] } }   (drive it; add window_title for Godot/Stride)
+- { ""wait_ms"": 300 }                                                        (let the game advance)
+- { ""capture"": true }  or  { ""capture"": { ""view"":""game"" } }                 (add a frame to the strip)
+- { ""assert"": [ { ""expression"":""..."", ""op"":""<"", ""value"":0, ""label"":""..."" } ], ""timeout_ms"":1000 }   (verify runtime state, polled)
+- { ""sample"": { ""y"":""Find(\""Bird\"").transform.position.y"" } }               (record values as evidence)
+
+'criteria' is a final assert array. Expressions are C# evaluated in the engine (like execute / assert_state); use
+engine-appropriate API and prefer scalars. Example: verify a jump —
+{ ""steps"": [ {""sample"":{""y0"":""Find(\""P\"").transform.position.y""}}, {""input"":{""events"":[{""type"":""key"",""key"":""Space"",""hold_ms"":60}]}},
+  {""wait_ms"":250}, {""capture"":true}, {""assert"":[{""expression"":""Find(\""P\"").transform.position.y"",""op"":"">"",""value"":0.5,""label"":""rose after jump""}],""timeout_ms"":800} ] }",
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""enter"": { ""type"": ""boolean"", ""description"": ""enter_play first (default true)"" },
+                        ""exit"": { ""type"": ""boolean"", ""description"": ""exit_play at the end (default true)"" },
+                        ""steps"": { ""type"": ""array"", ""items"": { ""type"": ""object"" }, ""description"": ""ordered timeline (input/wait_ms/capture/assert/sample)"" },
+                        ""criteria"": { ""type"": ""array"", ""items"": { ""type"": ""object"" }, ""description"": ""final acceptance assertions"" },
+                        ""criteria_timeout_ms"": { ""type"": ""integer"" }
+                    }
+                }"),
+                HandlePlaytest);
         }
 
         private Task<ToolResult> HandleFocusWindow(JsonElement? args, CancellationToken ct)
@@ -646,6 +905,76 @@ Example: { ""title"": ""Game Studio"" }",
             return result;
         }
 
+        private async Task<ToolResult> HandleCreateSound(JsonElement? args, CancellationToken ct)
+        {
+            if (args is not JsonElement a || a.ValueKind != JsonValueKind.Object)
+                return ToolResult.Error("Missing arguments.");
+
+            if (!a.TryGetProperty("name", out var nameEl) || nameEl.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(nameEl.GetString()))
+                return ToolResult.Error("Missing required 'name'.");
+            var name = nameEl.GetString()!;
+
+            if (!a.TryGetProperty("spec", out var spec) || spec.ValueKind != JsonValueKind.Object)
+                return ToolResult.Error("Missing required 'spec' (sound-spec object).");
+
+            byte[] wav;
+            try { wav = SoundSynthesizer.RenderToWav(spec); }
+            catch (Exception ex) { return ToolResult.Error($"Sound synthesis failed: {ex.Message}"); }
+
+            var metadata = new Dictionary<string, object?> { ["name"] = name };
+            if (a.TryGetProperty("volume", out var v) && v.ValueKind == JsonValueKind.Number)
+                metadata["volume"] = v.GetDouble();
+            if (a.TryGetProperty("loop", out var lp) && (lp.ValueKind == JsonValueKind.True || lp.ValueKind == JsonValueKind.False))
+                metadata["loop"] = lp.GetBoolean();
+            if (a.TryGetProperty("auto_play", out var ap) && (ap.ValueKind == JsonValueKind.True || ap.ValueKind == JsonValueKind.False))
+                metadata["auto_play"] = ap.GetBoolean();
+            if (a.TryGetProperty("scene_path", out var sp) && sp.ValueKind == JsonValueKind.String)
+                metadata["scene_path"] = sp.GetString();
+            if (a.TryGetProperty("position", out var pos) && pos.ValueKind == JsonValueKind.Object)
+                metadata["position"] = JsonSerializer.Deserialize<Dictionary<string, double>>(pos.GetRawText());
+
+            var metadataJson = JsonSerializer.Serialize(metadata);
+            return await _engine.ForwardSoundImport(metadataJson, wav, ct, timeoutMs: 60_000);
+        }
+
+        private async Task<ToolResult> HandleAddPrimitive(JsonElement? args, CancellationToken ct)
+        {
+            var a = args ?? default;
+            string? id = a.ValueKind == JsonValueKind.Object && a.TryGetProperty("id", out var idEl)
+                && idEl.ValueKind == JsonValueKind.String ? idEl.GetString() : null;
+
+            // No id -> list the catalog.
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                var list = PrimitiveCatalog.All.Select(p => new { id = p.Id, summary = p.Summary, fields = p.Fields, engines = p.Variants.Keys });
+                return ToolResult.Text("Available gameplay primitives (call add_primitive with an 'id'):\n" +
+                    JsonSerializer.Serialize(list, _jsonOptions));
+            }
+
+            var prim = PrimitiveCatalog.Find(id!);
+            if (prim == null)
+                return ToolResult.Error($"Unknown primitive '{id}'. Available: {string.Join(", ", PrimitiveCatalog.All.Select(p => p.Id))}.");
+
+            var info = await _engine.ForwardResourceRead(IpcConstants.Methods.GetProjectInfo, ct);
+            var engineKey = PrimitiveCatalog.EngineKey(info) ?? "unity";
+            if (!prim.Variants.TryGetValue(engineKey, out var source))
+                return ToolResult.Error($"No '{id}' variant for engine '{engineKey}' yet (available for: {string.Join(", ", prim.Variants.Keys)}).");
+
+            var path = a.ValueKind == JsonValueKind.Object && a.TryGetProperty("path", out var pEl)
+                && pEl.ValueKind == JsonValueKind.String ? pEl.GetString()! : prim.DefaultFile;
+
+            var writeArgs = JsonSerializer.SerializeToElement(new { path, content = source });
+            var res = await _engine.ForwardToolCall(IpcConstants.Methods.WriteScript, writeArgs, ct);
+            if (res.IsError) return res;
+
+            var writeText = res.Content.Count > 0 ? res.Content[0].Text : "";
+            return ToolResult.Text(
+                $"Added primitive '{prim.Id}' -> {path}\n{writeText}\n" +
+                $"Configurable public fields: {string.Join(", ", prim.Fields)}\n" +
+                "NEXT: call refresh_scripts, then add the component to your object and set fields via execute/set_property.");
+        }
+
         private async Task<ToolResult> HandleSwitchBuildTarget(JsonElement? args, CancellationToken ct)
         {
             // Switching the active target can recompile scripts and reload the domain,
@@ -676,6 +1005,79 @@ Example: { ""title"": ""Game Studio"" }",
             return _engine.ForwardToolCall(
                 IpcConstants.Methods.BuildPlayer, args, ct, timeoutMs: 1_800_000);
         }
+
+        // enter_play / exit_play can trigger a domain reload (Unity) that drops the IPC
+        // connection mid-call — same as refresh_scripts. Treat a disconnect as the
+        // transition succeeding: wait for the plugin to auto-restart, then report the
+        // settled play state. On engines without a reload, the first forward already
+        // returns the state.
+        private Task<ToolResult> HandleEnterPlay(JsonElement? args, CancellationToken ct)
+            => HandlePlayTransition(IpcConstants.Methods.EnterPlay, "enter play mode", ct);
+
+        private Task<ToolResult> HandleExitPlay(JsonElement? args, CancellationToken ct)
+            => HandlePlayTransition(IpcConstants.Methods.ExitPlay, "exit play mode", ct);
+
+        private async Task<ToolResult> HandlePlayTransition(string method, string label, CancellationToken ct)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var result = await _engine.ForwardToolCall(method, null, ct, timeoutMs: 120_000);
+
+            bool reloaded = false;
+            if (IsDisconnectError(result))
+            {
+                // Unity domain reload dropped the connection mid-call — the transition happened.
+                if (!await _engine.WaitForConnection(120_000, ct).ConfigureAwait(false))
+                    return ToolResult.Error(
+                        $"Engine disconnected while trying to {label} and did not reconnect within 2 minutes. " +
+                        "Check the editor (it may show a blocking dialog), then call get_play_state.");
+                reloaded = true;
+            }
+            else if (result.IsError)
+            {
+                return result; // a genuine engine error (e.g. protocol mismatch), not a reload
+            }
+
+            // On exit, clear any OS-level keys/buttons left held (an unbalanced pressed:true)
+            // so a forgotten key-down can't stay physically stuck at the OS level.
+            if (method == IpcConstants.Methods.ExitPlay)
+            {
+                try { PlatformInput.Current?.ReleaseAll(); } catch { /* best-effort */ }
+            }
+
+            // Settle: the engine's own enter/exit response can be OPTIMISTIC — Unity's
+            // EnterPlaymode/ExitPlaymode are deferred, so the first result may predate the
+            // transition. Poll get_play_state until it reflects the intended state (or a short
+            // window elapses) and report the CONFIRMED state, not the optimistic snapshot.
+            bool wantPlaying = method == IpcConstants.Methods.EnterPlay;
+            var state = result;
+            var deadline = DateTime.UtcNow.AddSeconds(4);
+            while (DateTime.UtcNow < deadline && !ct.IsCancellationRequested)
+            {
+                var polled = await _engine.ForwardToolCall(IpcConstants.Methods.GetPlayState, null, ct);
+                if (!polled.IsError)
+                {
+                    state = polled;
+                    var txt = polled.Content.Count > 0 ? polled.Content[0].Text : "";
+                    var isPlaying = ReadJsonBoolNullable(txt, "isPlaying");
+                    if (isPlaying == wantPlaying) break;                 // reached the intended state
+                    if (ReadJsonBool(txt, "supported", true) == false) break; // engine can't report it
+                }
+                await Task.Delay(200, ct).ConfigureAwait(false);
+            }
+
+            var text = state.Content.Count > 0 ? state.Content[0].Text : null;
+            var prefix = reloaded ? $"Engine reloaded ({sw.Elapsed.TotalSeconds:0.#}s). " : "";
+            return ToolResult.Text($"{prefix}{label} completed.\n{text}");
+        }
+
+        private Task<ToolResult> HandleGetPlayState(JsonElement? args, CancellationToken ct)
+            => _engine.ForwardToolCall(IpcConstants.Methods.GetPlayState, args, ct);
+
+        private Task<ToolResult> HandleSetPlayPause(JsonElement? args, CancellationToken ct)
+            => _engine.ForwardToolCall(IpcConstants.Methods.SetPlayPause, args, ct);
+
+        private Task<ToolResult> HandlePlayStep(JsonElement? args, CancellationToken ct)
+            => _engine.ForwardToolCall(IpcConstants.Methods.PlayStep, args, ct);
 
         private async Task<ToolResult> HandleRefreshScripts(JsonElement? args, CancellationToken ct)
         {
@@ -713,12 +1115,26 @@ Example: { ""title"": ""Game Studio"" }",
 
         private async Task<ToolResult> HandleTakeScreenshot(JsonElement? args, CancellationToken ct)
         {
+            var (jpeg, error) = await CaptureFrameJpeg(args, ct);
+            if (jpeg == null)
+                return ToolResult.Error(error ?? "Screenshot failed.");
+
+            var base64 = Convert.ToBase64String(jpeg);
+            return new ToolResult
+            {
+                Content = new List<ContentItem> { ContentItem.FromImage(base64, "image/jpeg") }
+            };
+        }
+
+        // Captures one frame (engine-internal preferred, OS-level fallback) and returns
+        // it normalized to JPEG. Shared by take_screenshot and capture_sequence.
+        private async Task<(byte[]? jpeg, string? error)> CaptureFrameJpeg(JsonElement? args, CancellationToken ct)
+        {
             // Strategy 1: engine-internal capture (highest quality)
             var engineResult = await _engine.ForwardBinaryToolCall(
                 IpcConstants.Methods.TakeScreenshot, args, ct);
 
             byte[]? rawImage = engineResult.Bytes;
-            string sourceContentType = engineResult.ContentType ?? "image/png";
 
             if (rawImage == null)
             {
@@ -730,7 +1146,7 @@ Example: { ""title"": ""Game Studio"" }",
                 // PrintWindow captures background/occluded windows, so it still works.)
                 var capture = PlatformScreenCapture.Current;
                 if (capture == null)
-                    return ToolResult.Error(
+                    return (null,
                         engineResult.ErrorCode == IpcConstants.ErrorCodes.NotSupported
                             ? PlatformScreenCapture.UnsupportedPlatformMessage
                             : $"Screenshot failed: {engineResult.Error ?? "unknown error"}");
@@ -741,7 +1157,7 @@ Example: { ""title"": ""Game Studio"" }",
                 var windowText = await _engine.ForwardResourceRead(
                     IpcConstants.Methods.GetWindowInfo, ct);
                 if (string.IsNullOrEmpty(windowText) || windowText.StartsWith("Error:"))
-                    return ToolResult.Error("Cannot capture: engine window info unavailable.");
+                    return (null, "Cannot capture: engine window info unavailable.");
 
                 JsonElement windowInfo;
                 try
@@ -750,14 +1166,14 @@ Example: { ""title"": ""Game Studio"" }",
                 }
                 catch (Exception ex)
                 {
-                    return ToolResult.Error($"Failed to parse window info: {ex.Message}");
+                    return (null, $"Failed to parse window info: {ex.Message}");
                 }
 
                 if (!windowInfo.TryGetProperty("pid", out var pidElement))
-                    return ToolResult.Error("Window info missing 'pid'.");
+                    return (null, "Window info missing 'pid'.");
                 var pid = pidElement.GetInt32();
                 if (pid <= 0)
-                    return ToolResult.Error("Engine reports invalid PID.");
+                    return (null, "Engine reports invalid PID.");
 
                 var titlePrefix = windowInfo.TryGetProperty("windowTitlePrefix", out var p)
                     ? (p.GetString() ?? "")
@@ -765,29 +1181,485 @@ Example: { ""title"": ""Game Studio"" }",
 
                 rawImage = capture.CaptureMainWindow(pid, titlePrefix, out var captureError);
                 if (rawImage == null || rawImage.Length == 0)
-                    return ToolResult.Error(captureError ?? "OS-level capture failed.");
-
-                sourceContentType = "image/png";
+                    return (null, captureError ?? "OS-level capture failed.");
             }
 
             // Normalize: resize + JPEG. Cross-platform via ImageSharp.
-            byte[] outBytes;
-            string outMime;
             try
             {
-                outBytes = ImageProcessor.NormalizeToJpeg(rawImage);
-                outMime = "image/jpeg";
+                return (ImageProcessor.NormalizeToJpeg(rawImage), null);
             }
             catch (Exception ex)
             {
-                return ToolResult.Error($"Image processing failed: {ex.Message}");
+                return (null, $"Image processing failed: {ex.Message}");
+            }
+        }
+
+        private async Task<ToolResult> HandleCaptureSequence(JsonElement? args, CancellationToken ct)
+        {
+            int count = 4, intervalMs = 500;
+            JsonElement viewArgs = default;
+            bool hasView = false;
+            string? windowTitle = null;
+            if (args is JsonElement a && a.ValueKind == JsonValueKind.Object)
+            {
+                // Read via ReadDim (TryGetDouble+round) so a fractional literal like 4.0 for a
+                // schema-declared integer doesn't throw and abort the whole capture.
+                count = ReadDim(a, "count", count);
+                intervalMs = ReadDim(a, "interval_ms", intervalMs);
+                windowTitle = ReadString(a, "window_title");
+                if (a.TryGetProperty("view", out var v) && v.ValueKind == JsonValueKind.String)
+                {
+                    // Whitelist the value (don't interpolate arbitrary text into JSON).
+                    var view = v.GetString();
+                    if (view == "game" || view == "scene")
+                    {
+                        viewArgs = JsonSerializer.Deserialize<JsonElement>($"{{\"view\":\"{view}\"}}");
+                        hasView = true;
+                    }
+                }
             }
 
-            var base64 = Convert.ToBase64String(outBytes);
-            return new ToolResult
+            count = Math.Max(1, Math.Min(8, count));           // cap frames (payload + time)
+            intervalMs = Math.Max(0, Math.Min(3000, intervalMs));
+            JsonElement? capArgs = hasView ? viewArgs : args;
+            bool byWindow = !string.IsNullOrWhiteSpace(windowTitle);
+
+            var content = new List<ContentItem>();
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            for (int i = 0; i < count; i++)
             {
-                Content = new List<ContentItem> { ContentItem.FromImage(base64, outMime) }
+                if (i > 0 && intervalMs > 0)
+                    await Task.Delay(intervalMs, ct).ConfigureAwait(false);
+
+                // With window_title, capture that OS window (the separate-window game on
+                // Godot/Stride) instead of the engine's editor viewport.
+                var (jpeg, error) = byWindow
+                    ? CaptureWindowJpeg(windowTitle!)
+                    : await CaptureFrameJpeg(capArgs, ct);
+                if (jpeg == null)
+                {
+                    // Bail on first failure, but keep any frames already captured.
+                    content.Add(ContentItem.FromText($"frame {i + 1}/{count} failed: {error}"));
+                    break;
+                }
+                content.Add(ContentItem.FromText($"frame {i + 1}/{count} @ ~{sw.Elapsed.TotalSeconds:0.0}s"));
+                content.Add(ContentItem.FromImage(Convert.ToBase64String(jpeg), "image/jpeg"));
+            }
+
+            if (content.Count == 0)
+                return ToolResult.Error("capture_sequence produced no frames.");
+            return new ToolResult { Content = content };
+        }
+
+        // Capture an OS window (by title substring) as a normalized JPEG — for capture_sequence's
+        // window_title mode (a separate-window game). Mirrors the capture_window tool.
+        private static (byte[]? jpeg, string? error) CaptureWindowJpeg(string title)
+        {
+            var capture = PlatformScreenCapture.Current;
+            if (capture == null) return (null, PlatformScreenCapture.UnsupportedPlatformMessage);
+            var raw = capture.CaptureWindowByTitle(title, out var err);
+            if (raw == null) return (null, err ?? "Window capture failed.");
+            try { return (ImageProcessor.NormalizeToJpeg(raw), null); }
+            catch (Exception ex) { return (null, $"Image processing failed: {ex.Message}"); }
+        }
+
+        private async Task<ToolResult> HandleSendInput(JsonElement? args, CancellationToken ct)
+        {
+            // Strategy 1: engine-internal injection (IInputSimulator). The engine returns
+            // an InputResult JSON; supported:false means "fall back to OS-level".
+            var engineResult = await _engine.ForwardToolCall(IpcConstants.Methods.SendInput, args, ct);
+            if (IsDisconnectError(engineResult))
+                return engineResult;
+            if (!engineResult.IsError)
+            {
+                var text = engineResult.Content.Count > 0 ? engineResult.Content[0].Text : "";
+                if (ReadJsonBool(text, "supported", defaultValue: true))
+                    return engineResult; // engine handled it in-process
+            }
+
+            // Strategy 2: OS-level fallback (focus the target window, then SendInput).
+            var injector = PlatformInput.Current;
+            if (injector == null)
+                return ToolResult.Error(PlatformInput.UnsupportedPlatformMessage);
+
+            var events = ParseInputEvents(args);
+            if (events.Count == 0)
+                return ToolResult.Error("No input events supplied. Provide an 'events' array, e.g. " +
+                    "{ \"events\": [ { \"type\": \"key\", \"key\": \"Space\", \"hold_ms\": 60 } ] }.");
+
+            var capture = PlatformScreenCapture.Current;
+            string? focusTitle = ReadString(args, "window_title");
+            if (string.IsNullOrWhiteSpace(focusTitle))
+                focusTitle = await GetEngineWindowTitle(ct);
+            string focusNote = "";
+            if (capture != null && !string.IsNullOrWhiteSpace(focusTitle))
+            {
+                if (capture.FocusWindowByTitle(focusTitle!, out var focusErr))
+                    focusNote = $" (focused '{focusTitle}')";
+                else
+                    focusNote = $" (could not focus '{focusTitle}': {focusErr})";
+            }
+
+            if (!injector.Inject(events, out var dispatched, out var err))
+                return ToolResult.Error($"OS-level input injection failed: {err}");
+
+            var suffix = string.IsNullOrEmpty(err) ? "" : $" {err}";
+            return ToolResult.Text(
+                $"Injected {dispatched}/{events.Count} input event(s) via OS-level SendInput{focusNote}.{suffix}");
+        }
+
+        // Reads the engine's main-window title (from get_window_info) to focus before OS-level input.
+        private async Task<string?> GetEngineWindowTitle(CancellationToken ct)
+        {
+            var windowText = await _engine.ForwardResourceRead(IpcConstants.Methods.GetWindowInfo, ct);
+            if (string.IsNullOrEmpty(windowText) || windowText.StartsWith("Error:"))
+                return null;
+            try
+            {
+                var info = JsonSerializer.Deserialize<JsonElement>(windowText);
+                if (info.TryGetProperty("windowTitle", out var wt) && !string.IsNullOrWhiteSpace(wt.GetString()))
+                    return wt.GetString();
+                if (info.TryGetProperty("windowTitlePrefix", out var wp))
+                    return wp.GetString();
+            }
+            catch { /* fall through */ }
+            return null;
+        }
+
+        private static string? ReadString(JsonElement? args, string name)
+        {
+            if (args is JsonElement a && a.ValueKind == JsonValueKind.Object
+                && a.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String)
+                return v.GetString();
+            return null;
+        }
+
+        private static bool ReadJsonBool(string? json, string prop, bool defaultValue)
+            => ReadJsonBoolNullable(json, prop) ?? defaultValue;
+
+        // Returns the bool value of a top-level JSON property, or null if absent / not JSON / not a bool.
+        private static bool? ReadJsonBoolNullable(string? json, string prop)
+        {
+            if (string.IsNullOrEmpty(json)) return null;
+            try
+            {
+                var el = JsonSerializer.Deserialize<JsonElement>(json);
+                if (el.ValueKind == JsonValueKind.Object && el.TryGetProperty(prop, out var v)
+                    && (v.ValueKind == JsonValueKind.True || v.ValueKind == JsonValueKind.False))
+                    return v.GetBoolean();
+            }
+            catch { /* not JSON */ }
+            return null;
+        }
+
+        private static List<Shared.Abstraction.InputEvent> ParseInputEvents(JsonElement? args)
+        {
+            var list = new List<Shared.Abstraction.InputEvent>();
+            if (args is not JsonElement a || a.ValueKind != JsonValueKind.Object) return list;
+            if (!a.TryGetProperty("events", out var evs) || evs.ValueKind != JsonValueKind.Array) return list;
+
+            foreach (var e in evs.EnumerateArray())
+            {
+                if (e.ValueKind != JsonValueKind.Object) continue;
+                list.Add(new Shared.Abstraction.InputEvent
+                {
+                    Type = e.TryGetProperty("type", out var t) ? (t.GetString() ?? "key") : "key",
+                    Key = e.TryGetProperty("key", out var k) ? k.GetString() : null,
+                    Button = e.TryGetProperty("button", out var b) ? b.GetString() : null,
+                    Action = e.TryGetProperty("action", out var ac) ? ac.GetString() : null,
+                    Pressed = !e.TryGetProperty("pressed", out var pr) || pr.GetBoolean(),
+                    X = e.TryGetProperty("x", out var x) && x.ValueKind == JsonValueKind.Number ? x.GetDouble() : 0,
+                    Y = e.TryGetProperty("y", out var y) && y.ValueKind == JsonValueKind.Number ? y.GetDouble() : 0,
+                    HoldMs = e.TryGetProperty("hold_ms", out var h) && h.ValueKind == JsonValueKind.Number ? h.GetDouble() : 0,
+                });
+            }
+            return list;
+        }
+
+        // ---- Runtime verification: read/assert live engine values via the execute host ----
+
+        private async Task<ToolResult> HandleSampleState(JsonElement? args, CancellationToken ct)
+        {
+            if (args is not JsonElement a || !a.TryGetProperty("probes", out var probes)
+                || probes.ValueKind != JsonValueKind.Object)
+                return ToolResult.Error("Missing 'probes' object, e.g. { \"probes\": { \"y\": \"Find(\\\"Bird\\\").transform.position.y\" } }.");
+
+            var samples = new List<object>();
+            foreach (var p in probes.EnumerateObject())
+            {
+                var (val, err) = await SampleOne(p.Value.GetString() ?? "", ct);
+                samples.Add(new { name = p.Name, value = val, error = err });
+            }
+            return ToolResult.Text(JsonSerializer.Serialize(new { samples }, _jsonOptions));
+        }
+
+        private async Task<ToolResult> HandleAssertState(JsonElement? args, CancellationToken ct)
+        {
+            if (args is not JsonElement a || !a.TryGetProperty("assertions", out var asserts)
+                || asserts.ValueKind != JsonValueKind.Array)
+                return ToolResult.Error("Missing 'assertions' array.");
+
+            var (allPass, report) = await RunAssertions(
+                asserts, ReadDim(a, "timeout_ms", 0), ReadDim(a, "poll_ms", 250), ct);
+            return ToolResult.Text(JsonSerializer.Serialize(new { passed = allPass, assertions = report }, _jsonOptions));
+        }
+
+        // Evaluate an array of {expression, op, value, label} against live engine values,
+        // polling until all pass or timeoutMs elapses. Shared by assert_state and playtest.
+        private async Task<(bool passed, List<object> report)> RunAssertions(
+            JsonElement assertsArray, int timeoutMs, int pollMs, CancellationToken ct)
+        {
+            var items = new List<JsonElement>();
+            foreach (var e in assertsArray.EnumerateArray())
+                if (e.ValueKind == JsonValueKind.Object) items.Add(e);
+
+            pollMs = Math.Max(50, pollMs);
+            var deadline = DateTime.UtcNow.AddMilliseconds(Math.Max(0, timeoutMs));
+            var report = new List<object>();
+            bool allPass;
+
+            while (true)
+            {
+                report = new List<object>();
+                allPass = true;
+                foreach (var it in items)
+                {
+                    var expr = it.TryGetProperty("expression", out var ex) ? (ex.GetString() ?? "") : "";
+                    var op = it.TryGetProperty("op", out var o) ? (o.GetString() ?? "==") : "==";
+                    JsonElement? expected = it.TryGetProperty("value", out var vv) ? vv : (JsonElement?)null;
+                    var label = it.TryGetProperty("label", out var lb) ? lb.GetString() : null;
+
+                    var (val, err) = await SampleOne(expr, ct);
+                    bool pass = err == null && EvalAssertion(val, op, expected, out _);
+                    if (!pass) allPass = false;
+
+                    report.Add(new
+                    {
+                        label,
+                        expression = expr,
+                        op,
+                        expected,
+                        observed = err ?? (val.HasValue ? val.Value.GetRawText() : "(null)"),
+                        pass,
+                        error = err,
+                    });
+                }
+
+                if (allPass || DateTime.UtcNow >= deadline || ct.IsCancellationRequested) break;
+                await Task.Delay(pollMs, ct).ConfigureAwait(false);
+            }
+
+            return (allPass, report);
+        }
+
+        // Evaluate one C# expression in the engine via the execute host and return its JSON value.
+        private async Task<(JsonElement? value, string? error)> SampleOne(string expr, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(expr)) return (null, "empty expression");
+            var argsEl = JsonSerializer.SerializeToElement(new { code = "return (object)(" + expr + ");", timeout_ms = 3000 });
+            var res = await _engine.ForwardToolCall(IpcConstants.Methods.Execute, argsEl, ct);
+            if (res.IsError) return (null, res.Content.Count > 0 ? res.Content[0].Text : "execute failed");
+
+            var txt = (res.Content.Count > 0 ? res.Content[0].Text : "") ?? "";
+            try
+            {
+                var el = JsonSerializer.Deserialize<JsonElement>(txt);
+                if (el.ValueKind == JsonValueKind.Object)
+                {
+                    if (el.TryGetProperty("success", out var s) && s.ValueKind == JsonValueKind.False)
+                        return (null, el.TryGetProperty("error", out var e) ? (e.GetString() ?? "eval error") : "eval error");
+                    if (el.TryGetProperty("returnValue", out var rv))
+                        return (rv.Clone(), null);
+                }
+                return (null, "no returnValue (does this engine support execute?)");
+            }
+            catch (Exception ex) { return (null, "parse error: " + ex.Message); }
+        }
+
+        private static bool EvalAssertion(JsonElement? observed, string op, JsonElement? expected, out string obsStr)
+        {
+            obsStr = observed.HasValue ? observed.Value.GetRawText() : "(null)";
+            op = (op ?? "==").Trim().ToLowerInvariant();
+
+            if (op == "truthy") return observed.HasValue && IsTruthy(observed.Value);
+            if (op == "falsy") return !observed.HasValue || !IsTruthy(observed.Value);
+            if (!observed.HasValue) return false;
+            var o = observed.Value;
+
+            if (op == "==") return expected.HasValue && JsonEquals(o, expected.Value);
+            if (op == "!=") return !expected.HasValue || !JsonEquals(o, expected.Value);
+
+            if (TryNum(o, out var av) && expected.HasValue && TryNum(expected.Value, out var bv))
+            {
+                switch (op)
+                {
+                    case "<": return av < bv;
+                    case "<=": return av <= bv;
+                    case ">": return av > bv;
+                    case ">=": return av >= bv;
+                    case "approx": return Math.Abs(av - bv) <= 1e-3;
+                }
+            }
+            return false;
+        }
+
+        private static bool IsTruthy(JsonElement e)
+        {
+            switch (e.ValueKind)
+            {
+                case JsonValueKind.True: return true;
+                case JsonValueKind.False: case JsonValueKind.Null: return false;
+                case JsonValueKind.Number: return e.TryGetDouble(out var d) && d != 0;
+                case JsonValueKind.String:
+                    var s = e.GetString();
+                    return !string.IsNullOrEmpty(s)
+                        && !s.Equals("false", StringComparison.OrdinalIgnoreCase) && s != "0";
+                default: return true; // object/array present
+            }
+        }
+
+        private static bool TryNum(JsonElement e, out double d)
+        {
+            if (e.ValueKind == JsonValueKind.Number) return e.TryGetDouble(out d);
+            if (e.ValueKind == JsonValueKind.String
+                && double.TryParse(e.GetString(), System.Globalization.NumberStyles.Any,
+                    System.Globalization.CultureInfo.InvariantCulture, out d))
+                return true;
+            d = 0;
+            return false;
+        }
+
+        private static bool JsonEquals(JsonElement a, JsonElement b)
+        {
+            if (TryNum(a, out var an) && TryNum(b, out var bn)) return Math.Abs(an - bn) < 1e-9;
+            if ((a.ValueKind == JsonValueKind.True || a.ValueKind == JsonValueKind.False)
+                && (b.ValueKind == JsonValueKind.True || b.ValueKind == JsonValueKind.False))
+                return a.GetBoolean() == b.GetBoolean();
+            return string.Equals(
+                a.ValueKind == JsonValueKind.String ? a.GetString() : a.GetRawText(),
+                b.ValueKind == JsonValueKind.String ? b.GetString() : b.GetRawText(),
+                StringComparison.Ordinal);
+        }
+
+        // One-call acceptance harness: enter play, run a timed timeline (input/wait/capture/
+        // assert/sample) server-side so input lands at a precise moment relative to observation,
+        // check final criteria, exit — returns ONE verdict + a motion strip + structured evidence.
+        private async Task<ToolResult> HandlePlaytest(JsonElement? args, CancellationToken ct)
+        {
+            var a = args ?? default;
+            bool hasArgs = a.ValueKind == JsonValueKind.Object;
+            bool doEnter = ReadBool(a, "enter", true);
+            bool doExit = ReadBool(a, "exit", true);
+
+            var content = new List<ContentItem>();
+            var log = new System.Text.StringBuilder();
+            var assertionReports = new List<object>();
+            var samplesLog = new List<object>();
+            bool overallPass = true;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+
+            if (doEnter)
+            {
+                var r = await HandlePlayTransition(IpcConstants.Methods.EnterPlay, "enter play mode", ct);
+                if (r.IsError)
+                    return ToolResult.Error($"playtest: enter_play failed: {(r.Content.Count > 0 ? r.Content[0].Text : "")}");
+                log.AppendLine($"[{sw.Elapsed.TotalSeconds:0.0}s] enter_play ok");
+            }
+
+            if (hasArgs && a.TryGetProperty("steps", out var steps) && steps.ValueKind == JsonValueKind.Array)
+            {
+                int idx = 0;
+                foreach (var step in steps.EnumerateArray())
+                {
+                    if (step.ValueKind != JsonValueKind.Object) continue;
+                    idx++;
+                    ct.ThrowIfCancellationRequested();
+
+                    if (step.TryGetProperty("wait_ms", out var w) && w.ValueKind == JsonValueKind.Number)
+                    {
+                        var ms = Math.Max(0, Math.Min(10_000, (int)w.GetDouble()));
+                        await Task.Delay(ms, ct).ConfigureAwait(false);
+                        log.AppendLine($"[{sw.Elapsed.TotalSeconds:0.0}s] wait {ms}ms");
+                    }
+                    else if (step.TryGetProperty("input", out var input) && input.ValueKind == JsonValueKind.Object)
+                    {
+                        var r = await HandleSendInput(input, ct);
+                        var rt = r.Content.Count > 0 ? r.Content[0].Text : "";
+                        log.AppendLine($"[{sw.Elapsed.TotalSeconds:0.0}s] input -> {(r.IsError ? "ERROR: " : "")}{Truncate(rt, 100)}");
+                    }
+                    else if (step.TryGetProperty("capture", out var cap))
+                    {
+                        JsonElement? capArgs = cap.ValueKind == JsonValueKind.Object ? cap : (JsonElement?)null;
+                        var (jpeg, err) = await CaptureFrameJpeg(capArgs, ct);
+                        if (jpeg != null)
+                        {
+                            content.Add(ContentItem.FromText($"frame @ {sw.Elapsed.TotalSeconds:0.0}s (step {idx})"));
+                            content.Add(ContentItem.FromImage(Convert.ToBase64String(jpeg), "image/jpeg"));
+                            log.AppendLine($"[{sw.Elapsed.TotalSeconds:0.0}s] capture ok");
+                        }
+                        else log.AppendLine($"[{sw.Elapsed.TotalSeconds:0.0}s] capture failed: {err}");
+                    }
+                    else if (step.TryGetProperty("assert", out var asserts) && asserts.ValueKind == JsonValueKind.Array)
+                    {
+                        var (pass, rep) = await RunAssertions(asserts, ReadDim(step, "timeout_ms", 0), ReadDim(step, "poll_ms", 200), ct);
+                        overallPass &= pass;
+                        assertionReports.Add(new { step = idx, at = Math.Round(sw.Elapsed.TotalSeconds, 1), passed = pass, assertions = rep });
+                        log.AppendLine($"[{sw.Elapsed.TotalSeconds:0.0}s] assert -> {(pass ? "PASS" : "FAIL")}");
+                    }
+                    else if (step.TryGetProperty("sample", out var sam) && sam.ValueKind == JsonValueKind.Object)
+                    {
+                        var vals = new List<object>();
+                        foreach (var p in sam.EnumerateObject())
+                        {
+                            var (val, err) = await SampleOne(p.Value.GetString() ?? "", ct);
+                            vals.Add(new { name = p.Name, value = val, error = err });
+                        }
+                        samplesLog.Add(new { step = idx, at = Math.Round(sw.Elapsed.TotalSeconds, 1), values = vals });
+                        log.AppendLine($"[{sw.Elapsed.TotalSeconds:0.0}s] sample ({vals.Count})");
+                    }
+                }
+            }
+
+            if (hasArgs && a.TryGetProperty("criteria", out var crit) && crit.ValueKind == JsonValueKind.Array)
+            {
+                var (pass, rep) = await RunAssertions(crit, ReadDim(a, "criteria_timeout_ms", 0), 200, ct);
+                overallPass &= pass;
+                assertionReports.Add(new { step = "criteria", passed = pass, assertions = rep });
+                log.AppendLine($"[{sw.Elapsed.TotalSeconds:0.0}s] criteria -> {(pass ? "PASS" : "FAIL")}");
+            }
+
+            if (doExit)
+            {
+                var r = await HandlePlayTransition(IpcConstants.Methods.ExitPlay, "exit play mode", ct);
+                log.AppendLine($"[{sw.Elapsed.TotalSeconds:0.0}s] exit_play {(r.IsError ? "ERROR" : "ok")}");
+            }
+
+            var verdict = new
+            {
+                verdict = overallPass ? "PASS" : "FAIL",
+                elapsedS = Math.Round(sw.Elapsed.TotalSeconds, 1),
+                assertions = assertionReports,
+                samples = samplesLog,
             };
+            var summary = $"playtest {(overallPass ? "PASSED" : "FAILED")} ({sw.Elapsed.TotalSeconds:0.#}s)\n\n" +
+                          "TIMELINE:\n" + log + "\nRESULT:\n" +
+                          JsonSerializer.Serialize(verdict, _jsonOptions);
+            content.Insert(0, ContentItem.FromText(summary));
+            return new ToolResult { Content = content };
+        }
+
+        private static string Truncate(string? s, int n)
+            => string.IsNullOrEmpty(s) ? "" : (s!.Length <= n ? s : s.Substring(0, n) + "…");
+
+        private static bool ReadBool(JsonElement obj, string name, bool dflt)
+        {
+            if (obj.ValueKind == JsonValueKind.Object && obj.TryGetProperty(name, out var v))
+            {
+                if (v.ValueKind == JsonValueKind.True) return true;
+                if (v.ValueKind == JsonValueKind.False) return false;
+            }
+            return dflt;
         }
 
         private void Register(string name, string description, JsonElement inputSchema,

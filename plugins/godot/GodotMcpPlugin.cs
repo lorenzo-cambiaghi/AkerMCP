@@ -55,6 +55,9 @@ namespace AkerMcp.GodotAdapter
 
         protected override ISceneManager? CreateSceneManager() => new GodotSceneManager();
 
+        protected override IPlayModeController? CreatePlayModeController() => new GodotPlayModeController();
+        protected override ISoundImporter? CreateSoundImporter() => new GodotAudioImporter();
+
         protected override void Log(string message) => GD.Print($"[AkerMcp] {message}");
         protected override void LogError(string message) => GD.PrintErr($"[AkerMcp] {message}");
 

@@ -23,6 +23,9 @@ namespace AkerMcp.Client
         private readonly IBuildManager? _buildManager;
         private readonly ISpriteImporter? _spriteImporter;
         private readonly ISceneManager? _sceneManager;
+        private readonly IPlayModeController? _playModeController;
+        private readonly IInputSimulator? _inputSimulator;
+        private readonly ISoundImporter? _soundImporter;
         private readonly IEngineCapabilities _capabilities;
         private readonly IMainThreadDispatcher _dispatcher;
         private readonly PropertyPathResolver _pathResolver;
@@ -57,7 +60,10 @@ namespace AkerMcp.Client
             IScreenCapture? screenCapture = null,
             IBuildManager? buildManager = null,
             ISpriteImporter? spriteImporter = null,
-            ISceneManager? sceneManager = null)
+            ISceneManager? sceneManager = null,
+            IPlayModeController? playModeController = null,
+            IInputSimulator? inputSimulator = null,
+            ISoundImporter? soundImporter = null)
         {
             _sceneGraph = sceneGraph;
             _capabilities = capabilities;
@@ -71,6 +77,9 @@ namespace AkerMcp.Client
             _buildManager = buildManager;
             _spriteImporter = spriteImporter;
             _sceneManager = sceneManager;
+            _playModeController = playModeController;
+            _inputSimulator = inputSimulator;
+            _soundImporter = soundImporter;
             _pathResolver = new PropertyPathResolver();
             _inspector = new ReflectionInspector();
             _methodInvoker = new MethodInvoker();
@@ -89,6 +98,9 @@ namespace AkerMcp.Client
                 // needs to report NOT_SUPPORTED when the engine lacks ISpriteImporter.
                 if (request.Method == IpcConstants.Methods.ImportSprite)
                     return await HandleImportSprite(request, ct);
+
+                if (request.Method == IpcConstants.Methods.ImportSound)
+                    return await HandleImportSound(request, ct);
 
                 var result = request.Method switch
                 {
@@ -122,6 +134,12 @@ namespace AkerMcp.Client
                     IpcConstants.Methods.SetPlatformSettings => await HandleSetPlatformSettings(request, ct),
                     IpcConstants.Methods.SwitchBuildTarget => await HandleSwitchBuildTarget(request, ct),
                     IpcConstants.Methods.BuildPlayer => await HandleBuildPlayer(request, ct),
+                    IpcConstants.Methods.EnterPlay => await HandleEnterPlay(ct),
+                    IpcConstants.Methods.ExitPlay => await HandleExitPlay(ct),
+                    IpcConstants.Methods.SetPlayPause => await HandleSetPlayPause(request, ct),
+                    IpcConstants.Methods.PlayStep => await HandlePlayStep(request, ct),
+                    IpcConstants.Methods.GetPlayState => await HandleGetPlayState(ct),
+                    IpcConstants.Methods.SendInput => await HandleSendInput(request, ct),
                     _ => throw new InvalidOperationException($"Unknown method: {request.Method}")
                 };
 
@@ -197,6 +215,42 @@ namespace AkerMcp.Client
 
             var result = await _dispatcher.RunOnMainThread(
                 () => _spriteImporter.ImportSprite(importReq), ct);
+
+            return IpcResponse.Ok(request.Id,
+                Encoding.UTF8.GetBytes(JsonSerializer.Serialize(result, _compactJsonOptions)));
+        }
+
+        private async Task<IpcResponse> HandleImportSound(IpcRequest request, CancellationToken ct)
+        {
+            if (_soundImporter == null)
+                return IpcResponse.FailWithCode(request.Id,
+                    IpcConstants.ErrorCodes.NotSupported,
+                    "Engine does not implement ISoundImporter.");
+
+            if (request.Binary == null || request.Binary.Length == 0)
+                return IpcResponse.Fail(request.Id, "import_sound called without WAV bytes (request.Binary empty).");
+
+            var args = ParseArgs(request);
+
+            var req = new SoundImportRequest
+            {
+                Name = args.TryGetProperty("name", out var n) ? (n.GetString() ?? "sound") : "sound",
+                Wav = request.Binary,
+                Volume = args.TryGetProperty("volume", out var vol) ? (float)vol.GetDouble() : 1f,
+                Loop = args.TryGetProperty("loop", out var lp) && lp.GetBoolean(),
+                AutoPlay = args.TryGetProperty("auto_play", out var ap) && ap.GetBoolean(),
+                ScenePath = args.TryGetProperty("scene_path", out var sp) ? sp.GetString() : null,
+            };
+
+            if (args.TryGetProperty("position", out var pos) && pos.ValueKind == JsonValueKind.Object)
+            {
+                if (pos.TryGetProperty("x", out var x)) req.PosX = (float)x.GetDouble();
+                if (pos.TryGetProperty("y", out var y)) req.PosY = (float)y.GetDouble();
+                if (pos.TryGetProperty("z", out var z)) req.PosZ = (float)z.GetDouble();
+            }
+
+            var result = await _dispatcher.RunOnMainThread(
+                () => _soundImporter.ImportSound(req), ct);
 
             return IpcResponse.Ok(request.Id,
                 Encoding.UTF8.GetBytes(JsonSerializer.Serialize(result, _compactJsonOptions)));
@@ -850,6 +904,106 @@ namespace AkerMcp.Client
             {
                 error = "Platform/build operations not available. Engine plugin does not provide an IBuildManager."
             }, _jsonOptions);
+
+        // ---- Runtime loop: play control (IPlayModeController) ----
+
+        private async Task<string> HandleGetPlayState(CancellationToken ct)
+        {
+            if (_playModeController == null) return PlayNotSupportedJson();
+            return await _dispatcher.RunOnMainThread(
+                () => JsonSerializer.Serialize(_playModeController.GetState(), _compactJsonOptions), ct);
+        }
+
+        private async Task<string> HandleEnterPlay(CancellationToken ct)
+        {
+            if (_playModeController == null) return PlayNotSupportedJson();
+            return await _dispatcher.RunOnMainThread(
+                () => JsonSerializer.Serialize(_playModeController.EnterPlay(), _compactJsonOptions), ct);
+        }
+
+        private async Task<string> HandleExitPlay(CancellationToken ct)
+        {
+            if (_playModeController == null) return PlayNotSupportedJson();
+            return await _dispatcher.RunOnMainThread(
+                () => JsonSerializer.Serialize(_playModeController.ExitPlay(), _compactJsonOptions), ct);
+        }
+
+        private async Task<string> HandleSetPlayPause(IpcRequest request, CancellationToken ct)
+        {
+            if (_playModeController == null) return PlayNotSupportedJson();
+            var args = ParseArgs(request);
+            bool paused = !args.TryGetProperty("paused", out var p) || p.GetBoolean();
+            return await _dispatcher.RunOnMainThread(
+                () => JsonSerializer.Serialize(_playModeController.SetPaused(paused), _compactJsonOptions), ct);
+        }
+
+        private async Task<string> HandlePlayStep(IpcRequest request, CancellationToken ct)
+        {
+            if (_playModeController == null) return PlayNotSupportedJson();
+            var args = ParseArgs(request);
+            int frames = args.TryGetProperty("frames", out var f) && f.ValueKind == JsonValueKind.Number
+                ? f.GetInt32() : 1;
+            return await _dispatcher.RunOnMainThread(
+                () => JsonSerializer.Serialize(_playModeController.Step(frames), _compactJsonOptions), ct);
+        }
+
+        private string PlayNotSupportedJson()
+            => JsonSerializer.Serialize(new PlayState
+            {
+                Supported = false,
+                Error = "Play mode control not available. Engine plugin does not provide an IPlayModeController."
+            }, _compactJsonOptions);
+
+        // ---- Runtime loop: input injection (IInputSimulator) ----
+        // Returns InputResult JSON; Supported=false signals the server to try its
+        // OS-level input fallback (mirrors the take_screenshot hybrid).
+
+        private async Task<string> HandleSendInput(IpcRequest request, CancellationToken ct)
+        {
+            if (_inputSimulator == null)
+                return JsonSerializer.Serialize(new InputResult
+                {
+                    Supported = false,
+                    Error = "Engine plugin does not provide an IInputSimulator."
+                }, _compactJsonOptions);
+
+            var events = ParseInputEvents(ParseArgs(request));
+            if (events.Count == 0)
+                return JsonSerializer.Serialize(new InputResult
+                {
+                    Supported = true,
+                    Success = false,
+                    Error = "No input events supplied ('events' array is empty)."
+                }, _compactJsonOptions);
+
+            var result = await _dispatcher.RunOnMainThread(() => _inputSimulator.SendInput(events), ct);
+            return JsonSerializer.Serialize(result, _compactJsonOptions);
+        }
+
+        private static List<InputEvent> ParseInputEvents(JsonElement args)
+        {
+            var list = new List<InputEvent>();
+            if (!args.TryGetProperty("events", out var evs) || evs.ValueKind != JsonValueKind.Array)
+                return list;
+
+            foreach (var e in evs.EnumerateArray())
+            {
+                if (e.ValueKind != JsonValueKind.Object) continue;
+                var ev = new InputEvent
+                {
+                    Type = e.TryGetProperty("type", out var t) ? (t.GetString() ?? "key") : "key",
+                    Key = e.TryGetProperty("key", out var k) ? k.GetString() : null,
+                    Button = e.TryGetProperty("button", out var b) ? b.GetString() : null,
+                    Action = e.TryGetProperty("action", out var a) ? a.GetString() : null,
+                    Pressed = !e.TryGetProperty("pressed", out var pr) || pr.GetBoolean(),
+                    X = e.TryGetProperty("x", out var x) && x.ValueKind == JsonValueKind.Number ? x.GetDouble() : 0,
+                    Y = e.TryGetProperty("y", out var y) && y.ValueKind == JsonValueKind.Number ? y.GetDouble() : 0,
+                    HoldMs = e.TryGetProperty("hold_ms", out var h) && h.ValueKind == JsonValueKind.Number ? h.GetDouble() : 0,
+                };
+                list.Add(ev);
+            }
+            return list;
+        }
 
         // Error payloads must go through the serializer: paths/names coming from
         // the model can contain quotes or backslashes that would break

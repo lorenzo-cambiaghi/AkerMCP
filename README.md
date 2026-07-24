@@ -30,6 +30,7 @@ The 100% C# engine-agnostic core means the **same** AI workflow — inspect, mod
 | Platform/build tools (list · switch · build_player) | ✅ | ✅ | ✅ |
 | **2D vector placeholders** (`create_sprite`, server-rasterized) | ✅ | ✅ | ✅ |
 | Scene management (`new_scene` · `open_scene` · `save_scene`) | ✅ | ✅ | ✅ |
+| **Runtime loop** (`enter_play`/`exit_play` · `capture_sequence` · `send_input`) | ✅ | ◑ | ◑ |
 
 Most rows are implemented and verified live in each engine's editor — not a roadmap. Plus engine-independent OS tools (`list_windows` / `capture_window`) to screenshot any window on the machine.
 
@@ -453,6 +454,47 @@ Build a 2D prototype end-to-end — scene, placeholder art, and gameplay — wit
 
 > Keep placeholders flat and geometric — recognizable silhouette over detail. For arbitrary SVG (boolean paths, filters, tracing) a dedicated vector tool would be the right home; `create_sprite` deliberately targets the clean-prototype niche.
 
+### Runtime Loop
+
+Don't just build a prototype — **run it, watch it move, and drive it**, so the AI can verify the thing actually plays instead of building blind. The loop: `enter_play` → `send_input` to drive it → `capture_sequence`/`get_property` to observe → `exit_play`.
+
+| Tool | Description |
+|------|-------------|
+| `enter_play` | Start the project running (Play Mode / run the scene / play the timeline). On Unity this reloads the domain and briefly drops the connection — the server waits for the auto-reconnect and reports the settled state |
+| `exit_play` | Stop play/playback and return to a clean edit state |
+| `set_play_pause` | Pause (`{"paused": true}`) or resume an in-progress run |
+| `play_step` | Advance N frames while paused — step through a jump arc or collision frame by frame |
+| `get_play_state` | Report `isPlaying`, `isPaused`, current `time`, and clip `duration` (read-only) |
+| `capture_sequence` | Capture **several** frames at an interval and return them as a strip — see *motion*, not one pose. Call it while playing (`{"count": 4, "interval_ms": 400}`) |
+| `send_input` | Inject synthetic input into the running game to test interactive mechanics — an ordered `events` array of key / mouse-button / mouse-move / named-action events (e.g. `{"events":[{"type":"key","key":"Space","hold_ms":60}]}`) |
+
+> **Engine support:** the runtime loop is backed by the optional `IPlayModeController` (play control) and the optional `IInputSimulator` (in-process input, with an OS-level fallback). Support is honest per engine:
+> - **Unity** — full: Play Mode runs in the Game View, so `take_screenshot`/`capture_sequence` capture the live game; pause/step supported. Reuses the domain-reload reconnect from `refresh_scripts`.
+> - **Godot** — partial: the game runs in a **separate window** (screenshot it with `capture_window`, drive it with `send_input`'s OS-level path + `window_title`); no editor-side pause/step.
+> - **Stride** — Game Studio has no plugin-controllable Play Mode; `enter_play` reports this and points you to `build_player` + running the produced executable.
+> - **SkelForge** — full: "play" plays the animation timeline in-editor; pause + frame-step supported; the viewport shows the pose.
+>
+> `send_input` prefers an engine's in-process `IInputSimulator`, otherwise focuses the game/engine window and injects via **OS-level `SendInput`** (Windows; macOS/Linux report unsupported). On **Unity** the in-process path drives the **new Input System** (`com.unity.inputsystem`) directly — resolved via reflection, so there is no hard package dependency; projects on the legacy Input Manager (or without the package) fall back to OS-level automatically. On **Godot/Stride** the game is a separate window, so pass `window_title` (the game window's title) or the OS-level path targets the editor. The `action` event type is reserved but not yet injectable — drive the key/mouse controls the action is bound to.
+
+### Verify & Iterate
+
+Close the loop: don't just *look* at the game — **read its runtime state and get a PASS/FAIL**, so the AI verifies a mechanic against ground truth instead of guessing from pixels.
+
+| Tool | Description |
+|------|-------------|
+| `sample_state` | Read live runtime values — `{ probes: { name: "C# expression" } }` evaluated in the engine (same host as `execute`); returns each value |
+| `assert_state` | Assert runtime conditions and get structured PASS/FAIL. Each assertion is `{expression, op, value}` (`op`: `==`/`!=`/`<`/`<=`/`>`/`>=`/`approx`/`truthy`/`falsy`); polls until all pass or `timeout_ms` |
+| `playtest` | **One-call acceptance harness**: `enter_play` → a timed timeline of `input`/`wait_ms`/`capture`/`assert`/`sample` steps → final `criteria` → `exit_play`. Returns ONE verdict + a motion strip + evidence — input lands at a precise moment relative to observation (no multi-round-trip lag that misses fast transients) |
+
+### Placeholder Audio & Gameplay Primitives
+
+Generate the other half of a prototype — sound and vetted code — without leaving the session.
+
+| Tool | Description |
+|------|-------------|
+| `create_sound` | Author a jsfxr-style **sound-spec** (JSON); the **server synthesizes a WAV** and imports it as an audio clip — engine-agnostic like `create_sprite`. Great for the flap/jump/score/hit SFX that make a prototype feel real. Implemented for **Unity** (AudioClip) and **Godot** (AudioStreamWav) |
+| `add_primitive` | Drop in a **vetted gameplay behaviour** (Unity: `platformer_controller_2d`, `auto_runner_2d`, `camera_follow_2d`, `killzone_2d`, `score_overlay`) instead of hand-writing and debugging it — the server writes the connected engine's known-good source via `write_script` and returns its configurable fields. Call with no `id` to list the catalog |
+
 ### Platform & Build
 
 Engine-neutral build pipeline control (backed by the optional `IBuildManager`; implemented for Unity, Godot and Stride).
@@ -837,6 +879,8 @@ public class MyEnginePlugin : EnginePluginBase
     protected override IScreenCapture? CreateScreenCapture() => new MyScreenCapture();
     protected override ISpriteImporter? CreateSpriteImporter() => new MySpriteImporter();
     protected override ISceneManager? CreateSceneManager() => new MySceneManager();
+    protected override IPlayModeController? CreatePlayModeController() => new MyPlayModeController();
+    protected override IInputSimulator? CreateInputSimulator() => new MyInputSimulator();
 
     protected override void Log(string message) { /* ... */ }
     protected override void LogError(string message) { /* ... */ }
@@ -855,6 +899,8 @@ public class MyEnginePlugin : EnginePluginBase
 | `IScreenCapture` | Engine-internal render-buffer capture (Game/Scene view) | No — falls back to OS-level capture on Windows (`PrintWindow`) and macOS (Quartz). On Linux, this interface is required |
 | `ISpriteImporter` | Import a server-rasterized PNG as a 2D sprite, optionally placing it in the scene (powers `create_sprite`) | No — `create_sprite` reports it as unavailable if absent |
 | `ISceneManager` | Create / open / save scenes (powers `new_scene`/`open_scene`/`save_scene`) | No — the scene tools report it as unavailable if absent |
+| `IPlayModeController` | Start/stop play, pause/step, read play state (powers `enter_play`/`exit_play`/`set_play_pause`/`play_step`/`get_play_state`) | No — the play tools report NOT_SUPPORTED if absent |
+| `IInputSimulator` | Inject synthetic input in-process (powers `send_input`) | No — `send_input` falls back to OS-level window injection if absent |
 
 > **Tip for the macOS OS-level fallback:** `IEngineCapabilities.EngineName` is used as a window-title preference signal — the macOS capture path prefers PID-owned windows whose title *contains* this string (anywhere in the title) to disambiguate the editor's main window from inspector/floating panels. The match is case-insensitive and works for both prefix-style titles (Unity: `"Unity 6000.x …"`) and suffix-style titles (Godot: `"Scene - Project - Godot Engine"`). If no window matches, the largest PID-owned window is used as a fallback, so even a non-matching `EngineName` won't break the capture.
 

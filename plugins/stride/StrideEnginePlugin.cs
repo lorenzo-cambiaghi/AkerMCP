@@ -45,6 +45,7 @@ namespace AkerMcp.StrideAdapter
 
         protected override ISpriteImporter? CreateSpriteImporter() => new StrideSpriteImporter();
         protected override ISceneManager? CreateSceneManager() => new StrideSceneManager();
+        protected override IPlayModeController? CreatePlayModeController() => new StridePlayModeController();
 
         protected override void Log(string message)
             => System.Diagnostics.Debug.WriteLine($"[AkerMcp] {message}");

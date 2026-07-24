@@ -359,6 +359,75 @@ namespace AkerMcp.Server
             }
         }
 
+        /// <summary>
+        /// Ships a server-synthesized WAV (Binary) + JSON metadata (Payload) into the engine,
+        /// the audio counterpart of ForwardSpriteImport. Used by create_sound.
+        /// </summary>
+        public async Task<ToolResult> ForwardSoundImport(
+            string metadataJson, byte[] binary, CancellationToken ct,
+            int timeoutMs = DefaultRequestTimeoutMs)
+        {
+            var channel = _channel;
+            if (channel == null)
+            {
+                if (!await WaitForConnection(ReconnectGraceMs, ct).ConfigureAwait(false))
+                    return ToolResult.Error($"{EngineDisconnectedPrefix} No engine connected. Retry shortly.");
+                channel = _channel;
+                if (channel == null)
+                    return ToolResult.Error($"{EngineDisconnectedPrefix} Engine connection dropped — retry shortly.");
+            }
+
+            var requestId = Interlocked.Increment(ref _nextRequestId);
+            var request = new IpcRequest
+            {
+                Id = requestId,
+                Method = IpcConstants.Methods.ImportSound,
+                Payload = System.Text.Encoding.UTF8.GetBytes(metadataJson),
+                Binary = binary
+            };
+
+            var tcs = new TaskCompletionSource<IpcResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _pendingRequests[requestId] = tcs;
+
+            try
+            {
+                await channel.SendRequest(request, ct).ConfigureAwait(false);
+
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(timeoutMs);
+                using var reg = cts.Token.Register(() => tcs.TrySetCanceled());
+
+                var response = await tcs.Task.ConfigureAwait(false);
+
+                if (!response.Success)
+                    return ToolResult.Error(response.Error ?? "Unknown engine error");
+
+                var resultText = response.Payload != null
+                    ? System.Text.Encoding.UTF8.GetString(response.Payload)
+                    : "OK";
+                return ToolResult.Text(resultText);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (OperationCanceledException)
+            {
+                if (!IsConnected)
+                    return ToolResult.Error(
+                        $"{EngineDisconnectedPrefix} Engine disconnected while importing sound. Retry shortly.");
+                return ToolResult.Error($"import_sound timed out after {timeoutMs / 1000}s (engine still connected).");
+            }
+            catch (IOException ex)
+            {
+                return ToolResult.Error($"{EngineDisconnectedPrefix} Pipe error during import_sound: {ex.Message}. Retry shortly.");
+            }
+            finally
+            {
+                _pendingRequests.TryRemove(requestId, out _);
+            }
+        }
+
         public async Task<BinaryToolCallResult> ForwardBinaryToolCall(
             string method, JsonElement? arguments, CancellationToken ct)
         {

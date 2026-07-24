@@ -54,6 +54,10 @@ namespace AkerMcp.Unity
         protected override IBuildManager? CreateBuildManager() => new UnityBuildManager();
         protected override ISpriteImporter? CreateSpriteImporter() => new UnitySpriteImporter();
         protected override ISceneManager? CreateSceneManager() => new UnitySceneManager();
+        protected override IPlayModeController? CreatePlayModeController() => new UnityPlayModeController();
+        // In-process input via the new Input System (reflection; falls back to OS-level if absent).
+        protected override IInputSimulator? CreateInputSimulator() => new UnityInputSimulator(_dispatcher!);
+        protected override ISoundImporter? CreateSoundImporter() => new UnityAudioImporter();
 
         protected override void Log(string message) => Debug.Log($"[AkerMcp] {message}");
         protected override void LogError(string message) => Debug.LogError($"[AkerMcp] {message}");

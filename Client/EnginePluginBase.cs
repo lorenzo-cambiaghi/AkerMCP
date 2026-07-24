@@ -45,6 +45,9 @@ namespace AkerMcp.Client
         protected virtual IBuildManager? CreateBuildManager() => null;
         protected virtual ISpriteImporter? CreateSpriteImporter() => null;
         protected virtual ISceneManager? CreateSceneManager() => null;
+        protected virtual IPlayModeController? CreatePlayModeController() => null;
+        protected virtual IInputSimulator? CreateInputSimulator() => null;
+        protected virtual ISoundImporter? CreateSoundImporter() => null;
 
         protected abstract void Log(string message);
         protected abstract void LogError(string message);
@@ -70,7 +73,10 @@ namespace AkerMcp.Client
                 CreateScreenCapture(),
                 CreateBuildManager(),
                 CreateSpriteImporter(),
-                CreateSceneManager());
+                CreateSceneManager(),
+                CreatePlayModeController(),
+                CreateInputSimulator(),
+                CreateSoundImporter());
 
             _cts = new CancellationTokenSource();
 
