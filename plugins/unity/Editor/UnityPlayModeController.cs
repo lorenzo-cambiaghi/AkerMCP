@@ -61,14 +61,22 @@ namespace AkerMcp.Unity
             return Snapshot();
         }
 
-        private static PlayState Snapshot() => new PlayState
+        private static PlayState Snapshot()
         {
-            IsPlaying = EditorApplication.isPlaying,
-            IsPaused = EditorApplication.isPaused,
-            // Seconds since the current scene started playing (0 in edit mode).
-            Time = EditorApplication.isPlaying ? UnityEngine.Time.timeSinceLevelLoad : 0,
-            // Entering/exiting Play Mode reloads the domain by default (drops the connection).
-            WillReload = true,
-        };
+            bool playing = EditorApplication.isPlaying;
+            float dt = UnityEngine.Time.smoothDeltaTime;
+            return new PlayState
+            {
+                IsPlaying = playing,
+                IsPaused = EditorApplication.isPaused,
+                // Seconds since the current scene started playing (0 in edit mode).
+                Time = playing ? UnityEngine.Time.timeSinceLevelLoad : 0,
+                // Diff FrameCount across reads to prove the loop is live (not soft-locked).
+                FrameCount = playing ? UnityEngine.Time.frameCount : 0,
+                Fps = playing && dt > 0.0001f ? 1f / dt : 0,
+                // Entering/exiting Play Mode reloads the domain by default (drops the connection).
+                WillReload = true,
+            };
+        }
     }
 }

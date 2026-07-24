@@ -18,6 +18,7 @@ namespace AkerMcp.GodotAdapter
             return new PlayState
             {
                 IsPlaying = playing,
+                WindowTitle = playing ? GameWindowTitle() : null,
                 Note = playing
                     ? "The game runs in a separate window — screenshot it with capture_window (by its title)."
                     : null
@@ -33,12 +34,25 @@ namespace AkerMcp.GodotAdapter
             return new PlayState
             {
                 IsPlaying = playing,
+                // The game window title (= project name) so the server can auto-route
+                // capture_sequence/send_input to it — no manual window_title needed.
+                WindowTitle = playing ? GameWindowTitle() : null,
                 Error = playing ? null : "Nothing started — is a runnable scene currently open/edited?",
                 Note = playing
-                    ? "Running the current scene in a SEPARATE window. Use capture_window (by the game window title) " +
-                      "to see it, and send_input with window_title to drive it — take_screenshot shows the editor, not the game."
+                    ? "Running the current scene in a SEPARATE window. capture_sequence/send_input auto-route to it now."
                     : null
             };
+        }
+
+        // The running game's default window title is the project name.
+        private static string? GameWindowTitle()
+        {
+            try
+            {
+                var name = ProjectSettings.GetSetting("application/config/name").AsString();
+                return string.IsNullOrWhiteSpace(name) ? null : name;
+            }
+            catch { return null; }
         }
 
         public PlayState ExitPlay()

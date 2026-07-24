@@ -16,6 +16,10 @@ namespace AkerMcp.Server
         private readonly EngineConnection _engine;
         private readonly JsonSerializerOptions _jsonOptions;
 
+        // Set from a separate-window game's PlayState.WindowTitle on enter_play (cleared on exit),
+        // so send_input/capture_sequence auto-route to that window without a manual window_title.
+        private volatile string? _gameWindowTitle;
+
         public ToolRegistry(EngineConnection engine)
         {
             _engine = engine;
@@ -648,8 +652,10 @@ tick — multi-frame stepping is best-effort, so call play_step repeatedly and c
                 HandlePlayStep);
 
             Register("get_play_state",
-                @"Report whether the project is playing, paused, the current time, and the clip duration (if any).
-Read-only. Use it to confirm enter_play took effect and to watch time advance while running.",
+                @"Report whether the project is playing/paused, the current time, clip duration, and a frame counter + fps.
+Read-only. Use it to confirm enter_play took effect. LIVENESS: read twice and check frameCount ADVANCED — a frozen /
+soft-locked game keeps isPlaying:true but a stale frameCount, which pixels/time alone can't reveal. On engines that run
+the game in a separate window (Godot), windowTitle names it (send_input/capture_sequence then auto-route to it).",
                 ParseSchema(@"{ ""type"": ""object"", ""properties"": {} }"),
                 HandleGetPlayState,
                 new ToolAnnotations { ReadOnlyHint = true });
@@ -1065,9 +1071,17 @@ engine-appropriate API and prefer scalars. Example: verify a jump —
                 await Task.Delay(200, ct).ConfigureAwait(false);
             }
 
-            var text = state.Content.Count > 0 ? state.Content[0].Text : null;
+            var settled = state.Content.Count > 0 ? state.Content[0].Text : null;
+
+            // Cache a separate-window game's title (Godot) so send_input/capture_sequence
+            // auto-route to it without a manual window_title; clear it on exit.
+            if (method == IpcConstants.Methods.EnterPlay)
+                _gameWindowTitle = ReadJsonString(settled, "windowTitle");
+            else if (method == IpcConstants.Methods.ExitPlay)
+                _gameWindowTitle = null;
+
             var prefix = reloaded ? $"Engine reloaded ({sw.Elapsed.TotalSeconds:0.#}s). " : "";
-            return ToolResult.Text($"{prefix}{label} completed.\n{text}");
+            return ToolResult.Text($"{prefix}{label} completed.\n{settled}");
         }
 
         private Task<ToolResult> HandleGetPlayState(JsonElement? args, CancellationToken ct)
@@ -1223,6 +1237,7 @@ engine-appropriate API and prefer scalars. Example: verify a jump —
             count = Math.Max(1, Math.Min(8, count));           // cap frames (payload + time)
             intervalMs = Math.Max(0, Math.Min(3000, intervalMs));
             JsonElement? capArgs = hasView ? viewArgs : args;
+            if (string.IsNullOrWhiteSpace(windowTitle)) windowTitle = _gameWindowTitle; // auto-route to the game window
             bool byWindow = !string.IsNullOrWhiteSpace(windowTitle);
 
             var content = new List<ContentItem>();
@@ -1290,6 +1305,7 @@ engine-appropriate API and prefer scalars. Example: verify a jump —
 
             var capture = PlatformScreenCapture.Current;
             string? focusTitle = ReadString(args, "window_title");
+            if (string.IsNullOrWhiteSpace(focusTitle)) focusTitle = _gameWindowTitle; // auto-route to the game window
             if (string.IsNullOrWhiteSpace(focusTitle))
                 focusTitle = await GetEngineWindowTitle(ct);
             string focusNote = "";
@@ -1337,6 +1353,24 @@ engine-appropriate API and prefer scalars. Example: verify a jump —
 
         private static bool ReadJsonBool(string? json, string prop, bool defaultValue)
             => ReadJsonBoolNullable(json, prop) ?? defaultValue;
+
+        // Returns a top-level JSON string property, or null if absent / not JSON / not a string.
+        private static string? ReadJsonString(string? json, string prop)
+        {
+            if (string.IsNullOrEmpty(json)) return null;
+            try
+            {
+                var el = JsonSerializer.Deserialize<JsonElement>(json);
+                if (el.ValueKind == JsonValueKind.Object && el.TryGetProperty(prop, out var v)
+                    && v.ValueKind == JsonValueKind.String)
+                {
+                    var s = v.GetString();
+                    return string.IsNullOrWhiteSpace(s) ? null : s;
+                }
+            }
+            catch { /* not JSON */ }
+            return null;
+        }
 
         // Returns the bool value of a top-level JSON property, or null if absent / not JSON / not a bool.
         private static bool? ReadJsonBoolNullable(string? json, string prop)

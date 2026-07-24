@@ -74,6 +74,12 @@ namespace AkerMcp.Loopback
             var gs = await Call(reg, "get_play_state", new { });
             Check("get_play_state isPlaying:true", Text(gs).Contains("\"isPlaying\":true"), Text(gs));
 
+            // FrameCount must advance across reads — the "is the game loop actually live?" check.
+            var s1 = await Call(reg, "get_play_state", new { });
+            var s2 = await Call(reg, "get_play_state", new { });
+            long f1 = ExtractLong(Text(s1), "frameCount"), f2 = ExtractLong(Text(s2), "frameCount");
+            Check("frameCount advances (live loop)", f2 > f1 && f1 >= 0, $"{f1} -> {f2}");
+
             var sp = await Call(reg, "set_play_pause", new { paused = true });
             Check("set_play_pause isPaused:true", Text(sp).Contains("\"isPaused\":true"), Text(sp));
 
@@ -132,6 +138,18 @@ namespace AkerMcp.Loopback
         }
 
         private static string Text(ToolResult r) => r.Content.Count > 0 ? (r.Content[0].Text ?? "") : "";
+
+        private static long ExtractLong(string json, string prop)
+        {
+            try
+            {
+                var el = JsonSerializer.Deserialize<JsonElement>(json);
+                if (el.ValueKind == JsonValueKind.Object && el.TryGetProperty(prop, out var v) && v.TryGetInt64(out var n))
+                    return n;
+            }
+            catch { }
+            return -1;
+        }
 
         private static int CountImages(ToolResult r)
         {

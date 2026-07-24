@@ -41,6 +41,22 @@ namespace AkerMcp.Shared.Abstraction
         /// <summary>Total length in seconds if known (e.g. an animation clip); 0 otherwise.</summary>
         public double Duration { get; set; }
         /// <summary>
+        /// Frames rendered since play started (0 if unknown). Diff it across two get_play_state
+        /// reads to prove the game loop is LIVE — a frozen/soft-locked game keeps a stale value
+        /// while IsPlaying stays true.
+        /// </summary>
+        public long FrameCount { get; set; }
+        /// <summary>Current frames-per-second (0 if unknown).</summary>
+        public double Fps { get; set; }
+        /// <summary>
+        /// For engines that run the game in a SEPARATE window (Godot), its window-title
+        /// substring — so capture_window / send_input can target it without guessing. The
+        /// server also uses it to auto-route capture_sequence/send_input after enter_play.
+        /// </summary>
+        public string? WindowTitle { get; set; }
+        /// <summary>OS process id of a separately-launched game, if known (0 otherwise).</summary>
+        public int ProcessId { get; set; }
+        /// <summary>
         /// True when entering/exiting play triggers a domain reload that drops the IPC
         /// connection (Unity). Informational for the AI; the server tolerates the drop.
         /// </summary>

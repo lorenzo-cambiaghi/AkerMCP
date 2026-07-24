@@ -92,14 +92,20 @@ namespace AkerMcp.Loopback
     {
         private bool _playing, _paused;
         private double _time;
+        private long _frames;
 
         public PlayState GetState() => Snap();
-        public PlayState EnterPlay() { _playing = true; _paused = false; _time = 0.016; return Snap(); }
-        public PlayState ExitPlay() { _playing = false; _paused = false; _time = 0; return Snap(); }
+        public PlayState EnterPlay() { _playing = true; _paused = false; _time = 0.016; _frames = 1; return Snap(); }
+        public PlayState ExitPlay() { _playing = false; _paused = false; _time = 0; _frames = 0; return Snap(); }
         public PlayState SetPaused(bool paused) { _paused = paused; return Snap(); }
-        public PlayState Step(int frames) { _time += 0.016 * Math.Max(1, frames); return Snap(); }
+        public PlayState Step(int frames) { var n = Math.Max(1, frames); _time += 0.016 * n; _frames += n; return Snap(); }
 
-        private PlayState Snap() => new PlayState { IsPlaying = _playing, IsPaused = _paused, Time = _time };
+        // Advance a frame per read while playing, so two get_play_state reads show a live loop.
+        private PlayState Snap()
+        {
+            if (_playing && !_paused) _frames++;
+            return new PlayState { IsPlaying = _playing, IsPaused = _paused, Time = _time, FrameCount = _frames, Fps = 60 };
+        }
     }
 
     public sealed class FakeInputSimulator : IInputSimulator
