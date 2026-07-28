@@ -14,6 +14,7 @@ using Microsoft.CodeAnalysis.Scripting;
 using UnityEngine;
 using UnityEditor;
 using AkerMcp.Shared.Abstraction;
+using AkerMcp.Shared.Scripting;
 using Debug = UnityEngine.Debug;
 
 namespace AkerMcp.Unity
@@ -85,6 +86,16 @@ namespace AkerMcp.Unity
 
         private const int MaxCapturedOutputChars = 16_000;
 
+        // The Roslyn that ships with Unity's Mono is 3.7, whose DEFAULT language version is C# 8 — while
+        // the editor compiles the project itself at C# 9. Left at the default, this executor would reject
+        // syntax that is perfectly legal everywhere else in the same project (records, `is not`,
+        // target-typed `new`), which reads as a bug in the tool rather than a version mismatch. `Preview`
+        // is what turns those on in 3.7, and on any newer Roslyn it simply keeps the executor as permissive
+        // as the compiler allows — the right default for throwaway snippets.
+        private static readonly Microsoft.CodeAnalysis.CSharp.CSharpParseOptions ScriptParseOptions =
+            new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(
+                Microsoft.CodeAnalysis.CSharp.LanguageVersion.Preview);
+
         private CodeExecutionResult ExecuteInternal(string code)
         {
             // Capture Debug.Log / Log() emitted while the script runs so the model
@@ -121,11 +132,12 @@ namespace AkerMcp.Unity
             try
             {
                 var assemblyName = "AkerDynamic_" + Guid.NewGuid().ToString("N");
-                // Hoist any leading `using X;` directives the model wrote at the top of the
-                // snippet up to file scope — otherwise they'd be illegal inside the method body.
-                var (userUsings, body) = HoistUsingDirectives(code);
-                var syntaxTree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText($@"
-                    {userUsings}
+                // The snippet becomes a method body, where `using` directives and type declarations are
+                // both illegal. Both are lifted to file scope instead of being refused: see
+                // ScriptSourceSplitter for why that is the executor's job and not the caller's.
+                var parts = ScriptSourceSplitter.Split(code);
+                var source = $@"
+                    {parts.Usings}
                     using System;
                     using System.Collections.Generic;
                     using System.Linq;
@@ -135,16 +147,21 @@ namespace AkerMcp.Unity
                     using AkerMcp.Unity;
                     using UnityEngine.Rendering;
 
+                    {parts.Types}
+
                     // Inheriting ScriptGlobals puts selectedObject / Find / FindAll / Create /
                     // Log directly in scope inside Execute (no `globals.` prefix needed).
                     public class DynamicScript : ScriptGlobals
                     {{
                         public object Execute()
                         {{
-                            {body}
+                            {parts.Body}
                             return null;
                         }}
-                    }}");
+                    }}
+
+                    {ScriptCompatibilityShims.ForCurrentRuntime()}";
+                var syntaxTree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(source, ScriptParseOptions);
 
                 var references = _options.MetadataReferences;
                 var compilation = Microsoft.CodeAnalysis.CSharp.CSharpCompilation.Create(
@@ -190,54 +207,6 @@ namespace AkerMcp.Unity
                     Error = $"{inner.GetType().Name}: {inner.Message}\n{inner.StackTrace}"
                 };
             }
-        }
-
-        // Matches a leading C# using-directive: `using System.Linq;`,
-        // `using static UnityEngine.Mathf;`, `using GO = UnityEngine.GameObject;`.
-        // Deliberately excludes using-statements (`using (...)`, `using var x = ...`)
-        // by forbidding '(' before the terminating ';'.
-        private static readonly System.Text.RegularExpressions.Regex UsingDirectiveRegex =
-            new System.Text.RegularExpressions.Regex(
-                @"^\s*using\s+(static\s+)?[^;(=]+(=[^;(]+)?;\s*$",
-                System.Text.RegularExpressions.RegexOptions.Compiled);
-
-        /// <summary>
-        /// Splits leading using-directives off the snippet so they can be emitted at file
-        /// scope. Only contiguous directives (interleaved with blank/comment lines) at the
-        /// very top are hoisted; the first real statement ends the scan.
-        /// </summary>
-        internal static (string usings, string body) HoistUsingDirectives(string code)
-        {
-            var usings = new StringBuilder();
-            var bodyLines = new List<string>();
-            var pending = new List<string>();
-            bool leading = true;
-
-            using var reader = new StringReader(code);
-            string? line;
-            while ((line = reader.ReadLine()) != null)
-            {
-                if (leading)
-                {
-                    var trimmed = line.TrimStart();
-                    if (trimmed.Length == 0 || trimmed.StartsWith("//"))
-                    {
-                        pending.Add(line);
-                        continue;
-                    }
-                    if (UsingDirectiveRegex.IsMatch(line))
-                    {
-                        usings.AppendLine(trimmed);
-                        continue;
-                    }
-                    leading = false;
-                    bodyLines.AddRange(pending);
-                    pending.Clear();
-                }
-                bodyLines.Add(line);
-            }
-            bodyLines.AddRange(pending);
-            return (usings.ToString(), string.Join("\n", bodyLines));
         }
 
         private ScriptOptions BuildScriptOptions()

@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using AkerMcp.Shared.Abstraction;
+using AkerMcp.Shared.Scripting;
 using Stride.Engine;
 
 namespace AkerMcp.StrideAdapter
@@ -116,14 +117,22 @@ namespace AkerMcp.StrideAdapter
             return result;
         }
 
+        // Snippets are throwaway code: the executor should accept whatever the host compiler can parse,
+        // not the conservative default (which lags the language version the project itself is built with).
+        private static readonly CSharpParseOptions ScriptParseOptions =
+            new CSharpParseOptions(LanguageVersion.Preview);
+
         private CodeExecutionResult CompileAndRun(string code)
         {
             try
             {
                 var assemblyName = "AkerDynamic_" + Guid.NewGuid().ToString("N");
-                var (userUsings, body) = HoistUsingDirectives(code);
-                var syntaxTree = CSharpSyntaxTree.ParseText($@"
-                    {userUsings}
+                // The snippet becomes a method body, where `using` directives and type declarations are
+                // both illegal. Both are lifted to file scope instead of being refused: see
+                // ScriptSourceSplitter for why that is the executor's job and not the caller's.
+                var parts = ScriptSourceSplitter.Split(code);
+                var source = $@"
+                    {parts.Usings}
                     using System;
                     using System.Collections.Generic;
                     using System.Linq;
@@ -131,6 +140,8 @@ namespace AkerMcp.StrideAdapter
                     using Stride.Engine;
                     using Stride.Core.Mathematics;
                     using AkerMcp.StrideAdapter;
+
+                    {parts.Types}
 
                     // Inheriting ScriptGlobals puts Find / FindAll / Log / RootEntities
                     // directly in scope inside Execute (no `globals.` prefix needed).
@@ -140,10 +151,13 @@ namespace AkerMcp.StrideAdapter
 
                         public object Execute()
                         {{
-                            {body}
+                            {parts.Body}
                             return null;
                         }}
-                    }}");
+                    }}
+
+                    {ScriptCompatibilityShims.ForCurrentRuntime()}";
+                var syntaxTree = CSharpSyntaxTree.ParseText(source, ScriptParseOptions);
 
                 var compilation = CSharpCompilation.Create(
                     assemblyName,
@@ -197,38 +211,6 @@ namespace AkerMcp.StrideAdapter
                 catch { /* skip unreadable assembly */ }
             }
             return refs;
-        }
-
-        // Matches a leading C# using-directive (not a using-statement); see Godot/Unity adapters.
-        private static readonly System.Text.RegularExpressions.Regex UsingDirectiveRegex =
-            new System.Text.RegularExpressions.Regex(
-                @"^\s*using\s+(static\s+)?[^;(=]+(=[^;(]+)?;\s*$",
-                System.Text.RegularExpressions.RegexOptions.Compiled);
-
-        private static (string usings, string body) HoistUsingDirectives(string code)
-        {
-            var usings = new StringBuilder();
-            var bodyLines = new List<string>();
-            var pending = new List<string>();
-            bool leading = true;
-
-            using var reader = new StringReader(code);
-            string? line;
-            while ((line = reader.ReadLine()) != null)
-            {
-                if (leading)
-                {
-                    var trimmed = line.TrimStart();
-                    if (trimmed.Length == 0 || trimmed.StartsWith("//")) { pending.Add(line); continue; }
-                    if (UsingDirectiveRegex.IsMatch(line)) { usings.AppendLine(trimmed); continue; }
-                    leading = false;
-                    bodyLines.AddRange(pending);
-                    pending.Clear();
-                }
-                bodyLines.Add(line);
-            }
-            bodyLines.AddRange(pending);
-            return (usings.ToString(), string.Join("\n", bodyLines));
         }
 
         private static string FormatReturnValue(object value)

@@ -603,6 +603,8 @@ The `execute` tool runs arbitrary C# code inside the live editor — **Unity, Go
 
 Need another namespace? Add `using ...;` directives at the **top** of the snippet — they are hoisted to file scope automatically (e.g. `using System.IO;`).
 
+**Declaring types works too.** A snippet is wrapped as a method body, but `class`, `struct`, `interface`, `enum`, `record` and `delegate` declarations are lifted to file scope before compiling — so helper classes, fake implementations of an interface, callback receivers and `MonoBehaviour`s you then `AddComponent` all work directly, with no reflection workarounds. Access modifiers are adjusted for you (`private class Foo` is accepted), and local functions inside the body keep working as usual.
+
 **Examples** (Unity-flavored; the same patterns apply with each engine's API):
 
 ```csharp

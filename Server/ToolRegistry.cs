@@ -289,6 +289,7 @@ Available globals (no initialization needed):
 
 Pre-imported namespaces: System, System.Collections.Generic, System.Linq, UnityEngine, UnityEditor.
 Need another namespace? Just put `using ...;` directives at the TOP of your snippet — they are hoisted to file scope automatically (e.g. `using System.IO;`, `using static UnityEngine.Mathf;`).
+Declaring TYPES works too: class, struct, interface, enum, record and delegate declarations are hoisted to file scope, so helper classes, fake implementations of an interface, MonoBehaviours you then AddComponent, and callback receivers all work directly — no reflection workarounds. Access modifiers are fixed up for you (`private class Foo` is accepted). Local functions inside the body work as usual.
 
 Important rules:
 1. Each script execution is independent — variables do not persist between calls. Write self-contained scripts.
