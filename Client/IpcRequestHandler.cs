@@ -355,12 +355,55 @@ namespace AkerMcp.Client
                     return ErrorJson($"Object not found: {target}");
                 }
 
+                // The node's DECLARED surface first (the default depth): what the engine says this
+                // node IS — the same catalog list-verbs show and set_property/call_method accept.
+                // Reflection over UnderlyingObject described a different dialect: raw CLR members
+                // nobody declared, none of the declared semantics (units, ranges, sentences), and
+                // for engines whose node wraps a richer surface (a component'd GameObject, a
+                // catalog-backed document node) it missed the real one — an agent could CALL but
+                // not DISCOVER. Depth > 1 stays reflective on purpose: nested expansion is a
+                // power ask the declared surface does not model.
+                if (depth == 1 && DeclaredSurface(node, includeMethods, filter) is { } declared)
+                    return CapOutput(JsonSerializer.Serialize(declared, _jsonOptions));
+
                 var result = _inspector.Inspect(node.UnderlyingObject, depth, includeMethods, filter);
                 result.Path = node.Path;
                 result.Components = node.GetComponents().ToList();
                 result.ChildNames = node.Children.Select(c => c.Name).ToList();
                 return CapOutput(JsonSerializer.Serialize(result, _jsonOptions));
             }, ct);
+        }
+
+        /// <summary>The inspection as the node's OWN declaration answers it, or null when the node
+        /// declares nothing (or cannot answer) — then reflection is the only story there is. The
+        /// filter matches like the reflective one (regex on names, case-insensitive); a filter that
+        /// matches nothing still returns the (empty) declared result rather than silently switching
+        /// dialect to reflection.</summary>
+        private static InspectionResult? DeclaredSurface(ISceneNode node, bool includeMethods, string? filter)
+        {
+            try
+            {
+                var all = node.GetProperties().ToList();
+                if (all.Count == 0) return null;
+                bool Matches(string name) => filter == null ||
+                    System.Text.RegularExpressions.Regex.IsMatch(name, filter,
+                        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                var result = new InspectionResult
+                {
+                    TypeName = node.TypeName,
+                    Path = node.Path,
+                    Properties = all.Where(p => Matches(p.Name)).ToList(),
+                    Components = node.GetComponents().ToList(),
+                    ChildNames = node.Children.Select(c => c.Name).ToList(),
+                };
+                if (includeMethods)
+                    result.Methods = node.GetMethods().Where(m => Matches(m.Name)).ToList();
+                return result;
+            }
+            catch
+            {
+                return null; // a node that cannot answer must not fail inspect — fall back
+            }
         }
 
         // Inspection of large objects/types can produce tens of thousands of tokens.
@@ -802,8 +845,10 @@ namespace AkerMcp.Client
                 if (node == null)
                     return "{\"selected\": false, \"message\": \"Selection is not a scene object\"}";
 
+                const int MaxSelectionProperties = 20; // context economy: a fat node would flood the reply
                 var components = node.GetComponents().ToList();
-                var properties = node.GetProperties().Take(20).ToList();
+                var all = node.GetProperties().ToList();
+                var properties = all.Take(MaxSelectionProperties).ToList();
 
                 return JsonSerializer.Serialize(new
                 {
@@ -813,6 +858,11 @@ namespace AkerMcp.Client
                     type = node.TypeName,
                     components = components,
                     properties = properties,
+                    // Silent truncation reads as "that is all there is" — say what was cut and how
+                    // to reach it (the same courtesy the compile output pays its warnings).
+                    truncatedProperties = all.Count > properties.Count
+                        ? $"showing {properties.Count} of {all.Count} properties — read the rest by name with get_property, or use inspect"
+                        : null,
                     childCount = node.Children.Count(),
                     childNames = node.Children.Select(c => c.Name).ToList()
                 }, _jsonOptions);
