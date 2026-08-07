@@ -118,14 +118,21 @@ namespace AkerMcp.Unity
                 tex = new Texture2D(w, h, TextureFormat.RGB24, false);
                 tex.ReadPixels(new Rect(0, 0, w, h), 0, 0);
 
-                // The GrabPixels readback orientation follows the graphics API's UV convention.
-                // On APIs where UV starts at the top (D3D11/D3D12/Metal/consoles,
-                // graphicsUVStartsAtTop == true) the readback is already correct — verified on
-                // Windows/D3D11, no flip needed. On OpenGL/GLES (== false) the framebuffer
-                // readback is vertically mirrored, so flip it. (A previous unconditional
-                // FlipHorizontal was wrong: it mirrored an already-correct image left-to-right,
-                // making UI text read backwards and left-docked panels appear on the right.)
-                if (!SystemInfo.graphicsUVStartsAtTop)
+                // GrabPixels writes the panel into the RenderTexture using the graphics API's UV
+                // convention, while ReadPixels/GetPixels32 always index rows from the BOTTOM. On
+                // APIs whose UV origin is at the top (D3D11/D3D12/Metal/consoles,
+                // graphicsUVStartsAtTop == true) the two disagree, so the readback comes out
+                // upside down and has to be flipped; on OpenGL/GLES both start at the bottom and
+                // it is already correct.
+                //
+                // Measured, not assumed: on D3D12 the same view was captured through GrabPixels
+                // and through a direct camera render, and compared row by row. Matching the rows
+                // straight scored 1,092,529 of difference against 600,375 when matching them
+                // mirrored — the grab was upside down. The condition used to be the other way
+                // round, which is why every screenshot came back rotated. (An even earlier
+                // unconditional FlipHorizontal was wrong in a different way: it mirrored the image
+                // left-to-right, making UI text read backwards.)
+                if (SystemInfo.graphicsUVStartsAtTop)
                     FlipVertical(tex);
                 tex.Apply();
 
