@@ -571,6 +571,23 @@ Example: { ""platform"": ""Android"", ""output_path"": ""Build/game.apk"", ""dev
                 HandleBuildPlayer,
                 new ToolAnnotations { DestructiveHint = true });
 
+            Register("engine_status",
+                @"Say WHICH engine is answering these tools, list the others that are running, and optionally pin one.
+
+Call it when an answer does not match the project you think you are driving — the classic sign is `execute` compiling fine but reporting that the engine's own types do not exist. With two editors open the server picks one at discovery, and a Unity domain reload (any script recompile) makes it pick AGAIN: the target can change mid-session, silently.
+
+A pinned engine survives every reconnect, and the server stays disconnected rather than falling back to a different editor. AKER_MCP_ENGINE does the same from the environment. Pass an empty string to unpin.
+
+Example: { ""engine"": ""unity"" }",
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""engine"": { ""type"": ""string"", ""description"": ""Engine name to pin (case-insensitive, e.g. 'unity'). Empty string unpins. Omit to only report."" }
+                    }
+                }"),
+                HandleEngineStatus,
+                new ToolAnnotations { ReadOnlyHint = true });
+
             Register("list_windows",
                 @"List the visible top-level windows on the machine running the server (title, process name, pid).
 OS-level — works regardless of whether an engine is connected. Use it to find a window title to pass to capture_window.",
@@ -825,6 +842,62 @@ engine-appropriate API and prefer scalars. Example: verify a jump —
             return Task.FromResult(ok
                 ? ToolResult.Text($"Brought window matching '{title}' to the foreground.")
                 : ToolResult.Error(err ?? "Failed to focus the window."));
+        }
+
+        /// <summary>
+        /// Who is answering, who else is running, and — optionally — who to stick to.
+        /// <para>
+        /// Pinning has to DROP the current connection, not just record a preference: the reconnect
+        /// loop only picks a target when there is no channel, so a pin alone would be honoured "next
+        /// time something breaks" — which is the kind of half-fix that looks like it works.
+        /// </para>
+        /// </summary>
+        private async Task<ToolResult> HandleEngineStatus(JsonElement? args, CancellationToken ct)
+        {
+            string? requested = null;
+            if (args is JsonElement a && a.ValueKind == JsonValueKind.Object && a.TryGetProperty("engine", out var e))
+                requested = e.GetString();
+
+            string? switchedFrom = null;
+            if (requested != null)
+            {
+                string? pin = string.IsNullOrWhiteSpace(requested) ? null : requested.Trim();
+                _engine.PinnedEngine = pin;
+
+                var connected = _engine.ConnectedEngine;
+                if (pin != null && connected != null && !connected.Is(pin))
+                {
+                    switchedFrom = connected.ToString();
+                    _engine.Disconnect();
+                    await _engine.TryDiscoverAndConnect(ct).ConfigureAwait(false);
+                }
+            }
+
+            var available = EngineConnection.DiscoverEngines();
+            var now = _engine.ConnectedEngine;
+
+            var payload = new
+            {
+                connected = now == null ? null : new
+                {
+                    engine = now.Engine,
+                    version = now.Version,
+                    pid = now.Pid,
+                    pipe = now.Pipe,
+                },
+                pinned = _engine.PinnedEngine,
+                switchedFrom,
+                available = available.ConvertAll(x => new { engine = x.Engine, version = x.Version, pid = x.Pid }),
+                note = now == null
+                    ? (_engine.PinnedEngine != null
+                        ? $"Not connected: nothing named '{_engine.PinnedEngine}' is running. Start it, or unpin with an empty string."
+                        : "Not connected: no engine plugin is running.")
+                    : available.Count > 1 && _engine.PinnedEngine == null
+                        ? "More than one engine is running and none is pinned: a reconnect (any script recompile) may switch the target."
+                        : null,
+            };
+
+            return ToolResult.Text(JsonSerializer.Serialize(payload, _jsonOptions));
         }
 
         private Task<ToolResult> HandleListWindows(JsonElement? args, CancellationToken ct)

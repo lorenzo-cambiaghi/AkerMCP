@@ -18,8 +18,16 @@ namespace AkerMcp.Loopback
         public readonly FakePlayModeController Play = new FakePlayModeController();
         public readonly FakeInputSimulator Input = new FakeInputSimulator();
 
+        private readonly string _engineName;
+
+        /// <param name="engineName">
+        /// Drives the pipe name and the discovery lock file, so a test can start TWO of these and
+        /// check WHICH one the server picks — the case where the target used to change by itself.
+        /// </param>
+        public FakeEnginePlugin(string engineName = "Loopback") => _engineName = engineName;
+
         protected override ISceneGraph CreateSceneGraph() => new FakeSceneGraph();
-        protected override IEngineCapabilities CreateCapabilities() => new FakeCapabilities();
+        protected override IEngineCapabilities CreateCapabilities() => new FakeCapabilities(_engineName);
         protected override IMainThreadDispatcher CreateDispatcher() => new FakeDispatcher();
         protected override IEditorContext? CreateEditorContext() => new FakeEditorContext();
         protected override ICodeExecutor? CreateCodeExecutor() => new FakeCodeExecutor();
@@ -48,7 +56,11 @@ namespace AkerMcp.Loopback
 
     public sealed class FakeCapabilities : IEngineCapabilities
     {
-        public string EngineName => "Loopback";
+        private readonly string _name;
+
+        public FakeCapabilities(string name = "Loopback") => _name = name;
+
+        public string EngineName => _name;
         public string EngineVersion => "1.0-test";
         public bool SupportsHotReload => false;
         public bool SupportsCodeExecution => true;

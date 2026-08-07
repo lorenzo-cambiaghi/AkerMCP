@@ -126,6 +126,39 @@ namespace AkerMcp.Loopback
             var after = await Call(reg, "get_play_state", new { });
             Check("tool works after reconnect", !after.IsError, Text(after));
 
+            // ---- Two engines running: WHO answers must be a choice, and it must hold ----
+            // The bug this covers: with two editors up, discovery took whichever lock file sorted
+            // first, and every reconnect (a Unity domain reload is one) ran discovery AGAIN. The
+            // target changed mid-session with no error anywhere — the tools kept working, against
+            // the wrong application.
+            var other = new FakeEnginePlugin("Zebra");
+            other.Start();
+            await Task.Delay(400);
+
+            var listed = Text(await Call(reg, "engine_status", new { }));
+            Check("engine_status lists both engines",
+                listed.Contains("Loopback") && listed.Contains("Zebra"), listed);
+
+            var pinned = Text(await Call(reg, "engine_status", new { engine = "zebra" }));
+            Check("pinning switches the live target", ConnectedName(pinned) == "Zebra", pinned);
+
+            other.Stop();
+            await Task.Delay(400);
+            other.Start();
+            await engine.WaitForConnection(10_000, cts.Token);
+            var reloaded = Text(await Call(reg, "engine_status", new { }));
+            Check("pinned engine survives a reload", ConnectedName(reloaded) == "Zebra", reloaded);
+
+            // Pinned to something that is not running: staying disconnected is the POINT. Falling
+            // back to the other engine is exactly what made the failure invisible.
+            await Call(reg, "engine_status", new { engine = "nosuchengine" });
+            await Task.Delay(1500);   // the retry loop gets its chance to (not) connect
+            Check("pinned-but-absent stays disconnected instead of falling back", !engine.IsConnected);
+
+            await Call(reg, "engine_status", new { engine = "" });
+            Check("unpinning connects again", await engine.WaitForConnection(10_000, cts.Token));
+
+            try { other.Stop(); } catch { }
             Cleanup(fake, cts);
             Console.WriteLine($"\n{_pass} passed, {_fail} failed");
             return _fail == 0 ? 0 : 1;
@@ -138,6 +171,25 @@ namespace AkerMcp.Loopback
         }
 
         private static string Text(ToolResult r) => r.Content.Count > 0 ? (r.Content[0].Text ?? "") : "";
+
+        /// <summary>
+        /// The engine named under "connected" — NOT anywhere in the blob. engine_status also lists
+        /// every available engine, so a plain Contains("Zebra") would pass even while connected to
+        /// the other one: the test would report exactly the bug it exists to catch as fixed.
+        /// </summary>
+        private static string ConnectedName(string json)
+        {
+            try
+            {
+                var el = JsonSerializer.Deserialize<JsonElement>(json);
+                if (el.ValueKind == JsonValueKind.Object &&
+                    el.TryGetProperty("connected", out var c) && c.ValueKind == JsonValueKind.Object &&
+                    c.TryGetProperty("engine", out var name))
+                    return name.GetString() ?? "";
+            }
+            catch { }
+            return "";
+        }
 
         private static long ExtractLong(string json, string prop)
         {

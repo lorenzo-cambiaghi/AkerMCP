@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Pipes;
 using System.Text.Json;
@@ -38,6 +39,83 @@ namespace AkerMcp.Server
         public const string EngineDisconnectedPrefix = "[ENGINE_DISCONNECTED]";
 
         public bool IsConnected => _channel != null;
+
+        /// <summary>Who answered: engine, version, pid, pipe. Null when nothing is connected.</summary>
+        public EngineIdentity? ConnectedEngine { get; private set; }
+
+        /// <summary>
+        /// The engine name this server is pinned to (case-insensitive), or null for "whoever answers
+        /// first". Seeded from <c>AKER_MCP_ENGINE</c> and settable at runtime through the
+        /// <c>engine_status</c> tool.
+        /// <para>
+        /// ⚠️ Pinning exists because the alternative is silent: with two editors running, the losing
+        /// one is not refused — it is simply never chosen, and the caller has no way to tell. Worse,
+        /// the choice can CHANGE mid-session, because a Unity domain reload drops the pipe and the
+        /// reconnect starts the scan over. Observed in the field: after a script recompile the server
+        /// switched to an animation editor that happened to sort first, and every `execute` kept
+        /// compiling — inside the other process, where the engine's own types do not exist.
+        /// </para>
+        /// </summary>
+        public string? PinnedEngine { get; set; } =
+            Environment.GetEnvironmentVariable("AKER_MCP_ENGINE") is { Length: > 0 } pinned ? pinned : null;
+
+        /// <summary>An engine plugin that has announced itself in the discovery directory.</summary>
+        public sealed class EngineIdentity
+        {
+            public string Engine { get; set; } = "Unknown";
+            public string Version { get; set; } = "";
+            public string Pipe { get; set; } = "";
+            public int Pid { get; set; }
+            public string ProtocolVersion { get; set; } = "";
+
+            public bool Is(string? name)
+                => name != null && string.Equals(Engine, name, StringComparison.OrdinalIgnoreCase);
+
+            public override string ToString()
+                => $"{Engine} {Version} (pid {Pid})";
+        }
+
+        /// <summary>
+        /// Everyone who has announced themselves and is still alive. Reading it is cheap and has no
+        /// side effect on the current connection — it is what <c>engine_status</c> reports.
+        /// </summary>
+        public static List<EngineIdentity> DiscoverEngines()
+        {
+            var found = new List<EngineIdentity>();
+            var discoveryDir = Path.Combine(Path.GetTempPath(), IpcConstants.DiscoveryDirectory);
+            if (!Directory.Exists(discoveryDir)) return found;
+
+            PurgeStaleLockFiles(discoveryDir);
+
+            foreach (var lockFile in Directory.GetFiles(discoveryDir, "*.lock"))
+            {
+                try
+                {
+                    var info = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(lockFile));
+                    if (!info.TryGetProperty("pipe", out var pipeElement)) continue;
+                    if (pipeElement.GetString() is not { Length: > 0 } pipeName) continue;
+
+                    found.Add(new EngineIdentity
+                    {
+                        Pipe = pipeName,
+                        Engine = info.TryGetProperty("engine", out var e) ? e.GetString() ?? "Unknown" : "Unknown",
+                        Version = info.TryGetProperty("version", out var v) ? v.GetString() ?? "" : "",
+                        Pid = info.TryGetProperty("pid", out var p) && p.TryGetInt32(out int pid) ? pid : 0,
+                        ProtocolVersion = info.TryGetProperty("protocolVersion", out var pv)
+                            ? pv.GetString() ?? "" : "",
+                    });
+                }
+                catch { /* corrupt lock file, skip */ }
+            }
+
+            // Stable order, and NOT the filesystem's: "whoever sorts first alphabetically" is an
+            // accident of naming, and it silently decided which editor an agent was talking to.
+            // The pipe name breaks ties so the order is total even for two plugins in one process.
+            found.Sort((a, b) => a.Pid != b.Pid
+                ? a.Pid.CompareTo(b.Pid)
+                : string.CompareOrdinal(a.Pipe, b.Pipe));
+            return found;
+        }
 
         /// <summary>Polls until the background retry loop re-establishes the connection.</summary>
         public async Task<bool> WaitForConnection(int timeoutMs, CancellationToken ct)
@@ -93,55 +171,60 @@ namespace AkerMcp.Server
 
         public async Task<bool> TryDiscoverAndConnect(CancellationToken ct = default)
         {
-            var discoveryDir = Path.Combine(Path.GetTempPath(), IpcConstants.DiscoveryDirectory);
-            if (!Directory.Exists(discoveryDir))
+            var candidates = DiscoverEngines();
+            if (candidates.Count == 0)
             {
-                StdioTransport.LogInfo("No engine plugin discovered (discovery directory not found).");
+                StdioTransport.LogInfo("No engine plugin discovered.");
                 return false;
             }
 
-            PurgeStaleLockFiles(discoveryDir);
-
-            foreach (var lockFile in Directory.GetFiles(discoveryDir, "*.lock"))
+            // ⚠️ The pin is honoured on EVERY reconnect, not just the first one. A Unity domain reload
+            // drops the pipe and this method runs again — which is exactly when the target used to
+            // change under the caller's feet.
+            if (PinnedEngine != null)
             {
-                try
+                var matching = candidates.FindAll(c => c.Is(PinnedEngine));
+                if (matching.Count == 0)
                 {
-                    var content = File.ReadAllText(lockFile);
-                    var info = JsonSerializer.Deserialize<JsonElement>(content);
-
-                    if (!info.TryGetProperty("pipe", out var pipeElement))
-                        continue;
-
-                    var pipeName = pipeElement.GetString();
-                    if (pipeName == null)
-                        continue;
-
-                    StdioTransport.LogInfo($"Attempting connection to pipe: {pipeName}");
-
-                    if (await TryConnect(pipeName, 5000, ct).ConfigureAwait(false))
-                    {
-                        var engineName = info.TryGetProperty("engine", out var eng) ? eng.GetString() : "Unknown";
-                        var clientProtocol = info.TryGetProperty("protocolVersion", out var prot) ? prot.GetString() : "Unknown";
-                        
-                        StdioTransport.LogInfo($"Connected to {engineName} engine via {pipeName} (Client Protocol: v{clientProtocol})");
-                        
-                        if (clientProtocol != IpcConstants.ProtocolVersion)
-                        {
-                            StdioTransport.LogError($"PROTOCOL MISMATCH! Server is v{IpcConstants.ProtocolVersion} but Client is v{clientProtocol}. Expect connection errors.");
-                        }
-                        
-                        return true;
-                    }
+                    StdioTransport.LogInfo(
+                        $"Pinned to '{PinnedEngine}' but only [{DescribeAll(candidates)}] are running: " +
+                        "staying disconnected rather than talking to the wrong one.");
+                    return false;
                 }
-                catch
+                candidates = matching;
+            }
+            else if (candidates.Count > 1)
+            {
+                StdioTransport.LogInfo(
+                    $"{candidates.Count} engines available [{DescribeAll(candidates)}] and none pinned: " +
+                    "taking the first. Pin one with AKER_MCP_ENGINE or the engine_status tool.");
+            }
+
+            foreach (var candidate in candidates)
+            {
+                StdioTransport.LogInfo($"Attempting connection to pipe: {candidate.Pipe}");
+
+                if (!await TryConnect(candidate.Pipe, 5000, ct).ConfigureAwait(false)) continue;
+
+                ConnectedEngine = candidate;
+                StdioTransport.LogInfo(
+                    $"Connected to {candidate} via {candidate.Pipe} (Client Protocol: v{candidate.ProtocolVersion})");
+
+                if (candidate.ProtocolVersion != IpcConstants.ProtocolVersion)
                 {
-                    // Corrupt lock file, skip
+                    StdioTransport.LogError($"PROTOCOL MISMATCH! Server is v{IpcConstants.ProtocolVersion} " +
+                                            $"but Client is v{candidate.ProtocolVersion}. Expect connection errors.");
                 }
+
+                return true;
             }
 
             StdioTransport.LogInfo("No engine plugin available after discovery scan.");
             return false;
         }
+
+        private static string DescribeAll(List<EngineIdentity> engines)
+            => string.Join(", ", engines.ConvertAll(e => e.ToString()));
 
         private static void PurgeStaleLockFiles(string discoveryDir)
         {
@@ -630,7 +713,12 @@ namespace AkerMcp.Server
             _pendingRequests.Clear();
         }
 
-        private void Disconnect()
+        /// <summary>
+        /// Drops the current connection so the retry loop picks a target again. Public because
+        /// <c>engine_status</c> uses it to switch engines: pinning alone would not move an already
+        /// established connection.
+        /// </summary>
+        public void Disconnect()
         {
             // Atomic claim: exactly one caller wins each pair, so a stale Disconnect
             // (e.g. listener finally running after heartbeat already tore down)
@@ -642,6 +730,7 @@ namespace AkerMcp.Server
             try { oldChannel?.Dispose(); } catch { }
             try { oldCts?.Dispose(); } catch { }
 
+            ConnectedEngine = null;
             CancelPendingRequests();
         }
 
