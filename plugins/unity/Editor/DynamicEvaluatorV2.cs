@@ -35,14 +35,49 @@ namespace AkerMcp.Unity
 
     public class DynamicEvaluatorV2 : ICodeExecutor
     {
-        private readonly ScriptOptions _options;
+        private ScriptOptions? _options;
+        private int _referencedAssemblyCount = -1;
         private readonly IMainThreadDispatcher _dispatcher;
         private readonly StringBuilder _outputCapture = new StringBuilder();
 
         public DynamicEvaluatorV2(IMainThreadDispatcher dispatcher)
         {
             _dispatcher = dispatcher;
-            _options = BuildScriptOptions();
+        }
+
+        /// <summary>
+        /// The reference set, rebuilt whenever the AppDomain has gained assemblies.
+        /// <para>
+        /// ⚠️ It must NOT be captured once in the constructor, and this is the whole point: .NET
+        /// loads assemblies LAZILY, and this plugin is recreated on the first editor tick after
+        /// every domain reload — precisely the moment when the fewest of them are loaded. A
+        /// snapshot taken there stays partial for the rest of the session, and the symptom is
+        /// brutal to diagnose from the outside: <c>execute</c> keeps compiling, but reports
+        /// "The name 'UnityEngine' does not exist in the current context" for every snippet, and
+        /// never recovers. Observed after a Play Mode cycle (two reloads): <c>Log(object)</c>
+        /// still worked while <c>Create(string)</c> did not — same class, but only the latter has
+        /// a UnityEngine type in its signature. That asymmetry is the fingerprint of a reference
+        /// list that kept the plugin's own assembly and lost the engine's.
+        /// </para>
+        /// <para>
+        /// The count is a sound cache key: assemblies are never unloaded from an AppDomain, so it
+        /// only grows until the next reload — which replaces this instance anyway. Rebuilding is
+        /// not free (it reads the project DLLs into memory, see below), so it happens only when
+        /// that number actually moves.
+        /// </para>
+        /// </summary>
+        private ScriptOptions Options
+        {
+            get
+            {
+                int loaded = AppDomain.CurrentDomain.GetAssemblies().Length;
+                if (_options == null || loaded != _referencedAssemblyCount)
+                {
+                    _options = BuildScriptOptions();
+                    _referencedAssemblyCount = loaded;
+                }
+                return _options;
+            }
         }
 
         public async Task<CodeExecutionResult> Execute(string code, int timeoutMs = 5000, CancellationToken ct = default)
@@ -163,7 +198,7 @@ namespace AkerMcp.Unity
                     {ScriptCompatibilityShims.ForCurrentRuntime()}";
                 var syntaxTree = Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(source, ScriptParseOptions);
 
-                var references = _options.MetadataReferences;
+                var references = Options.MetadataReferences;
                 var compilation = Microsoft.CodeAnalysis.CSharp.CSharpCompilation.Create(
                     assemblyName,
                     new[] { syntaxTree },
