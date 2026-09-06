@@ -10,15 +10,20 @@
 
 > *Aker (Egyptian: ꜣkr) was an ancient Egyptian earth god, depicted as **two lions seated back-to-back** facing opposite horizons — Sef and Duau (Yesterday and Today) — guarding the sun's safe passage through the underworld. In this architecture, Aker is the bridge: one face speaking **JSON-RPC to the LLM**, the other manipulating the **engine's main thread via IPC**.*
 
-> **Give your AI Assistant (Claude, Cursor, Copilot, Antigravity) the power to directly manipulate any C# Game Engine.**
+AkerMCP is an MCP server that lets an AI client (Claude Code, Cursor, Copilot, Antigravity, any stdio MCP client) work inside a running C# game editor: read the scene, change it with undo, run C# on the editor's main thread, take a screenshot, enter play mode and check what happened. One server and one tool set for three engines, Unity, Godot and Stride Game Studio, each behind a small adapter over the same core.
 
-Traditionally, AI coding assistants can only suggest code for you to copy-paste. With **AkerMCP**, you grant your AI the ability to actually *see* and *touch* your game project in real-time.
+## What it does
 
-> ### 🦁🦁 The only MCP that drives **Unity, Godot _and_ Stride** as first-class engines — every tool, full parity, across all three.
+Most engine integrations ship one hand-written tool per operation and break with every engine update. AkerMCP ships forty generic tools built on reflection and Roslyn. `inspect` shows what an object is made of, `set_property` changes any property by a dot path with undo, `query` finds objects, `execute` compiles and runs any C# against the live editor (with `using` lines and type declarations hoisted, so a helper class or a MonoBehaviour can be written and attached in one call), `take_screenshot` shows the result. The runtime loop, `enter_play`, `send_input`, `sample_state`, `assert_state` and the one-call `playtest`, runs the game and checks a mechanic against real values instead of pixels. Whatever the editor can do, the model can do, and it can see whether it worked.
 
-The 100% C# engine-agnostic core means the **same** AI workflow — inspect, modify, execute C#, screenshot, build — works *identically* whether you're in the **Unity Editor**, **Godot**, or **Stride Game Studio**, and ports to Flax Engine or any custom C# engine with a lightweight adapter. No other open-source MCP server exposes this breadth of editor control across three different engines.
+```
+AI: "Set the player's position to (10, 0, 5)"
 
-### 🎮 Supported engines — full feature parity
+-> set_property {"object_path": "/Player", "property_path": "position", "value": {"x":10,"y":0,"z":5}}
+<- Property 'position' set successfully on /Player
+```
+
+### Supported engines
 
 | Capability | Unity | Godot | Stride |
 |---|:--:|:--:|:--:|
@@ -32,135 +37,37 @@ The 100% C# engine-agnostic core means the **same** AI workflow — inspect, mod
 | Scene management (`new_scene` · `open_scene` · `save_scene`) | ✅ | ✅ | ✅ |
 | **Runtime loop** (`enter_play`/`exit_play` · `capture_sequence` · `send_input`) | ✅ | ◑ | ◑ |
 
-Most rows are implemented and verified live in each engine's editor — not a roadmap. Plus engine-independent OS tools (`list_windows` / `capture_window`) to screenshot any window on the machine.
-
-> **Newest additions** — `create_sprite` lets the AI author flat-geometric placeholder art as a vector spec that the **server rasterizes to a PNG** and imports as a real sprite, so it works regardless of the engine's own vector support. Unity & Godot import + place it; Stride persists it as a real `.sdtex` texture asset in the package (plus a runtime preview entity for immediate visibility). Companion authoring tools `new_scene`/`open_scene`/`save_scene` and `write_script` (all three engines) let an AI build a 2D prototype — art, scene and gameplay code — end-to-end from a single prompt.
->
-> *(Verified live in Game Studio: `create_sprite` persists and surfaces a real `.sdtex` texture asset and places a runtime sprite entity in an open scene; `new_scene` creates and opens a scene. On Stride, `take_screenshot` is served by the OS-level window fallback — Game Studio only ticks its embedded editor game on demand, so the internal readback can't reliably run during MCP use; just keep Game Studio non-minimized.)*
-
-### 🧠 No ceiling: arbitrary C# on the editor's main thread
-
-The structured tools are the convenient path — but the real power is the **`execute`** tool, which compiles and runs **any** C# (via Roslyn) directly against the live editor. That means the *entire* engine + editor API, your own project assemblies, the asset pipeline, the file system — **anything the editor itself can do, the AI can do.** There are effectively **no limits** to what it can accomplish.
-
-In short: AkerMCP gives the AI **eyes** (inspect, query, screenshots) and **hands** (set, create, call, execute, build) to do *whatever you actually need* — not a fixed menu of canned operations, but open-ended capability, identically across every supported engine.
-
-### 🪄 The "Wow" Factor: Talk to your Engine
-
-Imagine asking your AI:
-> *"Hey, make the Player character 20% bigger, turn all enemy materials red, and spawn 50 trees scattered across the ground plane."*
-
-- **Without AkerMCP:** The AI writes a custom script, explains where to put it, you switch to Unity, attach it, press play, and hope it works.
-- **With AkerMCP:** The AI just does it. Instantly. Right inside your editor — Unity, Godot, or Stride. You watch the scene change before your eyes.
-
-AkerMCP acts as a seamless bridge. It allows AI agents to inspect your scene hierarchy, modify objects, and even execute complex procedural C# scripts on the fly. No more manual repetitive clicking in the inspector—just tell your AI what you want to achieve.
-
-**Example:** *"Spawn 10 spheres in a circle with a radius of 10"*
-```csharp
-for (int i = 0; i < 10; i++) {
-    float angle = i * Mathf.PI * 2 / 10f;
-    Vector3 pos = new Vector3(Mathf.Cos(angle) * 10f, 0, Mathf.Sin(angle) * 10f);
-    GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-    sphere.transform.position = pos;
-    sphere.name = $"Aker_Sphere_{i}";
-}
-```
-![AkerMCP in Action — Unity](docs/images/unity-execution-demo.png)
-
-The **same request, same tools — in Stride Game Studio**. The AI duplicated a sphere into a ring via `execute` (through Stride's asset/Quantum layer, so they're **real, selectable, saved entities** — note `AkerSphere_*` in the Scene hierarchy on the left), then captured the editor itself. Identical workflow, different engine:
-
-<img src="readmeData/Stride.png" alt="AkerMCP in Action — Stride Game Studio" width="1024">
+Every row is implemented and was verified live in that engine's editor. The OS window tools (`list_windows`, `capture_window`, `focus_window`) work with no engine connected.
 
 
-*(Curious about the internal technical details? Jump to the [Architecture](#architecture) section).*
+### Where it stands next to the others
 
-### 🏆 Real-World Case Studies
+Two Unity MCP servers have far bigger communities: CoplayDev's unity-mcp (about 14,000 stars) and Ivan Murzak's Unity-MCP (about 4,000); for Godot, Coding-Solo's godot-mcp (about 5,500). If you work in one engine they are safe choices, with more users, more documentation and package-manager installs. AkerMCP is one author and a handful of stars, and this page says so rather than pretending otherwise.
 
-To truly understand the unprecedented power of AkerMCP, consider these two real-world sessions:
+What it has that they do not: the same tools across three engines from one core, so a workflow learned on Unity carries to Godot and Stride; `execute` with hoisted type declarations; a `playtest` that drives input and evaluates C# assertions server-side at precise moments, where separate tool calls miss fast transients like a jump arc; server-rasterised sprites and synthesised sounds for placeholder art on any engine; and Stride Game Studio at all. If those matter to you, read on. Pair it with [LynxMCP](https://github.com/lorenzo-cambiaghi/LynxMCP) for code search over the project and its library docs: Aker is the hands, Lynx the memory.
 
-#### Case Study 1: The "Invisible" GPU Bug
+<img src="docs/images/unity-execution-demo.png" alt="AkerMCP in Unity: a ring of spheres spawned by one execute call" width="1024">
 
-A developer's Custom Voxel Ambient Occlusion (AO) was rendering completely flat, making underground caves far too bright.
+The same request in Stride Game Studio. `execute` duplicated a sphere into a ring through Stride's asset layer, so they are real, selectable, saved entities (note `AkerSphere_*` in the hierarchy), then the editor captured itself:
 
-- **Without AkerMCP**, an AI assistant is blind. It can only read your shader code, guess what might be wrong, and give you a list of 5 things to check manually. You are left recompiling, entering Play Mode, attaching debuggers, and iterating blindly for hours because the state lives entirely in GPU memory.
-- **With AkerMCP**, the AI sits at your desk:
-  1. **Visual Verification:** By calling `take_screenshot` on the Scene View, the AI visually confirmed the user's report: *"The overall look is flat and washed out. The caves aren't dark at all."*
-  2. **Dynamic Editor Control:** The AI wrote an on-the-fly C# Roslyn script via the `execute` tool to force the `VoxelWorldGI` pipeline into a pure "Debug 10 (Grayscale AO)" mode. A second screenshot confirmed the AO channel was completely white (AO ≈ 1.0).
-  3. **CPU Memory Inspection:** To check if the voxelization was failing, the AI wrote another script to read the `_cells` array in CPU memory, counting **29,408 occupied solid voxels**. *Voxelization was working perfectly.*
-  4. **3D Texture Readback:** Realizing the bug was in the Cone-Tracing pass, the AI wrote a complex script to perform a GPU readback of the `Texture3D` radiance buffer. Unity only returned the 0-depth slice by default, so the AI rewrote its script to iterate and aggregate all 104 volume layers.
-  5. **The Smoking Gun:** By analyzing the aggregated buffer, the AI discovered the alpha channel was mirroring the raw occupancy data instead of the calculated AO. It immediately pinpointed the exact failure: an empty mip-map chain generation step meant the cones couldn't trace any occlusion.
+<img src="readmeData/Stride.png" alt="AkerMCP in Stride Game Studio" width="1024">
 
-In just minutes, the AI diagnosed a complex, data-dependent GPU bug. It didn't just write code; it acted as a Technical Artist—triggering Editor pipelines, reading multidimensional arrays from VRAM, taking visual snapshots, and confirming hypotheses through interactive feedback.
+### Under the hood
 
-#### Case Study 2: The "Context-Aware" Shader Architect
+- A shared .NET Standard 2.1 core holds the tool logic; each engine adds an adapter that implements the engine interfaces (scene graph, editor context, code executor, play mode, input, capture). A fourth engine is another adapter; the server and the tools do not change.
+- The standalone server talks JSON-RPC over stdio to the client and MessagePack over a named pipe to the plugin inside the editor, which runs every request on the engine's main thread.
+- A reflection-based type system converts JSON to engine structs (`Vector3`, `Color`, `Bounds`, ...) case-insensitively, the same way for all three engines.
+- Screenshots come from the editor's own render buffer with gizmos; when an adapter cannot, an OS-level capture (Windows `PrintWindow`, macOS Quartz) takes over without stealing focus.
+- The server answers the MCP handshake in well under a second, connected engine or not, and sends the model its usage instructions with the tool list. See [How the model learns to use it](#how-the-model-learns-to-use-it).
 
-In another session, the user wanted standard (non-voxel) meshes to react to the lighting data generated by the custom Voxel Engine.
-
-- **Without AkerMCP:** The AI might provide generic HLSL code. The user would have to manually create the `.hlsl` include files, figure out how to wire them up to Unity's Shader Graph as Custom Function Nodes, and hope the variable names matched the engine's internals.
-- **With AkerMCP (and LynxMCP):** 
-  1. The AI searched the project's custom C# and Shader code to understand exactly how the Voxel Engine stored its lighting buffers (e.g. `_VoxelGridMipped`).
-  2. It wrote an HLSL include file specifically tailored to the project's architectural quirks.
-  3. Using the `execute` tool, the AI tapped into Unity's `AssetDatabase` to automatically create and save the `.hlsl` files in the correct `Assets/` directory.
-  4. It didn't stop at the code. Recognizing that Unity Shader Graphs are JSON files under the hood, the AI used the `execute` tool to programmatically construct and save a complete `.shadergraph` asset directly into the project. This graph automatically wired up the new HLSL Custom Function Node to the PBR Master node.
-  5. **Visual A/B Testing (Zero User Input):** Finally, the AI didn't just assume it worked. It used `execute` to create a new Material using the generated shader, spawned two identical test objects in the scene—one with a standard shader, and one with the new Voxel GI shader—and applied the materials itself. It then took a `take_screenshot` to visually compare them side-by-side, proving the custom Global Illumination was contributing correctly, completely autonomously.
-
-AkerMCP turns the AI from a simple "code generator" into an autonomous Technical Artist that not only writes the shaders, but natively integrates them into the engine's asset pipeline.
-
----
-
-## 🦁 How it Works (Under the Hood)
-
-Traditional MCP integrations for game engines ship 100+ hand-written tools — one per operation, one per component type. Every engine update breaks them.
-
-AkerMCP replaces all of that with **20+ generic tools** powered by runtime reflection and **Roslyn**. A single `set_property` tool can modify *any* property on *any* object in *any* engine, while the `execute` tool enables complex procedural generation via C# scripts. The `take_screenshot` tool closes the loop, giving the AI a way to *visually verify* what it just changed. The engine-specific adapter provides the necessary layer for interacting directly with the engine's API.
-
-```
-AI: "Set the player's position to (10, 0, 5)"
-
-→ set_property {"object_path": "/Player", "property_path": "position", "value": {"x":10,"y":0,"z":5}}
-← Property 'position' set successfully on /Player
-```
-
-No custom tool class needed. No code generation. Just reflection.
-
----
-
-## Features
-
-- **Equal support for every engine — currently Unity, Godot and Stride**: not a Unity tool with side ports. All three are first-class adapters at full feature parity (see the table above); none is the "primary" engine, and there is no comparable multi-engine alternative.
-- **20+ Generic Reflection-Based Tools**: Operate on any object or component without custom tool definitions — the identical tool surface across all engines.
-- **Roslyn-Powered Dynamic Execution**: Send arbitrary C# scripts via the `execute` tool to perform complex procedural tasks or bulk operations directly inside the editor (Unity / Godot / Stride Game Studio).
-- **AI-Authored 2D Placeholders (`create_sprite`)**: The AI emits a flat-geometric *shape-spec* (JSON) and the **server** rasterizes it to an RGBA PNG (pure-managed ImageSharp.Drawing) before importing it as a sprite — **engine-agnostic by design**, since the engine receives a ready raster and never needs its own SVG/vector support. Perfect for clean prototype art with zero art skills.
-- **End-to-End Authoring Tools**: `new_scene`/`open_scene`/`save_scene` (scene management) and `write_script` (writes a source file into the project, resolved engine-side) let an AI go from prompt to a playable prototype — scene, art and gameplay code — in one session.
-- **Visual Verification (`take_screenshot`)**: Engine-internal scene-view capture *with editor gizmos* in all three engines, plus a **cross-platform OS-level fallback** (`PrintWindow` on Windows, Quartz `CGWindowListCreateImage` on macOS) and standalone `list_windows` / `capture_window` tools for any window. Output is auto-resized and JPEG-encoded via ImageSharp to fit AI image limits.
-- **MessagePack IPC Protocol**: High-performance, low-latency binary communication between the standalone MCP Server and the engine plugin.
-- **Robust Type System**: Serializes and deserializes engine structs (`Vector3`, `Color`, `Bounds`, …) seamlessly, case-insensitively, for Unity, Godot and Stride alike.
-- **Engine-Agnostic Core**: A shared .NET Standard 2.1 core; adding a fourth engine (Flax, or any custom C# engine) is just another adapter — the server and tools never change.
-
----
-
-## The Perfect Combo: AkerMCP + LynxMCP
-
-AkerMCP gives your AI agent the hands to **manipulate the active scene** and execute runtime code. But to be truly effective, the AI also needs the brain to understand your entire project architecture and dependencies.
-
-We highly recommend running AkerMCP alongside [**LynxMCP**](https://github.com/lorenzo-cambiaghi/LynxMCP), our local RAG (Retrieval-Augmented Generation) server designed for codebases. 
-
-When combined, your AI gets a **complete global vision**:
-- **LynxMCP** provides deep, semantic search over your custom C# scripts and up-to-date Unity/library documentation (feeding the AI with exact APIs and patterns it wouldn't otherwise know from its standard training data).
-- **AkerMCP** uses that exact context to write and execute flawless Roslyn scripts directly in your Editor.
+Details: [Architecture](#architecture) and [Writing an Engine Adapter](#writing-an-engine-adapter).
 
 ---
 
 ## Table of Contents
 
-- [The Perfect Combo: AkerMCP + LynxMCP](#the-perfect-combo-akermcp--lynxmcp)
 - [Quick Start (Recommended)](#quick-start-recommended)
 - [Connecting an AI Client](#connecting-an-ai-client)
-  - [Claude Code (CLI)](#claude-code-cli)
-  - [Claude Desktop](#claude-desktop)
-  - [Cursor](#cursor)
-  - [Windsurf](#windsurf)
-  - [Google Antigravity](#google-antigravity)
-  - [VS Code + Copilot](#vs-code--copilot)
 - [Advanced: Building from Source (For Developers)](#advanced-building-from-source-for-developers)
 - [Verifying the Connection](#verifying-the-connection)
 - [MCP Tools](#mcp-tools)
@@ -169,7 +76,8 @@ When combined, your AI gets a **complete global vision**:
 - [Example Session](#example-session)
 - [Architecture](#architecture)
 - [Writing an Engine Adapter](#writing-an-engine-adapter)
-- [AI Integration Rules](#ai-integration-rules)
+- [Two sessions, as they happened](#two-sessions-as-they-happened)
+- [How the model learns to use it](#how-the-model-learns-to-use-it)
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
 
@@ -403,40 +311,46 @@ If you see this, everything is working.
 
 ## MCP Tools
 
-### Scene Manipulation
+Every tool definition rides in your client's context on every turn, so the set is layered. `core` (14 tools, about 2,300 tokens of definitions) is inspect, edit, execute, screenshot, logs and compile. `standard` (27 tools, about 4,100 tokens, the default) adds scripts, scenes, play control, the engine pin and the OS window tools that unblock a modal dialog. `full` (40 tools, about 6,800 tokens) adds sprite and sound authoring, the verification tools, `playtest` and the build pipeline. Pick one with `--profile core` in the server's arguments or `AKER_MCP_PROFILE=core` in its environment; `AKER_MCP_TOOLS_INCLUDE=playtest,build_player` adds single tools to a profile and `AKER_MCP_TOOLS_EXCLUDE` removes them. A call to a hidden tool answers with the profile that hid it and how to load it, and the handshake instructions list the hidden ones, so the model asks instead of guessing.
 
-| Tool | Description |
-|------|-------------|
-| `inspect` | Return components, properties, methods, and children of a scene object or type |
-| `get_property` | Read a property via dot-notation path (e.g. `transform.position.x`) |
-| `set_property` | Write a property — supports primitives, structs, arrays, nested objects |
-| `call_method` | Invoke a method on a scene object or a static class method |
-| `query` | Find objects by type name, name pattern, tag, or property values |
-| `create` | Add a new object to the scene with optional initial properties |
-| `delete` | Remove an object from the scene (supports undo) |
-| `select` | Select an object in the editor — highlights it in the hierarchy and inspector |
-| `get_selection` | Get the currently selected object with its components, properties, and children |
+Every tool carries the four MCP hints (read-only, destructive, idempotent, open-world), so a client can auto-approve the reads and ask before `delete`, `execute`, `call_method`, `send_input`, `write_script`, `new_scene`, `open_scene`, `switch_build_target` and `build_player`.
 
-### Development Workflow
+### Scene
 
-| Tool | Description |
-|------|-------------|
-| `refresh_scripts` | Force script recompilation and return errors/warnings immediately |
-| `get_compile_errors` | Retrieve compilation errors with file path, line, and column |
-| `get_console_logs` | Read engine console entries with level and text filtering |
-| `execute` | Run arbitrary C# code in the engine context (Roslyn) — no fixed API surface |
-| `write_script` | Write a source file into the project (path relative to the project root, resolved engine-side) — works even if the server runs on a different machine. Pair with `refresh_scripts`. |
+| Tool | Profile | What it does |
+|------|---------|--------------|
+| `inspect` | core | Components, properties, methods and children of a scene object or of a type; `depth`, `include_methods`, `filter` |
+| `get_property` | core | Read one property by dot path (`position`, `Rigidbody.mass`, `MeshRenderer.material.color.r`) |
+| `set_property` | core | Set one property by dot path, with undo; structs as JSON objects |
+| `call_method` | core | Invoke a method on a scene object or a static member of a type; string arguments, converted |
+| `query` | core | Find objects by type, name glob or regex, tag or property values |
+| `create` | core | Add an object with a type, name, optional parent and initial properties, with undo |
+| `delete` | core | Remove an object, with undo; `recursive: false` keeps its children |
+| `select` | core | Select an object in the editor; it becomes `selectedObject` in `execute` |
+| `get_selection` | core | What the user has selected: path, components, property summary |
 
-### Scene & 2D Authoring
+### Development workflow
 
-Build a 2D prototype end-to-end — scene, placeholder art, and gameplay — without leaving the AI session.
+| Tool | Profile | What it does |
+|------|---------|--------------|
+| `refresh_scripts` | core | Compile pending script changes and return errors and warnings; blocks through Unity's domain reload |
+| `get_compile_errors` | core | The last compilation's result without recompiling |
+| `get_console_logs` | core | Recent console entries, filtered by level or text |
+| `execute` | core | Run any C# on the engine's main thread through Roslyn and return its value; globals `selectedObject`, `Find`, `FindAll<T>`, `Create`, `Log` |
+| `take_screenshot` | core | JPEG of the Game view (default) or the Scene view with gizmos |
+| `write_script` | standard | Write a source file into the project by a path relative to its root, wherever the server runs |
+| `engine_status` | standard | Which engine answers, which others run, and a pin that survives reconnects |
 
-| Tool | Description |
-|------|-------------|
-| `create_sprite` | Author a flat-geometric **shape-spec** (JSON); the server rasterizes it to an RGBA PNG and imports it as a sprite, optionally placing it in the scene. Engine-agnostic — the engine receives a ready raster |
-| `new_scene` | Create a fresh scene (`two_d: true` sets up an orthographic 2D camera); optionally save it |
-| `open_scene` | Open an existing scene by its engine asset path |
-| `save_scene` | Save the active/edited scene (in place, or to a new path) |
+### Scene and 2D authoring
+
+| Tool | Profile | What it does |
+|------|---------|--------------|
+| `new_scene` | standard | A fresh scene, 2D by default, optionally saved to an asset path |
+| `open_scene` | standard | Open a scene by its engine asset path |
+| `save_scene` | standard | Save the edited scene in place or to a path |
+| `create_sprite` | full | Author a flat, geometric shape-spec; the server rasterises it to a PNG and imports it as a sprite on any engine |
+| `create_sound` | full | Synthesise a short jsfxr-style sound and import it as an audio clip |
+| `add_primitive` | full | Write a vetted gameplay script (2D platformer controller, auto-runner, camera follow, kill zone, score overlay) |
 
 > **Engine support:** all three engines implement these. `create_sprite` imports + places a sprite on **Unity** and **Godot**; on **Stride** it persists a real `.sdtex` texture asset in the package (via the editor's `SessionViewModel`) and also adds a runtime preview entity for immediate visibility. `new_scene`/`open_scene`/`save_scene` work on **Unity** and **Godot** (file-on-disk scenes) and on **Stride** (package-managed `SceneAsset` via the editor). `write_script` works on all three. *(Stride's `create_sprite` + scene creation are verified live in Game Studio.)*
 
@@ -454,19 +368,16 @@ Build a 2D prototype end-to-end — scene, placeholder art, and gameplay — wit
 
 > Keep placeholders flat and geometric — recognizable silhouette over detail. For arbitrary SVG (boolean paths, filters, tracing) a dedicated vector tool would be the right home; `create_sprite` deliberately targets the clean-prototype niche.
 
-### Runtime Loop
+### Runtime loop
 
-Don't just build a prototype — **run it, watch it move, and drive it**, so the AI can verify the thing actually plays instead of building blind. The loop: `enter_play` → `send_input` to drive it → `capture_sequence`/`get_property` to observe → `exit_play`.
-
-| Tool | Description |
-|------|-------------|
-| `enter_play` | Start the project running (Play Mode / run the scene / play the timeline). On Unity this reloads the domain and briefly drops the connection — the server waits for the auto-reconnect and reports the settled state |
-| `exit_play` | Stop play/playback and return to a clean edit state |
-| `set_play_pause` | Pause (`{"paused": true}`) or resume an in-progress run |
-| `play_step` | Advance N frames while paused — step through a jump arc or collision frame by frame |
-| `get_play_state` | Report `isPlaying`, `isPaused`, current `time`, and clip `duration` (read-only) |
-| `capture_sequence` | Capture **several** frames at an interval and return them as a strip — see *motion*, not one pose. Call it while playing (`{"count": 4, "interval_ms": 400}`) |
-| `send_input` | Inject synthetic input into the running game to test interactive mechanics — an ordered `events` array of key / mouse-button / mouse-move / named-action events (e.g. `{"events":[{"type":"key","key":"Space","hold_ms":60}]}`) |
+| Tool | Profile | What it does |
+|------|---------|--------------|
+| `enter_play` / `exit_play` | standard | Run the project and stop it; Unity's domain reload and reconnect are handled |
+| `get_play_state` | standard | Playing, paused, time, frame counter; read twice to tell a frozen game from a live one |
+| `set_play_pause` | standard | Pause or resume |
+| `send_input` | standard | Inject key, mouse button and mouse move events into the running game (`window_title` for a game in its own window) |
+| `play_step` | full | Advance frames while paused |
+| `capture_sequence` | full | Several screenshots at an interval, returned as a strip, to see motion |
 
 > **Engine support:** the runtime loop is backed by the optional `IPlayModeController` (play control) and the optional `IInputSimulator` (in-process input, with an OS-level fallback). Support is honest per engine:
 > - **Unity** — full: Play Mode runs in the Game View, so `take_screenshot`/`capture_sequence` capture the live game; pause/step supported. Reuses the domain-reload reconnect from `refresh_scripts`.
@@ -476,49 +387,34 @@ Don't just build a prototype — **run it, watch it move, and drive it**, so the
 >
 > `send_input` prefers an engine's in-process `IInputSimulator`, otherwise focuses the game/engine window and injects via **OS-level `SendInput`** (Windows; macOS/Linux report unsupported). On **Unity** the in-process path drives the **new Input System** (`com.unity.inputsystem`) directly — resolved via reflection, so there is no hard package dependency; projects on the legacy Input Manager (or without the package) fall back to OS-level automatically. On **Godot/Stride** the game is a separate window, so pass `window_title` (the game window's title) or the OS-level path targets the editor. The `action` event type is reserved but not yet injectable — drive the key/mouse controls the action is bound to.
 
-### Verify & Iterate
+### Verify and iterate
 
-Close the loop: don't just *look* at the game — **read its runtime state and get a PASS/FAIL**, so the AI verifies a mechanic against ground truth instead of guessing from pixels.
+| Tool | Profile | What it does |
+|------|---------|--------------|
+| `sample_state` | full | Evaluate C# expressions in the running game and return their values |
+| `assert_state` | full | Compare runtime expressions to expected values with `==`, `<`, `approx`, `truthy` and friends, polled until they hold |
+| `playtest` | full | One call: enter play, run a timed list of input, wait, capture, assert and sample steps, check the final criteria, exit play; returns one verdict with frames and evidence |
 
-| Tool | Description |
-|------|-------------|
-| `sample_state` | Read live runtime values — `{ probes: { name: "C# expression" } }` evaluated in the engine (same host as `execute`); returns each value |
-| `assert_state` | Assert runtime conditions and get structured PASS/FAIL. Each assertion is `{expression, op, value}` (`op`: `==`/`!=`/`<`/`<=`/`>`/`>=`/`approx`/`truthy`/`falsy`); polls until all pass or `timeout_ms` |
-| `playtest` | **One-call acceptance harness**: `enter_play` → a timed timeline of `input`/`wait_ms`/`capture`/`assert`/`sample` steps → final `criteria` → `exit_play`. Returns ONE verdict + a motion strip + evidence — input lands at a precise moment relative to observation (no multi-round-trip lag that misses fast transients) |
+### Platform and build
 
-### Placeholder Audio & Gameplay Primitives
-
-Generate the other half of a prototype — sound and vetted code — without leaving the session.
-
-| Tool | Description |
-|------|-------------|
-| `create_sound` | Author a jsfxr-style **sound-spec** (JSON); the **server synthesizes a WAV** and imports it as an audio clip — engine-agnostic like `create_sprite`. Great for the flap/jump/score/hit SFX that make a prototype feel real. Implemented for **Unity** (AudioClip) and **Godot** (AudioStreamWav) |
-| `add_primitive` | Drop in a **vetted gameplay behaviour** (Unity: `platformer_controller_2d`, `auto_runner_2d`, `camera_follow_2d`, `killzone_2d`, `score_overlay`) instead of hand-writing and debugging it — the server writes the connected engine's known-good source via `write_script` and returns its configurable fields. Call with no `id` to list the catalog |
-
-### Platform & Build
-
-Engine-neutral build pipeline control (backed by the optional `IBuildManager`; implemented for Unity, Godot and Stride).
-
-| Tool | Description |
-|------|-------------|
-| `list_platforms` | List build platforms the engine knows about, flagged active/buildable |
-| `get_platform_settings` | Read a platform's build/player settings as a key-value map |
-| `set_platform_settings` | Change platform settings (e.g. app id, min SDK, scripting backend) |
-| `switch_build_target` | Make a platform the active build target (handles recompile/reload) |
-| `build_player` | Build the project for a platform (APK/AAB/exe/app bundle) and return a build report |
+| Tool | Profile | What it does |
+|------|---------|--------------|
+| `list_platforms` | full | The build platforms the engine knows, flagged active and buildable |
+| `get_platform_settings` / `set_platform_settings` | full | Read and change a platform's build and player settings as a key-value map |
+| `switch_build_target` | full | Make a platform the active target |
+| `build_player` | full | Build the project for a platform and return a report |
 
 > Engine differences are handled gracefully: e.g. Godot and Stride have no global active target, so `switch_build_target` reports that and you pass the platform directly to `build_player`.
 
-### Visual Verification
+### Windows on the server's machine
 
-| Tool | Description |
-|------|-------------|
-| `take_screenshot` | Capture the editor's Scene/Game view (with gizmos) and return a JPEG to the AI |
-| `list_windows` | List visible top-level OS windows (title, process, pid) on the server machine |
-| `capture_window` | Screenshot **any** window matched by a title substring — even occluded, no focus steal |
-| `focus_window` | Bring **any** window (matched by title substring) to the foreground, restoring it if minimized |
+| Tool | Profile | What it does |
+|------|---------|--------------|
+| `list_windows` | standard | Visible top-level windows: title, process, pid; works with no engine connected |
+| `capture_window` | standard | Screenshot any window by a title substring, occluded or not, without stealing focus |
+| `focus_window` | standard | Bring a window to the foreground, restoring it if minimised |
 
-`list_windows` / `capture_window` are OS-level and engine-independent: they work with no engine connected and can capture external apps (browsers, dashboards, other editors) — useful for debugging and cross-app workflows.
+These three are how the model recovers from a modal dialog that blocks the editor's main thread, and how it screenshots a Godot game that runs in its own window.
 
 #### How `take_screenshot` works
 
@@ -659,6 +555,7 @@ When a property name is ambiguous (e.g. `enabled` exists on multiple components)
 
 | URI | Description |
 |-----|-------------|
+| `aker://guide` | The usage playbook as markdown: workflow, property paths, `execute` rules, screenshots, recovery. Served by the server, no engine needed |
 | `scene://hierarchy` | Full scene tree with components listed per object |
 | `project://info` | Engine name/version, project path, active scene |
 | `editor://logs` | Recent console entries |
@@ -790,8 +687,12 @@ AkerMCP/
 │   └── Ipc/                             Named pipe channel, binary framing
 ├── Server/                              AkerMcp.Server (net8.0 console app)
 │   ├── McpServer.cs                     JSON-RPC dispatcher, MCP lifecycle
-│   ├── ToolRegistry.cs                  20+ generic tool definitions
-│   ├── ResourceRegistry.cs              5 resource definitions
+│   ├── ToolRegistry.cs                  40 tool registrations, handlers, profile pruning
+│   ├── ToolDocs.cs                      every tool description, in one place
+│   ├── ToolProfiles.cs                  core / standard / full
+│   ├── ToolAnnotationTable.cs           the four MCP hints per tool
+│   ├── ServerInstructions.cs            handshake instructions + the aker://guide resource
+│   ├── ResourceRegistry.cs              6 resources, incl. the aker://guide playbook
 │   ├── EngineConnection.cs              IPC client to engine plugin
 │   ├── StdioTransport.cs                stdin/stdout transport
 │   ├── ImageProcessor.cs                Resize + JPEG normalization (cross-platform via ImageSharp)
@@ -917,262 +818,53 @@ TypeRegistry.Instance.RegisterCustomSerializer<Vector3>(
 
 ---
 
-## AI Integration Rules
+## Two sessions, as they happened
 
-AkerMCP embeds comprehensive usage instructions **directly into each tool's description** served via the MCP protocol. This means any AI client (Claude, Cursor, Copilot, Antigravity) automatically learns how to use all the tools correctly — including property path syntax, the Inspect → Modify → Verify workflow, Roslyn execution globals, compilation verification, and visual verification via screenshots — **with zero configuration**.
+Two sessions on a real project, told as they happened. They show what the loop looks like when the model can inspect, execute and look.
 
-### Optional: Boost with a rules file
+#### Case Study 1: The "Invisible" GPU Bug
 
-For even better results, you can add a rules file to your project root. This reinforces the built-in instructions and gives the AI additional context about common workflows and anti-patterns.
+A developer's Custom Voxel Ambient Occlusion (AO) was rendering completely flat, making underground caves far too bright.
 
-| Platform | File | Scope |
-|----------|------|-------|
-| Claude Code | `CLAUDE.md` (project root) | Per-project |
-| Antigravity | `AGENTS.md` (project root) | Per-project |
-| Cursor | `.cursor/rules/AkerMCP.md` | Per-project |
-| Cross-tool | `AGENTS.md` (project root) | Works with most clients |
+- **Without AkerMCP**, an AI assistant is blind. It can only read your shader code, guess what might be wrong, and give you a list of 5 things to check manually. You are left recompiling, entering Play Mode, attaching debuggers, and iterating blindly for hours because the state lives entirely in GPU memory.
+- **With AkerMCP**, the AI sits at your desk:
+  1. **Visual Verification:** By calling `take_screenshot` on the Scene View, the AI visually confirmed the user's report: *"The overall look is flat and washed out. The caves aren't dark at all."*
+  2. **Dynamic Editor Control:** The AI wrote an on-the-fly C# Roslyn script via the `execute` tool to force the `VoxelWorldGI` pipeline into a pure "Debug 10 (Grayscale AO)" mode. A second screenshot confirmed the AO channel was completely white (AO ≈ 1.0).
+  3. **CPU Memory Inspection:** To check if the voxelization was failing, the AI wrote another script to read the `_cells` array in CPU memory, counting **29,408 occupied solid voxels**. *Voxelization was working perfectly.*
+  4. **3D Texture Readback:** Realizing the bug was in the Cone-Tracing pass, the AI wrote a complex script to perform a GPU readback of the `Texture3D` radiance buffer. Unity only returned the 0-depth slice by default, so the AI rewrote its script to iterate and aggregate all 104 volume layers.
+  5. **The Smoking Gun:** By analyzing the aggregated buffer, the AI discovered the alpha channel was mirroring the raw occupancy data instead of the calculated AO. It immediately pinpointed the exact failure: an empty mip-map chain generation step meant the cones couldn't trace any occlusion.
 
-> **Recommended:** Use `AGENTS.md` in your project root. It's the most widely supported convention.
+In just minutes, the AI diagnosed a complex, data-dependent GPU bug. It didn't just write code; it acted as a Technical Artist—triggering Editor pipelines, reading multidimensional arrays from VRAM, taking visual snapshots, and confirming hypotheses through interactive feedback.
 
-### Rules template
+#### Case Study 2: The "Context-Aware" Shader Architect
 
-Copy everything inside the block below into your rules file:
+In another session, the user wanted standard (non-voxel) meshes to react to the lighting data generated by the custom Voxel Engine.
+
+- **Without AkerMCP:** The AI might provide generic HLSL code. The user would have to manually create the `.hlsl` include files, figure out how to wire them up to Unity's Shader Graph as Custom Function Nodes, and hope the variable names matched the engine's internals.
+- **With AkerMCP (and LynxMCP):** 
+  1. The AI searched the project's custom C# and Shader code to understand exactly how the Voxel Engine stored its lighting buffers (e.g. `_VoxelGridMipped`).
+  2. It wrote an HLSL include file specifically tailored to the project's architectural quirks.
+  3. Using the `execute` tool, the AI tapped into Unity's `AssetDatabase` to automatically create and save the `.hlsl` files in the correct `Assets/` directory.
+  4. It didn't stop at the code. Recognizing that Unity Shader Graphs are JSON files under the hood, the AI used the `execute` tool to programmatically construct and save a complete `.shadergraph` asset directly into the project. This graph automatically wired up the new HLSL Custom Function Node to the PBR Master node.
+  5. **Visual A/B Testing (Zero User Input):** Finally, the AI didn't just assume it worked. It used `execute` to create a new Material using the generated shader, spawned two identical test objects in the scene—one with a standard shader, and one with the new Voxel GI shader—and applied the materials itself. It then took a `take_screenshot` to visually compare them side-by-side, proving the custom Global Illumination was contributing correctly, completely autonomously.
+
+AkerMCP turns the AI from a simple "code generator" into an autonomous Technical Artist that not only writes the shaders, but natively integrates them into the engine's asset pipeline.
 
 ---
 
-<details>
-<summary><strong>Click to expand the full rules template</strong></summary>
+## How the model learns to use it
 
-```markdown
-<agent_instructions>
+Nothing to install on the client side. The server sends its usage instructions in the MCP handshake, with the tool list: the inspect, modify, verify order; the property path syntax; the `execute` rules (nothing persists between calls, always return a value, `using` lines at the top, the timeout only stops the wait); what to do after writing a script; how to dismiss a modal dialog. They name only the tools of the active profile and list the hidden ones with the way to load them. The full playbook is the `aker://guide` resource, markdown a client can read on demand, and it needs no engine.
 
-#### AkerMCP — AI Integration Rules
-
-You have access to a C# game engine — **Unity, Godot, or Stride** (all equally supported) — via the `game-engine` MCP server. This gives you 20+ tools to inspect, query, modify, script, and visually verify the active scene, plus platform/build control — all from the editor. The `execute` tool runs arbitrary C# (Roslyn) against the live editor, so there is effectively no limit to what you can do.
-
-#### Available Tools (quick reference)
-
-| Tool | Use when... |
-|------|-------------|
-| `inspect` | You need to see what's on an object — components, properties, children |
-| `get_property` | You know the exact path and want a single value |
-| `set_property` | You want to change one property with undo support |
-| `call_method` | You need to invoke a method (e.g. `SetActive`, `AddForce`) |
-| `query` | You need to find objects by type, name pattern, or tag |
-| `create` | You need to add a new object to the scene |
-| `delete` | You need to remove an object (destructive, has undo) |
-| `select` | You want to highlight an object in Unity's Hierarchy/Inspector |
-| `get_selection` | You want to know what the user currently has selected |
-| `refresh_scripts` | You just wrote or modified a `.cs` file and need to trigger recompilation |
-| `get_compile_errors` | You need to check if scripts compiled successfully |
-| `get_console_logs` | You need to read runtime errors, warnings, or debug output |
-| `execute` | You need to run arbitrary C# code (procedural generation, bulk ops, complex logic) |
-| `take_screenshot` | You need to **see** the result of a change (placement, materials, lighting, UI) |
-| `list_platforms` / `get_platform_settings` / `set_platform_settings` | You need to inspect or change build/player settings for a platform |
-| `switch_build_target` / `build_player` | You need to switch the active platform or produce a build (APK/exe/…) |
-| `list_windows` / `capture_window` | You need to screenshot any OS window (incl. external apps), not just the engine |
-
-#### Core Workflow: Inspect → Modify → Verify
-
-Always follow this pattern:
-
-1. **Inspect first.** Before modifying anything, call `inspect` to see the object's components, properties, and current values. Never guess.
-2. **Modify.** Use `set_property` for single changes, `execute` for complex operations.
-3. **Verify.** Call `get_property` or `inspect` again to confirm the change took effect. Check `get_console_logs` if something seems wrong.
-4. **Visually verify (when relevant).** For changes that affect what the user *sees* — placement, materials, lighting, UI layout, scale — call `take_screenshot` after the change to confirm the result looks right. This catches problems that property values alone cannot reveal (e.g. an object placed inside another, a material that compiled but renders pink, a UI element clipped off-screen).
-
-```
-Bad:  set_property "/Player" "mass" 5        ← "mass" might not resolve (it's on Rigidbody)
-Good: inspect "/Player" → see "Rigidbody.mass" exists → set_property "/Player" "Rigidbody.mass" 5
-```
-
-#### Property Path Syntax
-
-Properties use **dot-notation** resolved via reflection:
-
-```
-position                → Transform.position (Transform is searched first)
-position.x              → float
-Rigidbody.mass          → targets the Rigidbody component specifically
-Rigidbody.useGravity    → bool
-MeshRenderer.material.color → Color
-```
-
-**Rules:**
-- Transform properties (`position`, `rotation`, `localScale`, `eulerAngles`) don't need a prefix
-- Other components need the type prefix: `Rigidbody.mass`, `Camera.fieldOfView`, `Light.intensity`
-- Nested properties work: `MeshRenderer.material.color.r`
-- Array indexing works: `mesh.vertices[0]`
-
-**Structs are passed as JSON objects:**
-```json
-{"x": 1.0, "y": 2.0, "z": 3.0}           // Vector3
-{"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0} // Color
-```
-
-#### When to Use `execute` vs Other Tools
-
-| Scenario | Use |
-|----------|-----|
-| Change one property | `set_property` |
-| Read one value | `get_property` |
-| Find objects | `query` |
-| Create one object | `create` |
-| Modify 10+ objects in a loop | `execute` |
-| Generate procedural content | `execute` |
-| Access Editor API (AssetDatabase, Undo groups, etc.) | `execute` |
-| Complex conditional logic | `execute` |
-| Create materials, shaders, ScriptableObjects | `execute` |
-| Confirm a visual change actually looks right | `take_screenshot` |
-| Show the user what the scene currently looks like | `take_screenshot` |
-
-#### Writing `execute` Scripts
-
-**Available globals** (no setup needed) — shown for the Unity adapter; Godot and Stride expose equivalents over their own `Node` / `Entity` types:
-
-```csharp
-selectedObject              // Currently selected object (or null)
-Find("Player")              // find by name
-FindAll<Rigidbody>()        // find all components/nodes of a type
-Create("MyObject")          // create an empty object
-Log("message")              // log to the engine console
-```
-
-**Pre-imported namespaces**: `System`, `System.Collections.Generic`, `System.Linq`, plus the engine's namespaces (`UnityEngine`/`UnityEditor`, or `Godot`, or `Stride.Engine`/`Stride.Core.Mathematics`). For anything else, put `using ...;` directives at the top of the snippet — they are hoisted to file scope automatically.
-
-**State does NOT persist between calls.** Each script is compiled and run independently — write self-contained scripts:
-
-```csharp
-// Wrong — 'player' from a previous call no longer exists
-return player.transform.position;
-
-// Right — re-acquire what you need within the same script
-var player = Find("Player");
-return player.transform.position;
-```
-
-**Return values** are sent back to you. Always `return` a meaningful result:
-
-```csharp
-// Good — returns useful info
-var count = FindAll<Rigidbody>().Length;
-return $"Found {count} rigidbodies";
-
-// Bad — no feedback
-FindAll<Rigidbody>();  // returns null, you won't know the result
-```
-
-**Timeout**: Default is 5 seconds. Pass `timeout_ms` for longer operations. Note: the timeout only stops *waiting* — a running script cannot be aborted and keeps running on the engine main thread, so avoid unbounded loops and verify scene state after a timeout.
-
-#### Visual Verification with `take_screenshot`
-
-Use it whenever the user asks "how does it look?", "did it work?", or after making any change that has a **visual outcome**:
-
-| Situation | Should you screenshot? |
-|-----------|------------------------|
-| Moved/created/deleted an object | ✅ Yes — confirm placement |
-| Changed a material, color, or texture | ✅ Yes — colors can fail silently (pink fallback shaders) |
-| Modified lighting | ✅ Yes — intensity/color changes are hard to predict numerically |
-| Modified UI layout | ✅ Yes — anchoring/scaling bugs are visual-only |
-| Spawned procedural content | ✅ Yes — verify the generation looks reasonable |
-| Changed a non-visual property (mass, tag, name, layer) | ❌ No — `get_property` is enough |
-| Wrote a script | ❌ No — use `get_compile_errors` instead |
-
-**Parameters:**
-
-```json
-{ "view": "game" }   // default — Game View, what the player sees
-{ "view": "scene" }  // Scene View, useful for inspecting the full editor with gizmos
-```
-
-Output is a JPEG (~150-400 KB, max 1920px). You'll receive it as an image content block — read it like any other image.
-
-**Pattern: change → screenshot → react**
-
-```
-→ execute "for (int i = 0; i < 50; i++) { var t = GameObject.CreatePrimitive(PrimitiveType.Cube); t.transform.position = new Vector3(Random.Range(-20,20), 0, Random.Range(-20,20)); t.name = $\"Tree_{i}\"; } return \"spawned 50\";"
-← spawned 50
-
-→ take_screenshot {"view": "scene"}
-← [JPEG image]
-   ← AI sees: cubes are clustered too tightly in one corner — distribution looks wrong
-   → Fixes the script and re-runs.
-```
-
-**Don't screenshot for every micro-change.** It's not free — the AI client renders the image and consumes context. Use it at the end of a logical edit, not after each `set_property` in a sequence.
-
-#### After Writing or Modifying C# Scripts
-
-Whenever you create or edit a `.cs` file in the Unity project:
-
-1. Call `refresh_scripts` — this forces Unity to recompile
-2. Call `get_compile_errors` — check for errors
-3. If errors exist, fix them and repeat
-
-```
-→ refresh_scripts {}
-← Recompilation requested. Result: FAILED
-  === ERRORS (1) ===
-  Assets/Scripts/Player.cs(15,9): error CS1002: ; expected
-
-→ (fix the file)
-
-→ refresh_scripts {}
-← Result: SUCCESS. No errors or warnings.
-```
-
-**Never assume a script change compiled successfully.** Always verify.
-
-#### Scene Navigation
-
-**Paths** use forward slashes from the scene root:
-
-```
-/Player
-/Player/PlayerCamera
-/Environment/Trees/Oak_01
-```
-
-**To find objects** when you don't know the path:
-- `query {"name_pattern": "Player*"}` — glob search
-- `query {"type_filter": "Camera"}` — by component type
-- `query {"tag": "Enemy"}` — by tag
-
-**To explore the full scene:**
-- Read the `scene://hierarchy` resource — returns the complete tree with components
-- Or call `inspect` on root objects
-
-#### Anti-Patterns
-
-| Don't | Do instead |
-|-------|------------|
-| Guess property names | `inspect` the object first |
-| Modify without inspecting | Inspect → modify → verify |
-| Use `execute` for one property change | `set_property` (supports undo) |
-| Ignore compile errors after writing scripts | `refresh_scripts` → `get_compile_errors` |
-| Assume paths are case-insensitive | They're case-sensitive on the engine side |
-| Create complex objects one property at a time | Use `execute` with a single script |
-| Forget to `return` values in `execute` | Always return a string describing what happened |
-| Screenshot after every micro-change | Screenshot once at the end of a logical edit |
-| Trust property values alone for visual changes | `take_screenshot` to confirm the actual rendered result |
-
-#### Error Recovery
-
-If a tool call fails:
-
-1. **Read the error message** — it usually tells you exactly what's wrong
-2. **Inspect the target** — the object may not exist, or the property name may be different
-3. **Check the console** — `get_console_logs {"level_filter": "error"}` shows runtime errors
-4. **For compile errors** — `get_compile_errors` shows the exact file, line, and column
-
-</agent_instructions>
-```
-
-</details>
+If your client honours a project rules file (`CLAUDE.md`, `AGENTS.md`, `.cursor/rules/`), the same text can live there: ask the model to read `aker://guide` and save it, or copy it from `Server/ServerInstructions.cs`. Earlier versions of this README carried a 250-line template here for that purpose; the handshake replaced it.
 
 ---
 
 ## Troubleshooting
+
+**The AI says a tool "is not loaded in tool profile 'standard'"**
+
+The default profile hides the authoring, verification and build tools. Start the server with `--profile full` (or `AKER_MCP_PROFILE=full`), or add just that tool with `AKER_MCP_TOOLS_INCLUDE=playtest`. See [MCP Tools](#mcp-tools).
 
 **The server says "No engine plugin discovered"**
 
