@@ -14,7 +14,7 @@ AkerMCP is an MCP server that lets an AI client (Claude Code, Cursor, Copilot, A
 
 ## What it does
 
-Most engine integrations ship one hand-written tool per operation and break with every engine update. AkerMCP ships forty generic tools built on reflection and Roslyn. `inspect` shows what an object is made of, `set_property` changes any property by a dot path with undo, `query` finds objects, `execute` compiles and runs any C# against the live editor (with `using` lines and type declarations hoisted, so a helper class or a MonoBehaviour can be written and attached in one call), `take_screenshot` shows the result. The runtime loop, `enter_play`, `send_input`, `sample_state`, `assert_state` and the one-call `playtest`, runs the game and checks a mechanic against real values instead of pixels. Whatever the editor can do, the model can do, and it can see whether it worked.
+Most engine integrations ship one hand-written tool per operation and break with every engine update. AkerMCP ships forty generic tools built on reflection and Roslyn. `inspect` shows what an object is made of, `set_property` changes any property by a dot path with undo, `query` finds objects, `execute` compiles and runs any C# against the live editor (with `using` lines and type declarations hoisted, so a helper class or a MonoBehaviour can be written and attached in one call), `take_screenshot` shows the result. The runtime loop, `enter_play`, `send_input`, `sample_state`, `assert_state` and the one-call `playtest`, runs the game and checks a mechanic against real values instead of pixels. Placeholder art and audio work the same way: the model writes a spec, the server returns a PNG or a WAV. Whatever the editor can do, the model can do, and it can see whether it worked.
 
 ```
 AI: "Set the player's position to (10, 0, 5)"
@@ -33,18 +33,22 @@ AI: "Set the player's position to (10, 0, 5)"
 | Selection · console logs · recompile/compile-errors | ✅ | ✅ | ✅ |
 | Scene-view screenshot **with editor gizmos** | ✅ | ✅ | ✅ |
 | Platform/build tools (list · switch · build_player) | ✅ | ✅ | ✅ |
-| **2D vector placeholders** (`create_sprite`, server-rasterized) | ✅ | ✅ | ✅ |
+| **2D sprites from a JSON shape-spec** (`create_sprite`, rasterized server-side) | ✅ | ✅ | ✅ |
 | Scene management (`new_scene` · `open_scene` · `save_scene`) | ✅ | ✅ | ✅ |
 | **Runtime loop** (`enter_play`/`exit_play` · `capture_sequence` · `send_input`) | ✅ | ◑ | ◑ |
 
 Every row is implemented and was verified live in that engine's editor. The OS window tools (`list_windows`, `capture_window`, `focus_window`) work with no engine connected.
 
 
-### Where it stands next to the others
+### What it does that the others do not
 
-Two Unity MCP servers have far bigger communities: CoplayDev's unity-mcp (about 14,000 stars) and Ivan Murzak's Unity-MCP (about 4,000); for Godot, Coding-Solo's godot-mcp (about 5,500). If you work in one engine they are safe choices, with more users, more documentation and package-manager installs. AkerMCP is one author and a handful of stars, and this page says so rather than pretending otherwise.
+The other MCP servers for game engines are tied to one engine each: unity-mcp and Unity-MCP to Unity, godot-mcp to Godot. Here one tool set covers Unity, Godot and Stride from a shared core, so what you learn driving Unity works unchanged in the other two, and Stride Game Studio is supported at all.
 
-What it has that they do not: the same tools across three engines from one core, so a workflow learned on Unity carries to Godot and Stride; `execute` with hoisted type declarations; a `playtest` that drives input and evaluates C# assertions server-side at precise moments, where separate tool calls miss fast transients like a jump arc; server-rasterised sprites and synthesised sounds for placeholder art on any engine; and Stride Game Studio at all. If those matter to you, read on. Pair it with [LynxMCP](https://github.com/lorenzo-cambiaghi/LynxMCP) for code search over the project and its library docs: Aker is the hands, Lynx the memory.
+`execute` hoists `using` lines and type declarations, so a MonoBehaviour can be written, compiled and attached in one call instead of three. `playtest` drives input and evaluates C# assertions server-side at exact moments on the timeline, which is the only way to catch a transient as short as the top of a jump arc: separate tool calls arrive whenever the round trip lets them, and by then the frame is gone.
+
+Then there is the asset gap. A model writes code, not pixels. `create_sprite` closes it: the model describes the shape in JSON, with ellipses, rectangles, polygons and SVG path data, plus linear gradients and per-shape opacity, and the server rasterises that to an RGBA PNG at 4x supersampling before the plugin imports it as a sprite. The vector never reaches the editor, so Godot and Stride need no SVG support of their own to get the same placeholder Unity gets. `create_sound` does the same for audio, synthesising a WAV from a jsfxr-style spec. The prototype stops waiting for someone to draw the bird.
+
+Pair it with [LynxMCP](https://github.com/lorenzo-cambiaghi/LynxMCP) for code search over the project and its library docs: Aker is the hands, Lynx the memory.
 
 <img src="docs/images/unity-execution-demo.png" alt="AkerMCP in Unity: a ring of spheres spawned by one execute call" width="1024">
 
