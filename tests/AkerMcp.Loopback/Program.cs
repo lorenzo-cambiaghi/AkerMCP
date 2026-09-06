@@ -113,6 +113,23 @@ namespace AkerMcp.Loopback
             var badProfile = false;
             try { ToolProfiles.Resolve("turbo"); } catch (System.ArgumentException) { badProfile = true; }
             Check("an unknown profile name is refused", badProfile);
+
+            // One version, three places: IpcConstants.ProtocolVersion and the <Version> of the two
+            // packable csproj. The packages are versioned by the protocol they speak, so a drift
+            // here ships a package that announces a contract it does not implement.
+            static string PackageVersionOf(System.Type t)
+            {
+                var attrs = t.Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false);
+                var v = attrs.Length > 0
+                    ? ((System.Reflection.AssemblyInformationalVersionAttribute)attrs[0]).InformationalVersion
+                    : (t.Assembly.GetName().Version?.ToString() ?? "");
+                return v.Split('+')[0];   // the SDK appends +<commit> when SourceLink is on
+            }
+            var protocol = AkerMcp.Shared.Ipc.IpcConstants.ProtocolVersion;
+            Check($"AkerMcp.Shared package version equals the IPC protocol version {protocol}",
+                PackageVersionOf(typeof(AkerMcp.Shared.Ipc.IpcConstants)) == protocol, PackageVersionOf(typeof(AkerMcp.Shared.Ipc.IpcConstants)));
+            Check($"AkerMcp.Client package version equals the IPC protocol version {protocol}",
+                PackageVersionOf(typeof(AkerMcp.Client.EnginePluginBase)) == protocol, PackageVersionOf(typeof(AkerMcp.Client.EnginePluginBase)));
             var hiddenCall = await Call(new ToolRegistry(engine).Tap(r => r.ApplyProfile("core")), "playtest", new { });
             Check("calling a hidden tool names the profile and the fix", Text(hiddenCall).Contains("not loaded in tool profile 'core'") && Text(hiddenCall).Contains("--profile full"), Text(hiddenCall));
             var tooLong = new List<string>();
