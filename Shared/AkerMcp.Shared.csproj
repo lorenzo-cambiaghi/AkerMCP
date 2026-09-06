@@ -4,6 +4,19 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <RootNamespace>AkerMcp.Shared</RootNamespace>
+
+    <!--
+      Packable: engines that embed the bridge (SkelForge) consume these contracts as a VERSIONED
+      PACKAGE instead of a ProjectReference into this checkout: a product cannot require another
+      repository to be cloned next to it. The version tracks the IPC PROTOCOL version the client and
+      the plugins announce, so "which contract am I speaking" has one answer.
+      Build with: dotnet pack Shared -c Release -o <out>
+    -->
+    <IsPackable>true</IsPackable>
+    <Version>1.6.0</Version>
+    <PackageId>AkerMcp.Shared</PackageId>
+    <Authors>Lorenzo Cambiaghi</Authors>
+    <Description>AkerMCP shared contracts: engine abstraction, IPC protocol and models.</Description>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="MessagePack" Version="3.1.7" />

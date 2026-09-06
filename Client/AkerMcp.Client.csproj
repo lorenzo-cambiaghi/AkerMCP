@@ -4,6 +4,14 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <RootNamespace>AkerMcp.Client</RootNamespace>
+
+    <!-- Packed alongside AkerMcp.Shared (same version = same protocol); the ProjectReference below
+         becomes a package dependency automatically. See the note in Shared/AkerMcp.Shared.csproj. -->
+    <IsPackable>true</IsPackable>
+    <Version>1.6.0</Version>
+    <PackageId>AkerMcp.Client</PackageId>
+    <Authors>Lorenzo Cambiaghi</Authors>
+    <Description>AkerMCP engine-plugin side: pipe server, discovery lock file, EnginePluginBase.</Description>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Shared\AkerMcp.Shared.csproj" />
