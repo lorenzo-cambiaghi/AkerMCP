@@ -35,7 +35,9 @@ namespace AkerMcp.Server
             using var transport = new StdioTransport();
             using var engine = new EngineConnection();
 
-            StdioTransport.LogInfo($"AkerMcp Server v{AkerMcp.Shared.Ipc.IpcConstants.ProtocolVersion} starting...");
+            StdioTransport.LogInfo(
+                $"AkerMcp Server v{ServerVersion.Product} starting " +
+                $"(IPC protocol {AkerMcp.Shared.Ipc.IpcConstants.ProtocolVersion})...");
 
             await engine.TryDiscoverAndConnect(cts.Token);
             var retryTask = Task.Run(() => RetryEngineConnection(engine, cts.Token));

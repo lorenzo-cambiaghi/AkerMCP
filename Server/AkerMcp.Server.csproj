@@ -5,6 +5,11 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <RootNamespace>AkerMcp.Server</RootNamespace>
+
+    <!-- The product version: the GitHub release tag and what the MCP handshake
+         reports (see ServerVersion.cs). NOT the IPC protocol version, which
+         AkerMcp.Shared and AkerMcp.Client are versioned by. -->
+    <Version>1.5.0</Version>
   </PropertyGroup>
   <ItemGroup>
     <!-- System.Drawing.Common is kept for the Windows-only OS-level capture

@@ -125,6 +125,10 @@ namespace AkerMcp.Loopback
                     : (t.Assembly.GetName().Version?.ToString() ?? "");
                 return v.Split('+')[0];   // the SDK appends +<commit> when SourceLink is on
             }
+            var product = ServerVersion.Product;
+            Check($"the server announces a real product version ({product}), not the SDK default",
+                product != "1.0.0" && System.Text.RegularExpressions.Regex.IsMatch(product, @"^\d+\.\d+\.\d+$"),
+                product);
             var protocol = AkerMcp.Shared.Ipc.IpcConstants.ProtocolVersion;
             Check($"AkerMcp.Shared package version equals the IPC protocol version {protocol}",
                 PackageVersionOf(typeof(AkerMcp.Shared.Ipc.IpcConstants)) == protocol, PackageVersionOf(typeof(AkerMcp.Shared.Ipc.IpcConstants)));
