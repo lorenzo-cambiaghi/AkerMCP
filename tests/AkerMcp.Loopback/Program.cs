@@ -58,6 +58,40 @@ namespace AkerMcp.Loopback
 
             var reg = new ToolRegistry(engine);
 
+            // Every tool declares all four hints. A client that sees none assumes
+            // destructive + open-world and asks before each call; a half-declared
+            // set used to drop every "false" from the wire.
+            var incomplete = new List<string>();
+            var registered = new HashSet<string>();
+            foreach (var t in reg.ListTools().Tools)
+            {
+                registered.Add(t.Name);
+                var a = t.Annotations;
+                if (a == null || !a.ReadOnlyHint.HasValue || !a.DestructiveHint.HasValue
+                    || !a.IdempotentHint.HasValue || !a.OpenWorldHint.HasValue)
+                    incomplete.Add(t.Name);
+            }
+            Check("every tool declares all four annotation hints", incomplete.Count == 0, string.Join(", ", incomplete));
+            var stale = new List<string>();
+            foreach (var n in ToolAnnotationTable.Names) if (!registered.Contains(n)) stale.Add(n);
+            Check("annotation table names only registered tools", stale.Count == 0, string.Join(", ", stale));
+            var reads = 0;
+            foreach (var t in reg.ListTools().Tools) if (t.Annotations?.ReadOnlyHint == true) reads++;
+            Check("read-only tools are a minority the client may auto-approve", reads >= 12 && reads < registered.Count / 2, $"{reads} of {registered.Count}");
+
+            // The handshake carries the workflow; the full playbook is a resource that
+            // needs no engine.
+            var hs = ServerInstructions.Handshake;
+            Check("handshake instructions are compact", hs.Length > 600 && hs.Length < 2500, hs.Length.ToString());
+            Check("handshake names the inspect/modify/verify order and the guide", hs.Contains("inspect") && hs.Contains(ServerInstructions.GuideUri));
+            var resources = new ResourceRegistry(engine);
+            Check("aker://guide is listed", resources.ListResources().Resources.Exists(r => r.Uri == ServerInstructions.GuideUri));
+            var guideRead = await resources.ReadResource(
+                JsonSerializer.Deserialize<JsonElement>("{\"uri\":\"" + ServerInstructions.GuideUri + "\"}"), cts.Token);
+            Check("aker://guide reads without forwarding to the engine",
+                guideRead.Contents.Count == 1 && (guideRead.Contents[0].Text ?? "").Length > 2000
+                && guideRead.Contents[0].MimeType == "text/markdown");
+
             // tools/list exposes the new tools
             var names = new HashSet<string>();
             foreach (var t in reg.ListTools().Tools) names.Add(t.Name);

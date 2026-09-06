@@ -83,6 +83,13 @@ namespace AkerMcp.Server
                 "Current script compilation status with errors and warnings",
                 "text/plain",
                 ct => _engine.ForwardResourceRead("get_compile_status", ct));
+
+            // Served by the server itself: readable before any engine connects.
+            Register(ServerInstructions.GuideUri, "AkerMCP guide",
+                "How to drive the engine well: inspect, modify, verify; property paths; " +
+                "execute rules; screenshots; recovering from a modal dialog.",
+                "text/markdown",
+                _ => Task.FromResult(ServerInstructions.Guide));
         }
 
         private void Register(string uri, string name, string description,

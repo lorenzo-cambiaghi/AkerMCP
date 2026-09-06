@@ -1781,7 +1781,9 @@ engine-appropriate API and prefer scalars. Example: verify a jump —
                     Name = name,
                     Description = description,
                     InputSchema = inputSchema,
-                    Annotations = annotations
+                    // The table is the one place the four hints are decided; the
+                    // per-call argument only covers a tool the table does not know.
+                    Annotations = ToolAnnotationTable.For(name, annotations)
                 },
                 Handler = handler
             };

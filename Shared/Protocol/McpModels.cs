@@ -33,6 +33,12 @@ namespace AkerMcp.Shared.Protocol
 
         [JsonPropertyName("serverInfo")]
         public ImplementationInfo ServerInfo { get; set; } = new();
+
+        // Usage guidance the client hands to the model with the tool list. Optional
+        // in the protocol; omitted from the wire when null.
+        [JsonPropertyName("instructions")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Instructions { get; set; }
     }
 
     public class ServerCapabilities
@@ -92,21 +98,24 @@ namespace AkerMcp.Shared.Protocol
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? Title { get; set; }
 
+        // Nullable on purpose: the protocol's defaults for an absent hint are the
+        // pessimistic ones (destructive, open-world), so "false" must reach the
+        // wire, and only a hint nobody set is left out.
         [JsonPropertyName("readOnlyHint")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-        public bool ReadOnlyHint { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? ReadOnlyHint { get; set; }
 
         [JsonPropertyName("destructiveHint")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-        public bool DestructiveHint { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? DestructiveHint { get; set; }
 
         [JsonPropertyName("idempotentHint")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-        public bool IdempotentHint { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? IdempotentHint { get; set; }
 
         [JsonPropertyName("openWorldHint")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-        public bool OpenWorldHint { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? OpenWorldHint { get; set; }
     }
 
     public class ToolCallParams
