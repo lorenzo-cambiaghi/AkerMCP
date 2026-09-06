@@ -5,10 +5,10 @@
 ![MCP](https://img.shields.io/badge/mcp-compatible-green.svg)
 
 <p align="center">
-  <img src="readmeData/AkerMCP.png" alt="AkerMCP — Aker, the twin lions, bridging the AI and the game engine" width="680">
+  <img src="readmeData/AkerMCP.png" alt="AkerMCP: Aker, the twin lions, bridging the AI and the game engine" width="680">
 </p>
 
-> *Aker (Egyptian: ꜣkr) was an ancient Egyptian earth god, depicted as **two lions seated back-to-back** facing opposite horizons — Sef and Duau (Yesterday and Today) — guarding the sun's safe passage through the underworld. In this architecture, Aker is the bridge: one face speaking **JSON-RPC to the LLM**, the other manipulating the **engine's main thread via IPC**.*
+> *Aker (Egyptian: ꜣkr) was an ancient Egyptian earth god, depicted as **two lions seated back-to-back** facing opposite horizons, Sef and Duau (Yesterday and Today), guarding the sun's safe passage through the underworld. In this architecture, Aker is the bridge: one face speaking **JSON-RPC to the LLM**, the other manipulating the **engine's main thread via IPC**.*
 
 AkerMCP is an MCP server that lets an AI client (Claude Code, Cursor, Copilot, Antigravity, any stdio MCP client) work inside a running C# game editor: read the scene, change it with undo, run C# on the editor's main thread, take a screenshot, enter play mode and check what happened. One server and one tool set for three engines, Unity, Godot and Stride Game Studio, each behind a small adapter over the same core.
 
@@ -29,7 +29,7 @@ AI: "Set the player's position to (10, 0, 5)"
 |---|:--:|:--:|:--:|
 | Inspect · query · get/set property (incl. nested) | ✅ | ✅ | ✅ |
 | `call_method` · `create` · `delete` (native Undo) | ✅ | ✅ | ✅ |
-| `execute` — arbitrary C# via Roslyn | ✅ | ✅ | ✅ |
+| `execute`: arbitrary C# via Roslyn | ✅ | ✅ | ✅ |
 | Selection · console logs · recompile/compile-errors | ✅ | ✅ | ✅ |
 | Scene-view screenshot **with editor gizmos** | ✅ | ✅ | ✅ |
 | Platform/build tools (list · switch · build_player) | ✅ | ✅ | ✅ |
@@ -85,7 +85,7 @@ Details: [Architecture](#architecture) and [Writing an Engine Adapter](#writing-
 
 ## Quick Start (Recommended)
 
-Two steps: **(1)** install the adapter for your engine — Unity, Godot, or Stride (they are peers; pick the one you use), then **(2)** run the standalone MCP server, which is identical for all of them and auto-discovers whichever engine is running.
+Two steps: **(1)** install the adapter for your engine, Unity, Godot or Stride (they are peers; pick the one you use), then **(2)** run the standalone MCP server, which is identical for all of them and auto-discovers whichever engine is running.
 
 ### 1a. Unity Setup
 
@@ -102,10 +102,10 @@ Two steps: **(1)** install the adapter for your engine — Unity, Godot, or Stri
 
 ### 1b. Godot Setup
 
-AkerMCP ships a **Godot 4.x (.NET/C#) adapter** with the **same full toolset** as Unity. Because a Godot project is a real `.csproj`, there are no DLLs to copy — references and the Roslyn engine come via NuGet/ProjectReference.
+AkerMCP ships a **Godot 4.x (.NET/C#) adapter** with the **same full toolset** as Unity. Because a Godot project is a real `.csproj`, there are no DLLs to copy: references and the Roslyn engine come via NuGet/ProjectReference.
 
 1. Download `AkerMcp.Godot-addon.zip` from the [latest Release](https://github.com/lorenzo-cambiaghi/AkerMCP/releases/latest) and extract it so you get `addons/aker_mcp/` in your Godot project (or copy this repo's `plugins/godot` folder into your project as `addons/aker_mcp`).
-2. Add the AkerMcp core to your game's `.csproj` (or use the included `samples/godot` project directly — run `setup-samples` first to link the addon):
+2. Add the AkerMcp core to your game's `.csproj` (or use the included `samples/godot` project directly; run `setup-samples` first to link the addon):
    ```xml
    <ProjectReference Include="path/to/AkerMcp.Shared.csproj" />
    <ProjectReference Include="path/to/AkerMcp.Client.csproj" />
@@ -114,15 +114,15 @@ AkerMCP ships a **Godot 4.x (.NET/C#) adapter** with the **same full toolset** a
    Make sure your project has `<EnableDynamicLoading>true</EnableDynamicLoading>` (required for editor plugins).
 3. Build the C# solution once (**Project → Tools → C#: Create/Build**), then enable the plugin under **Project → Project Settings → Plugins → AkerMcp**.
 
-The plugin auto-starts with the editor and pumps requests on the main thread every frame. Scene paths follow the edited scene root (e.g. `/TestScene/Box`), property paths are case-insensitive (`position.x` resolves to `Position.X`), and screenshots capture the editor's 3D viewport. The standalone MCP server discovers the Godot plugin automatically — no server changes needed.
+The plugin auto-starts with the editor and pumps requests on the main thread every frame. Scene paths follow the edited scene root (e.g. `/TestScene/Box`), property paths are case-insensitive (`position.x` resolves to `Position.X`), and screenshots capture the editor's 3D viewport. The standalone MCP server discovers the Godot plugin automatically, with no server changes.
 
 ### 1c. Stride Setup
 
-AkerMCP ships a **Stride (Game Studio) adapter** with the **same full toolset** — including undoable edits via Stride's Quantum graph, `execute` (Roslyn), real Scene-view screenshots (editor back-buffer, with gizmos), and the platform/build tools (`dotnet build` per executable project).
+AkerMCP ships a **Stride (Game Studio) adapter** with the **same full toolset**, including undoable edits via Stride's Quantum graph, `execute` (Roslyn), real Scene-view screenshots (editor back-buffer, with gizmos), and the platform/build tools (`dotnet build` per executable project).
 
 > Stride support runs as a Game Studio editor plugin. Game Studio has no third-party plugin discovery, so AkerMcp registers itself with one tiny bootstrap. Pick the path that matches how you got Stride.
 
-#### Option A — Stride installed from the Launcher (official binaries, no Stride rebuild) — recommended
+#### Option A (recommended): Stride installed from the Launcher, official binaries, no Stride rebuild
 
 A per-launch wrapper injects the plugin **only into the Game Studio process it starts**, via the .NET runtime's `DOTNET_STARTUP_HOOKS`. The variable is never written to your user/machine environment, so it cannot affect any other .NET app; if the plugin DLL is ever missing, the wrapper just launches Game Studio without AkerMcp.
 
@@ -132,9 +132,9 @@ A per-launch wrapper injects the plugin **only into the Game Studio process it s
 # (omit -GameStudioPath to auto-detect a Launcher install)
 ```
 
-This builds the adapter against your installed Game Studio, drops it into `<GameStudio>/AkerMcpPlugins`, and creates a **"Stride Game Studio (AkerMCP)"** shortcut (Desktop + Start Menu). Launch Stride from that shortcut and **open a project + scene** — the pipe server starts automatically. Your official Stride shortcut keeps launching Game Studio untouched. Remove everything with `.\install-stride-wrapper.ps1 -Uninstall`.
+This builds the adapter against your installed Game Studio, drops it into `<GameStudio>/AkerMcpPlugins`, and creates a **"Stride Game Studio (AkerMCP)"** shortcut (Desktop + Start Menu). Launch Stride from that shortcut and **open a project + scene**; the pipe server starts automatically. Your official Stride shortcut keeps launching Game Studio untouched. Remove everything with `.\install-stride-wrapper.ps1 -Uninstall`.
 
-#### Option B — You build Stride Game Studio from source
+#### Option B: you build Stride Game Studio from source
 
 The adapter loads in-process via a drop-in loader patched into Game Studio itself (no wrapper needed).
 
@@ -149,9 +149,9 @@ The adapter loads in-process via a drop-in loader patched into Game Studio itsel
                          AssetsPlugin.RegisterPlugin(t); }
            catch { /* skip incompatible DLLs */ }
    ```
-3. Build + deploy the adapter into Game Studio with `setup-stride.ps1` (set `-StrideBin` to your Game Studio build output), then launch Game Studio and **open a project + scene** — the plugin starts the pipe server when a project opens.
+3. Build + deploy the adapter into Game Studio with `setup-stride.ps1` (set `-StrideBin` to your Game Studio build output), then launch Game Studio and **open a project + scene**; the plugin starts the pipe server when a project opens.
 
-Either way, the standalone MCP server then discovers the Stride engine automatically — same as Unity/Godot.
+Either way, the standalone MCP server then discovers the Stride engine automatically, the same as Unity and Godot.
 
 ### 2. MCP Server Setup
 1. Go to the [latest GitHub Release](https://github.com/lorenzo-cambiaghi/AkerMCP/releases/latest).
@@ -259,7 +259,7 @@ claude mcp add game-engine -- dotnet run --project /absolute/path/to/AkerMCP/Ser
 
 If you want to modify AkerMCP or test the included Unity project, you'll need the **.NET 8.0+ SDK**.
 
-### Step 1 — Clone and Build
+### Step 1: clone and build
 ```bash
 git clone https://github.com/lorenzo-cambiaghi/AkerMCP.git
 cd AkerMCP
@@ -267,7 +267,7 @@ dotnet build -c Release
 dotnet publish Shared/AkerMcp.Shared.csproj -c Release -o .publish
 ```
 
-### Step 2 — Unity Plugin Setup
+### Step 2: Unity plugin setup
 If you are modifying the source code and want to push changes to your own Unity project:
 1. Copy this repo's `plugins/unity` folder into your own Unity project as `Assets/AkerMcp`.
 2. Create `Assets/AkerMcp/Plugins/` and copy all `.dll` files from `.publish/` and `Client/bin/Release/netstandard2.1/`.
@@ -278,7 +278,7 @@ If you just want to run the included sample, run `./setup-samples.sh` (or `setup
 ### Packaging a Release
 On Windows, `.\publish-release.ps1 -Version v1.2.3` does the whole release in one command: builds the packages (Unity must be closed), tags the commit, creates the [GitHub Release](https://github.com/lorenzo-cambiaghi/AkerMCP/releases) and uploads the five artifacts via the GitHub API (auth via `GITHUB_TOKEN` or the stored git credential). Use `-DryRun` to preview, `-SkipBuild` to reuse existing `Build/` output.
 
-The six release artifacts are: `AkerMCP.unitypackage` (Unity plugin), `AkerMcp.Godot-addon.zip` (Godot addon — extract into your project's `addons/`), `AkerMcp.Stride-source.zip` (Stride adapter **source** + `install-stride-wrapper.ps1` — build it against your Game Studio per [1c. Stride Setup](#1c-stride-setup); it is not a prebuilt binary because it links your specific Stride editor assemblies), and the three standalone server builds (`AkerMcp.Server-{win,osx,linux}-x64.zip`).
+The six release artifacts are: `AkerMCP.unitypackage` (Unity plugin), `AkerMcp.Godot-addon.zip` (Godot addon; extract into your project's `addons/`), `AkerMcp.Stride-source.zip` (Stride adapter **source** + `install-stride-wrapper.ps1`; build it against your Game Studio per [1c. Stride Setup](#1c-stride-setup); it is not a prebuilt binary because it links your specific Stride editor assemblies), and the three standalone server builds (`AkerMcp.Server-{win,osx,linux}-x64.zip`).
 
 Alternatively, run `build-package.bat` (Windows) or `./build-package.sh` (Mac/Linux) to only produce the artifacts in the local `Build/` folder (gitignored), then upload them as release assets manually. Binaries are distributed via Releases, not committed to the repository.
 
@@ -288,8 +288,8 @@ Alternatively, run `build-package.bat` (Windows) or `./build-package.sh` (Mac/Li
 
 Once both the Unity plugin and an AI client are running, you can verify the connection:
 
-1. **In Unity** — the AkerMcp window should show **Running** (green)
-2. **In the AI client** — ask the AI to use the `inspect` tool:
+1. **In Unity**: the AkerMcp window should show **Running** (green)
+2. **In the AI client**: ask the AI to use the `inspect` tool:
 
 ```
 "Inspect the scene hierarchy"
@@ -354,7 +354,7 @@ Every tool carries the four MCP hints (read-only, destructive, idempotent, open-
 
 > **Engine support:** all three engines implement these. `create_sprite` imports + places a sprite on **Unity** and **Godot**; on **Stride** it persists a real `.sdtex` texture asset in the package (via the editor's `SessionViewModel`) and also adds a runtime preview entity for immediate visibility. `new_scene`/`open_scene`/`save_scene` work on **Unity** and **Godot** (file-on-disk scenes) and on **Stride** (package-managed `SceneAsset` via the editor). `write_script` works on all three. *(Stride's `create_sprite` + scene creation are verified live in Game Studio.)*
 
-**`create_sprite` shape-spec** — drawn in order (painter's): `ellipse`, `rect` (with `rx` for rounded corners), `polygon`, `line`/`polyline`, and `path` (an SVG path-data subset). Each shape takes a `fill` (hex or linear `gradient`), optional `stroke`/`strokeWidth`, and `opacity`. Example (a flat bird placeholder):
+**`create_sprite` shape-spec**: drawn in order (painter's): `ellipse`, `rect` (with `rx` for rounded corners), `polygon`, `line`/`polyline`, and `path` (an SVG path-data subset). Each shape takes a `fill` (hex or linear `gradient`), optional `stroke`/`strokeWidth`, and `opacity`. Example (a flat bird placeholder):
 
 ```json
 {
@@ -366,7 +366,7 @@ Every tool carries the four MCP hints (read-only, destructive, idempotent, open-
 }
 ```
 
-> Keep placeholders flat and geometric — recognizable silhouette over detail. For arbitrary SVG (boolean paths, filters, tracing) a dedicated vector tool would be the right home; `create_sprite` deliberately targets the clean-prototype niche.
+> Keep placeholders flat and geometric: recognizable silhouette over detail. For arbitrary SVG (boolean paths, filters, tracing) a dedicated vector tool would be the right home; `create_sprite` deliberately targets the clean-prototype niche.
 
 ### Runtime loop
 
@@ -380,12 +380,12 @@ Every tool carries the four MCP hints (read-only, destructive, idempotent, open-
 | `capture_sequence` | full | Several screenshots at an interval, returned as a strip, to see motion |
 
 > **Engine support:** the runtime loop is backed by the optional `IPlayModeController` (play control) and the optional `IInputSimulator` (in-process input, with an OS-level fallback). Support is honest per engine:
-> - **Unity** — full: Play Mode runs in the Game View, so `take_screenshot`/`capture_sequence` capture the live game; pause/step supported. Reuses the domain-reload reconnect from `refresh_scripts`.
-> - **Godot** — partial: the game runs in a **separate window** (screenshot it with `capture_window`, drive it with `send_input`'s OS-level path + `window_title`); no editor-side pause/step.
-> - **Stride** — Game Studio has no plugin-controllable Play Mode; `enter_play` reports this and points you to `build_player` + running the produced executable.
-> - **SkelForge** — full: "play" plays the animation timeline in-editor; pause + frame-step supported; the viewport shows the pose.
+> - **Unity**, full: Play Mode runs in the Game View, so `take_screenshot`/`capture_sequence` capture the live game; pause/step supported. Reuses the domain-reload reconnect from `refresh_scripts`.
+> - **Godot**, partial: the game runs in a **separate window** (screenshot it with `capture_window`, drive it with `send_input`'s OS-level path + `window_title`); no editor-side pause/step.
+> - **Stride**: Game Studio has no plugin-controllable Play Mode; `enter_play` reports this and points you to `build_player` + running the produced executable.
+> - **SkelForge**, full: "play" plays the animation timeline in-editor; pause + frame-step supported; the viewport shows the pose.
 >
-> `send_input` prefers an engine's in-process `IInputSimulator`, otherwise focuses the game/engine window and injects via **OS-level `SendInput`** (Windows; macOS/Linux report unsupported). On **Unity** the in-process path drives the **new Input System** (`com.unity.inputsystem`) directly — resolved via reflection, so there is no hard package dependency; projects on the legacy Input Manager (or without the package) fall back to OS-level automatically. On **Godot/Stride** the game is a separate window, so pass `window_title` (the game window's title) or the OS-level path targets the editor. The `action` event type is reserved but not yet injectable — drive the key/mouse controls the action is bound to.
+> `send_input` prefers an engine's in-process `IInputSimulator`, otherwise focuses the game/engine window and injects via **OS-level `SendInput`** (Windows; macOS/Linux report unsupported). On **Unity** the in-process path drives the **new Input System** (`com.unity.inputsystem`) directly, resolved via reflection, so there is no hard package dependency; projects on the legacy Input Manager (or without the package) fall back to OS-level automatically. On **Godot/Stride** the game is a separate window, so pass `window_title` (the game window's title) or the OS-level path targets the editor. The `action` event type is reserved but not yet injectable; drive the key/mouse controls the action is bound to.
 
 ### Verify and iterate
 
@@ -420,11 +420,11 @@ These three are how the model recovers from a modal dialog that blocks the edito
 
 The tool follows a **hybrid capture strategy** that prefers quality but always succeeds:
 
-1. **Engine-internal path** *(implemented by all three adapters)* — captures the Scene view directly from the editor's render buffer **including gizmos** (Unity `GrabPixels`, Godot viewport, Stride editor back-buffer via `Texture.Save`). Works even when the editor window is occluded or partially off-screen. Highest quality.
-2. **OS-level fallback** *(automatic, cross-platform on Windows + macOS)* — captures the engine's main window without stealing foreground focus. Works for any C# engine without requiring adapter code. Per-OS implementation is selected at runtime:
-   - **Windows** — Win32 `PrintWindow(PW_RENDERFULLCONTENT)` via `user32.dll`
-   - **macOS** — Quartz `CGWindowListCreateImage` via `CoreGraphics.framework` + `ImageIO.framework`. Window discovery: enumerates on-screen windows owned by the engine PID; among those, prefers any whose title contains the engine name (anywhere — matches both "Unity 6000…" and "… Godot Engine") and within that subset picks the largest by area. If no title contains the engine name, falls back to the largest PID-owned window
-   - **Linux** — not implemented; the engine adapter must implement `IScreenCapture`
+1. **Engine-internal path** *(implemented by all three adapters)*: captures the Scene view directly from the editor's render buffer **including gizmos** (Unity `GrabPixels`, Godot viewport, Stride editor back-buffer via `Texture.Save`). Works even when the editor window is occluded or partially off-screen. Highest quality.
+2. **OS-level fallback** *(automatic, cross-platform on Windows + macOS)*: captures the engine's main window without stealing foreground focus. Works for any C# engine without requiring adapter code. Per-OS implementation is selected at runtime:
+   - **Windows**: Win32 `PrintWindow(PW_RENDERFULLCONTENT)` via `user32.dll`
+   - **macOS**: Quartz `CGWindowListCreateImage` via `CoreGraphics.framework` + `ImageIO.framework`. Window discovery: enumerates on-screen windows owned by the engine PID; among those, prefers any whose title contains the engine name (anywhere; it matches both "Unity 6000…" and "… Godot Engine") and within that subset picks the largest by area. If no title contains the engine name, falls back to the largest PID-owned window
+   - **Linux**: not implemented; the engine adapter must implement `IScreenCapture`
 
 Output is automatically (cross-platform via ImageSharp):
 - **Resized** to a maximum of 1920px on the longest side
@@ -435,7 +435,7 @@ Typical output size: **~150-400 KB**, comfortably under Claude API image limits 
 **Parameters:**
 
 ```json
-{ "view": "game" }   // default — captures the Game View
+{ "view": "game" }   // default: captures the Game View
 { "view": "scene" }  // captures the active Scene View with gizmos (Unity / Godot / Stride)
 ```
 
@@ -451,7 +451,7 @@ Typical output size: **~150-400 KB**, comfortably under Claude API image limits 
 
 #### macOS: Screen Recording permission
 
-On macOS 10.15+, capturing windows from another process requires **Screen Recording permission** for the binary running the AkerMcp server. This affects only the OS-level path (`capture_window` and the `take_screenshot` fallback) — the engine-internal `IScreenCapture` path (implemented by all three engine adapters) works without any permission grant.
+On macOS 10.15+, capturing windows from another process requires **Screen Recording permission** for the binary running the AkerMcp server. This affects only the OS-level path (`capture_window` and the `take_screenshot` fallback); the engine-internal `IScreenCapture` path (implemented by all three engine adapters) works without any permission grant.
 
 **First-time setup:**
 
@@ -460,7 +460,7 @@ On macOS 10.15+, capturing windows from another process requires **Screen Record
 3. Add (or enable the toggle for) the binary running AkerMcp:
    - If you launch via `dotnet run --project Server` → the entry is `dotnet` (or `dotnet [version]`)
    - If you ship a self-contained build → the entry is your published executable
-4. **Restart the server.** macOS caches the denial decision until the process restarts — granting alone is not enough.
+4. **Restart the server.** macOS caches the denial decision until the process restarts; granting alone is not enough.
 
 **Verification:**
 
@@ -474,7 +474,7 @@ On macOS 10.15+, capturing windows from another process requires **Screen Record
 
 ### Dynamic Code Execution (`execute`)
 
-The `execute` tool runs arbitrary C# code inside the live editor — **Unity, Godot, or Stride** — using Roslyn. This is the most powerful tool: it can do anything that engine's editor API allows, with no fixed tool surface.
+The `execute` tool runs arbitrary C# code inside the live editor, **Unity, Godot or Stride**, using Roslyn. This is the most powerful tool: it can do anything that engine's editor API allows, with no fixed tool surface.
 
 **What it enables:**
 
@@ -495,11 +495,11 @@ The `execute` tool runs arbitrary C# code inside the live editor — **Unity, Go
 | `Create(name)` | `GameObject` | Create a new empty GameObject |
 | `Log(message)` | `void` | Log to the Unity console |
 
-**Imported namespaces** (no `using` needed): `System`, `System.Collections.Generic`, `System.Linq`, plus the engine's namespaces — `UnityEngine`/`UnityEditor` (Unity), `Godot` (Godot), `Stride.Engine`/`Stride.Core.Mathematics` (Stride).
+**Imported namespaces** (no `using` needed): `System`, `System.Collections.Generic`, `System.Linq`, plus the engine's namespaces: `UnityEngine`/`UnityEditor` (Unity), `Godot` (Godot), `Stride.Engine`/`Stride.Core.Mathematics` (Stride).
 
-Need another namespace? Add `using ...;` directives at the **top** of the snippet — they are hoisted to file scope automatically (e.g. `using System.IO;`).
+Need another namespace? Add `using ...;` directives at the **top** of the snippet; they are hoisted to file scope automatically (e.g. `using System.IO;`).
 
-**Declaring types works too.** A snippet is wrapped as a method body, but `class`, `struct`, `interface`, `enum`, `record` and `delegate` declarations are lifted to file scope before compiling — so helper classes, fake implementations of an interface, callback receivers and `MonoBehaviour`s you then `AddComponent` all work directly, with no reflection workarounds. Access modifiers are adjusted for you (`private class Foo` is accepted), and local functions inside the body keep working as usual.
+**Declaring types works too.** A snippet is wrapped as a method body, but `class`, `struct`, `interface`, `enum`, `record` and `delegate` declarations are lifted to file scope before compiling, so helper classes, fake implementations of an interface, callback receivers and `MonoBehaviour`s you then `AddComponent` all work directly, with no reflection workarounds. Access modifiers are adjusted for you (`private class Foo` is accepted), and local functions inside the body keep working as usual.
 
 **Examples** (Unity-flavored; the same patterns apply with each engine's API):
 
@@ -535,7 +535,7 @@ var types = objects
 return string.Join("\n", types);
 ```
 
-> **Note:** Each `execute` call is compiled and run independently — variables do **not** persist between calls, so every script must be self-contained. The evaluator runs on Unity's main thread with full Editor API access; `Debug.Log` output produced during the run is captured and returned in the `output` field.
+> **Note:** Each `execute` call is compiled and run independently: variables do **not** persist between calls, so every script must be self-contained. The evaluator runs on Unity's main thread with full Editor API access; `Debug.Log` output produced during the run is captured and returned in the `output` field.
 
 ### How property paths work
 
@@ -568,13 +568,13 @@ When a property name is ambiguous (e.g. `enabled` exists on multiple components)
 
 The serializer converts between JSON and .NET types via reflection. It handles:
 
-- **Primitives** — `int`, `float`, `double`, `bool`, `string`, `enum`
-- **Structs** — any value type, constructed from JSON via field/property matching
-- **Arrays** — `T[]` from JSON arrays
-- **Lists** — `List<T>` from JSON arrays
-- **Dictionaries** — `Dictionary<string, T>` from JSON objects
-- **Nested types** — recursive resolution (e.g. `Bounds` containing `Vector3` fields)
-- **Nullable** — automatic unwrap
+- **Primitives**: `int`, `float`, `double`, `bool`, `string`, `enum`
+- **Structs**: any value type, constructed from JSON via field/property matching
+- **Arrays**: `T[]` from JSON arrays
+- **Lists**: `List<T>` from JSON arrays
+- **Dictionaries**: `Dictionary<string, T>` from JSON objects
+- **Nested types**: recursive resolution (e.g. `Bounds` containing `Vector3` fields)
+- **Nullable**: automatic unwrap
 
 The Unity adapter registers optimized converters for:
 
@@ -662,8 +662,8 @@ JSON examples:
 | Project | Target | Description |
 |---------|--------|-------------|
 | `AkerMcp.Shared` | netstandard2.1 | Protocol models, engine abstractions, reflection engine, serialization, IPC |
-| `AkerMcp.Server` | net8.0 | MCP server — JSON-RPC over stdio, routes tool calls to the engine plugin |
-| `AkerMcp.Client` | netstandard2.1 | Plugin base class — runs inside the engine, handles IPC and main-thread dispatch |
+| `AkerMcp.Server` | net8.0 | MCP server: JSON-RPC over stdio, routes tool calls to the engine plugin |
+| `AkerMcp.Client` | netstandard2.1 | Plugin base class: runs inside the engine, handles IPC and main-thread dispatch |
 
 ### How it works
 
@@ -737,7 +737,7 @@ AkerMCP/
 │       └── GodotCodeExecutor.cs         Roslyn-powered C# execution engine
 │   └── stride/                         Stride (Game Studio) adapter (.csproj + sources)
 │       ├── StrideMcpPlugin.cs           AssetsPlugin entry (Game Studio hook)
-│       ├── StrideBootstrap.cs           Idempotent Register() — shared by both loaders
+│       ├── StrideBootstrap.cs           Idempotent Register(), shared by both loaders
 │       ├── StrideEnginePlugin.cs        EnginePluginBase (composed; hosts the IPC server)
 │       ├── StrideSceneGraph.cs          Live edited-scene traversal
 │       ├── StrideSceneNode.cs           Reflection wrapper for Entities + components
@@ -759,7 +759,7 @@ AkerMCP/
 └── setup-samples.bat / .sh             Recreates the sample junctions after a clone
 ```
 
-> The plugins under `plugins/` are the canonical, shippable source. The `samples/` projects are thin shells that link the plugin in via a directory junction (created by `setup-samples`), so there is a **single copy** of each adapter — the editor edits it in place. The junctions are gitignored; run `setup-samples` once after cloning.
+> The plugins under `plugins/` are the canonical, shippable source. The `samples/` projects are thin shells that link the plugin in via a directory junction (created by `setup-samples`), so there is a **single copy** of each adapter; the editor edits it in place. The junctions are gitignored; run `setup-samples` once after cloning.
 
 ---
 
@@ -799,13 +799,13 @@ public class MyEnginePlugin : EnginePluginBase
 | `IEditorContext` | Selection, scene management, console logs | No |
 | `IAssetManager` | Asset search, load, save, delete | No |
 | `ICompilationSupport` | Script recompilation, error retrieval | No |
-| `IScreenCapture` | Engine-internal render-buffer capture (Game/Scene view) | No — falls back to OS-level capture on Windows (`PrintWindow`) and macOS (Quartz). On Linux, this interface is required |
-| `ISpriteImporter` | Import a server-rasterized PNG as a 2D sprite, optionally placing it in the scene (powers `create_sprite`) | No — `create_sprite` reports it as unavailable if absent |
-| `ISceneManager` | Create / open / save scenes (powers `new_scene`/`open_scene`/`save_scene`) | No — the scene tools report it as unavailable if absent |
-| `IPlayModeController` | Start/stop play, pause/step, read play state (powers `enter_play`/`exit_play`/`set_play_pause`/`play_step`/`get_play_state`) | No — the play tools report NOT_SUPPORTED if absent |
-| `IInputSimulator` | Inject synthetic input in-process (powers `send_input`) | No — `send_input` falls back to OS-level window injection if absent |
+| `IScreenCapture` | Engine-internal render-buffer capture (Game/Scene view) | No; falls back to OS-level capture on Windows (`PrintWindow`) and macOS (Quartz). On Linux, this interface is required |
+| `ISpriteImporter` | Import a server-rasterized PNG as a 2D sprite, optionally placing it in the scene (powers `create_sprite`) | No; `create_sprite` reports it as unavailable if absent |
+| `ISceneManager` | Create / open / save scenes (powers `new_scene`/`open_scene`/`save_scene`) | No; the scene tools report it as unavailable if absent |
+| `IPlayModeController` | Start/stop play, pause/step, read play state (powers `enter_play`/`exit_play`/`set_play_pause`/`play_step`/`get_play_state`) | No; the play tools report NOT_SUPPORTED if absent |
+| `IInputSimulator` | Inject synthetic input in-process (powers `send_input`) | No; `send_input` falls back to OS-level window injection if absent |
 
-> **Tip for the macOS OS-level fallback:** `IEngineCapabilities.EngineName` is used as a window-title preference signal — the macOS capture path prefers PID-owned windows whose title *contains* this string (anywhere in the title) to disambiguate the editor's main window from inspector/floating panels. The match is case-insensitive and works for both prefix-style titles (Unity: `"Unity 6000.x …"`) and suffix-style titles (Godot: `"Scene - Project - Godot Engine"`). If no window matches, the largest PID-owned window is used as a fallback, so even a non-matching `EngineName` won't break the capture.
+> **Tip for the macOS OS-level fallback:** `IEngineCapabilities.EngineName` is used as a window-title preference signal: the macOS capture path prefers PID-owned windows whose title *contains* this string (anywhere in the title) to disambiguate the editor's main window from inspector/floating panels. The match is case-insensitive and works for both prefix-style titles (Unity: `"Unity 6000.x …"`) and suffix-style titles (Godot: `"Scene - Project - Godot Engine"`). If no window matches, the largest PID-owned window is used as a fallback, so even a non-matching `EngineName` won't break the capture.
 
 Register custom type converters for engine-specific structs:
 
@@ -834,7 +834,7 @@ A developer's Custom Voxel Ambient Occlusion (AO) was rendering completely flat,
   4. **3D Texture Readback:** Realizing the bug was in the Cone-Tracing pass, the AI wrote a complex script to perform a GPU readback of the `Texture3D` radiance buffer. Unity only returned the 0-depth slice by default, so the AI rewrote its script to iterate and aggregate all 104 volume layers.
   5. **The Smoking Gun:** By analyzing the aggregated buffer, the AI discovered the alpha channel was mirroring the raw occupancy data instead of the calculated AO. It immediately pinpointed the exact failure: an empty mip-map chain generation step meant the cones couldn't trace any occlusion.
 
-In just minutes, the AI diagnosed a complex, data-dependent GPU bug. It didn't just write code; it acted as a Technical Artist—triggering Editor pipelines, reading multidimensional arrays from VRAM, taking visual snapshots, and confirming hypotheses through interactive feedback.
+In just minutes, the AI diagnosed a complex, data-dependent GPU bug. It didn't just write code; it acted as a Technical Artist, triggering Editor pipelines, reading multidimensional arrays from VRAM, taking visual snapshots, and confirming hypotheses through interactive feedback.
 
 #### Case Study 2: The "Context-Aware" Shader Architect
 
@@ -846,7 +846,7 @@ In another session, the user wanted standard (non-voxel) meshes to react to the 
   2. It wrote an HLSL include file specifically tailored to the project's architectural quirks.
   3. Using the `execute` tool, the AI tapped into Unity's `AssetDatabase` to automatically create and save the `.hlsl` files in the correct `Assets/` directory.
   4. It didn't stop at the code. Recognizing that Unity Shader Graphs are JSON files under the hood, the AI used the `execute` tool to programmatically construct and save a complete `.shadergraph` asset directly into the project. This graph automatically wired up the new HLSL Custom Function Node to the PBR Master node.
-  5. **Visual A/B Testing (Zero User Input):** Finally, the AI didn't just assume it worked. It used `execute` to create a new Material using the generated shader, spawned two identical test objects in the scene—one with a standard shader, and one with the new Voxel GI shader—and applied the materials itself. It then took a `take_screenshot` to visually compare them side-by-side, proving the custom Global Illumination was contributing correctly, completely autonomously.
+  5. **Visual A/B Testing (Zero User Input):** Finally, the AI didn't just assume it worked. It used `execute` to create a new Material using the generated shader, spawned two identical test objects in the scene, one with a standard shader and one with the new Voxel GI shader, and applied the materials itself. It then took a `take_screenshot` to visually compare them side-by-side, proving the custom Global Illumination was contributing correctly, completely autonomously.
 
 AkerMCP turns the AI from a simple "code generator" into an autonomous Technical Artist that not only writes the shaders, but natively integrates them into the engine's asset pipeline.
 
@@ -888,11 +888,11 @@ Prefix the property with the component type name: `Rigidbody.mass` instead of ju
 
 **Connection drops after Unity recompiles scripts**
 
-Domain reload in Unity tears down the plugin to safely release file locks. Re-click **Start** in the AkerMcp window after a recompile. The MCP server features an infinite background retry loop and will automatically detect the new instance and reconnect—you do **not** need to restart the server.
+Domain reload in Unity tears down the plugin to safely release file locks. Re-click **Start** in the AkerMcp window after a recompile. The MCP server features an infinite background retry loop and will automatically detect the new instance and reconnect; you do **not** need to restart the server.
 
 **macOS: `take_screenshot` returns "macOS denied the screen capture"**
 
-Only happens when the OS-level fallback is used (engine adapter doesn't implement `IScreenCapture`). Open **System Settings → Privacy & Security → Screen Recording**, enable the entry for the binary running the server (typically `dotnet`), then **restart the server** — macOS caches the denial decision until the process restarts. See [macOS: Screen Recording permission](#macos-screen-recording-permission) for the full procedure.
+Only happens when the OS-level fallback is used (engine adapter doesn't implement `IScreenCapture`). Open **System Settings → Privacy & Security → Screen Recording**, enable the entry for the binary running the server (typically `dotnet`), then **restart the server**; macOS caches the denial decision until the process restarts. See [macOS: Screen Recording permission](#macos-screen-recording-permission) for the full procedure.
 
 **macOS: `take_screenshot` returns "No on-screen window found for PID"**
 
