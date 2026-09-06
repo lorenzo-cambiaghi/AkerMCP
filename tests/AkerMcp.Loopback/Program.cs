@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -81,9 +82,45 @@ namespace AkerMcp.Loopback
 
             // The handshake carries the workflow; the full playbook is a resource that
             // needs no engine.
-            var hs = ServerInstructions.Handshake;
+            var hs = ServerInstructions.Handshake(registered, System.Array.Empty<string>(), "full");
             Check("handshake instructions are compact", hs.Length > 600 && hs.Length < 2500, hs.Length.ToString());
             Check("handshake names the inspect/modify/verify order and the guide", hs.Contains("inspect") && hs.Contains(ServerInstructions.GuideUri));
+            var coreHs = ServerInstructions.Handshake(ToolProfiles.Core, new[] { "playtest", "build_player" }, "core");
+            Check("core handshake lists the hidden tools and how to load them",
+                coreHs.Contains("not loaded: playtest, build_player") && coreHs.Contains("--profile full") && !coreHs.Contains("modal dialog"));
+
+            // Profiles: nested, complete, and what each one costs on the wire. Every
+            // character of tools/list sits in the model's context on every turn; the
+            // budgets are what stop the descriptions from growing back.
+            Check("profiles nest: core < standard < full == registered",
+                ToolProfiles.Core.Length < ToolProfiles.Standard.Length && ToolProfiles.Standard.Length < ToolProfiles.Full.Length
+                && new HashSet<string>(ToolProfiles.Full).SetEquals(registered),
+                $"core {ToolProfiles.Core.Length}, standard {ToolProfiles.Standard.Length}, full {ToolProfiles.Full.Length}, registered {registered.Count}");
+            var wire = new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
+            // Measured 2026-09-06: 9,117 / 16,000 / 26,817 (before the diet the full list was 36,303
+            // with no annotations and 40,466 with them). Raise a ceiling only with a reason next to it.
+            var budget = new Dictionary<string, int> { ["core"] = 10_000, ["standard"] = 17_500, ["full"] = 29_500 };
+            foreach (var profile in new[] { "core", "standard", "full" })
+            {
+                var r2 = new ToolRegistry(engine);
+                var (kept, dropped) = r2.ApplyProfile(profile);
+                var size = JsonSerializer.Serialize(r2.ListTools().Tools, wire).Length;
+                Check($"profile {profile}: {kept.Count} tools, tools/list {size} chars within {budget[profile]}",
+                    size <= budget[profile] && kept.Count + dropped.Count == registered.Count);
+            }
+            var (inc, _) = new ToolRegistry(engine).ApplyProfile("core", include: new[] { "playtest" }, exclude: new[] { "delete" });
+            Check("include/exclude adjust a profile by name", inc.Contains("playtest") && !inc.Contains("delete"));
+            var hiddenCall = await Call(new ToolRegistry(engine).Tap(r => r.ApplyProfile("core")), "playtest", new { });
+            Check("calling a hidden tool names the profile and the fix", Text(hiddenCall).Contains("not loaded in tool profile 'core'") && Text(hiddenCall).Contains("--profile full"), Text(hiddenCall));
+            var tooLong = new List<string>();
+            foreach (var t in reg.ListTools().Tools)
+            {
+                if (string.IsNullOrWhiteSpace(t.Description) || t.Description.Length > 800) tooLong.Add($"{t.Name}({t.Description?.Length ?? 0})");
+                if (t.InputSchema.GetRawText().Contains("\"title\":\"")) tooLong.Add($"{t.Name}(schema title)");
+            }
+            Check("every description is present and under 800 chars, no schema titles", tooLong.Count == 0, string.Join(", ", tooLong));
+            var titledParam = reg.ListTools().Tools.First(t => t.Name == "capture_window").InputSchema.GetRawText();
+            Check("a parameter named 'title' survives the title strip", titledParam.Contains("\"title\": {") || titledParam.Contains("\"title\":{"));
             var resources = new ResourceRegistry(engine);
             Check("aker://guide is listed", resources.ListResources().Resources.Exists(r => r.Uri == ServerInstructions.GuideUri));
             var guideRead = await resources.ReadResource(
@@ -205,6 +242,8 @@ namespace AkerMcp.Loopback
         }
 
         private static string Text(ToolResult r) => r.Content.Count > 0 ? (r.Content[0].Text ?? "") : "";
+
+        private static ToolRegistry Tap(this ToolRegistry r, System.Action<ToolRegistry> f) { f(r); return r; }
 
         /// <summary>
         /// The engine named under "connected" — NOT anywhere in the blob. engine_status also lists

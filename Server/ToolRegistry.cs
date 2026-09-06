@@ -14,6 +14,15 @@ namespace AkerMcp.Server
     {
         private readonly Dictionary<string, RegisteredTool> _tools = new Dictionary<string, RegisteredTool>();
         private readonly EngineConnection _engine;
+
+        /// <summary>The tool profile applied by <see cref="ApplyProfile"/>, or "full" before it runs.</summary>
+        public string Profile { get; private set; } = "full";
+
+        /// <summary>Tools the profile hid, in registration order; named in the handshake so the model can ask for them.</summary>
+        public IReadOnlyList<string> HiddenTools { get; private set; } = new List<string>();
+
+        /// <summary>Registered tool names, in registration order.</summary>
+        public IEnumerable<string> ToolNames => _tools.Keys;
         private readonly JsonSerializerOptions _jsonOptions;
 
         // Set from a separate-window game's PlayState.WindowTitle on enter_play (cleared on exit),
@@ -31,6 +40,21 @@ namespace AkerMcp.Server
             RegisterBuiltinTools();
         }
 
+        /// <summary>
+        /// Keep only the tools a profile wants (see <see cref="ToolProfiles"/>). Registration
+        /// stays complete and capability-driven; the profile is applied afterwards, so the
+        /// loopback test keeps seeing the full surface. Returns (kept, dropped).
+        /// </summary>
+        public (List<string> kept, List<string> dropped) ApplyProfile(
+            string profile, IEnumerable<string>? include = null, IEnumerable<string>? exclude = null)
+        {
+            var (kept, dropped) = ToolProfiles.Select(_tools.Keys.ToList(), profile, include, exclude);
+            foreach (var name in dropped) _tools.Remove(name);
+            Profile = profile;
+            HiddenTools = dropped;
+            return (kept, dropped);
+        }
+
         public ToolListResult ListTools()
         {
             var tools = new List<ToolDefinition>();
@@ -46,7 +70,13 @@ namespace AkerMcp.Server
                 return ToolResult.Error("Missing tool name");
 
             if (!_tools.TryGetValue(callParams.Name, out var tool))
+            {
+                if (HiddenTools.Contains(callParams.Name))
+                    return ToolResult.Error(
+                        $"Tool '{callParams.Name}' is not loaded in tool profile '{Profile}'. Start the server " +
+                        $"with --profile full, AKER_MCP_PROFILE=full, or AKER_MCP_TOOLS_INCLUDE={callParams.Name}.");
                 return ToolResult.Error($"Unknown tool: {callParams.Name}");
+            }
 
             try
             {
@@ -60,17 +90,7 @@ namespace AkerMcp.Server
 
         private void RegisterBuiltinTools()
         {
-            Register("inspect",
-                @"Inspect all properties, methods, and children of a scene object or type.
-ALWAYS call this BEFORE modifying any object. Never guess property names or component types.
-Follow the pattern: Inspect → Modify → Verify.
-
-Usage:
-- Pass a scene path (e.g. '/Player') to inspect a specific object.
-- Pass a type name (e.g. 'Rigidbody') to inspect a type's API.
-- Use 'depth: 2' to also inspect children's properties.
-- Use 'include_methods: true' to discover callable methods.
-- Use 'filter' (regex) to narrow results on large objects.",
+            Register("inspect", ToolDocs.Describe("inspect"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -84,14 +104,7 @@ Usage:
                 (args, ct) => _engine.ForwardToolCall("inspect", args, ct),
                 new ToolAnnotations { ReadOnlyHint = true });
 
-            Register("get_property",
-                @"Get the value of a property using dot-notation path. Use this to verify changes after set_property.
-
-Property path syntax:
-- Transform props need no prefix: 'position', 'rotation', 'localScale', 'eulerAngles'
-- Other components require a type prefix: 'Rigidbody.mass', 'Camera.fieldOfView', 'Light.intensity'
-- Nested access works: 'MeshRenderer.material.color.r'
-- Structs are returned as JSON objects: {""x"": 1.0, ""y"": 2.0, ""z"": 3.0}",
+            Register("get_property", ToolDocs.Describe("get_property"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -103,22 +116,7 @@ Property path syntax:
                 (args, ct) => _engine.ForwardToolCall("get_property", args, ct),
                 new ToolAnnotations { ReadOnlyHint = true });
 
-            Register("set_property",
-                @"Set the value of a property on a scene object. Supports undo. Use for single property changes.
-For bulk modifications (10+ objects), use the 'execute' tool instead.
-
-Property path syntax:
-- Transform props: 'position', 'localScale', 'eulerAngles' (no prefix needed)
-- Component props: 'Rigidbody.mass', 'Light.intensity', 'Camera.fieldOfView'
-- Nested: 'MeshRenderer.material.color'
-
-Value formats:
-- Primitives: 5, 3.14, true, ""hello""
-- Vector3: {""x"": 1, ""y"": 2, ""z"": 3}
-- Color: {""r"": 1.0, ""g"": 0.0, ""b"": 0.0, ""a"": 1.0}
-- Quaternion: {""x"": 0, ""y"": 0, ""z"": 0, ""w"": 1}
-
-Always verify after setting: call get_property or inspect to confirm the change.",
+            Register("set_property", ToolDocs.Describe("set_property"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -130,14 +128,7 @@ Always verify after setting: call get_property or inspect to confirm the change.
                 }"),
                 (args, ct) => _engine.ForwardToolCall("set_property", args, ct));
 
-            Register("call_method",
-                @"Invoke a method on a scene object or static class.
-Use for actions like SetActive, AddForce, AddComponent, or any static utility method.
-
-Examples:
-- target: '/Player', method: 'SetActive', args: ['false']
-- target: 'UnityEngine.Application', method: 'get_dataPath' (static)
-- All args are passed as strings and converted automatically.",
+            Register("call_method", ToolDocs.Describe("call_method"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -149,18 +140,7 @@ Examples:
                 }"),
                 (args, ct) => _engine.ForwardToolCall("call_method", args, ct));
 
-            Register("query",
-                @"Find objects in the scene by type, name pattern, property value, or tag.
-Use this when you don't know the exact path of an object.
-
-Examples:
-- Find all cameras: {""type_filter"": ""Camera""}
-- Find by name glob: {""name_pattern"": ""Enemy*""}
-- Find by tag: {""tag"": ""Player""}
-- Combine filters: {""type_filter"": ""Rigidbody"", ""name_pattern"": ""*Boss*""}
-- Limit results: {""max_results"": 10}
-
-Paths are case-sensitive. Returns an array of matching objects with their scene paths.",
+            Register("query", ToolDocs.Describe("query"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -174,14 +154,7 @@ Paths are case-sensitive. Returns an array of matching objects with their scene 
                 (args, ct) => _engine.ForwardToolCall("query", args, ct),
                 new ToolAnnotations { ReadOnlyHint = true });
 
-            Register("create",
-                @"Create a new object/node in the scene. Supports undo.
-For creating a single object with initial properties, use this tool. For spawning many objects or procedural generation, use 'execute' instead.
-
-Examples:
-- Empty object: {""type"": ""GameObject"", ""name"": ""Waypoint""}
-- Under a parent: {""type"": ""GameObject"", ""name"": ""Child"", ""parent_path"": ""/Parent""}
-- With properties: {""type"": ""GameObject"", ""name"": ""Light"", ""properties"": {""position"": {""x"": 0, ""y"": 5, ""z"": 0}}}",
+            Register("create", ToolDocs.Describe("create"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -194,11 +167,7 @@ Examples:
                 }"),
                 (args, ct) => _engine.ForwardToolCall("create", args, ct));
 
-            Register("delete",
-                @"Remove an object/node from the scene. This action supports undo.
-By default ('recursive: true') the object AND all its children are deleted.
-Pass 'recursive: false' to delete only this object — its children are preserved and re-parented to the deleted object's parent.
-Paths are case-sensitive.",
+            Register("delete", ToolDocs.Describe("delete"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -210,12 +179,7 @@ Paths are case-sensitive.",
                 (args, ct) => _engine.ForwardToolCall("delete", args, ct),
                 new ToolAnnotations { DestructiveHint = true });
 
-            Register("refresh_scripts",
-                @"Compile pending script changes and return the result (blocks until done, including Unity's domain reload — typically 5-60s).
-ALWAYS call this after creating or modifying any .cs file. Works even when the Unity editor is unfocused.
-The result already contains errors and warnings: no separate get_compile_errors call is needed.
-
-Workflow: edit .cs files → refresh_scripts → fix any reported errors → repeat.",
+            Register("refresh_scripts", ToolDocs.Describe("refresh_scripts"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -224,10 +188,7 @@ Workflow: edit .cs files → refresh_scripts → fix any reported errors → rep
                 }"),
                 HandleRefreshScripts);
 
-            Register("get_compile_errors",
-                @"Get the result of the last script compilation: status, errors and warnings (file, line, column).
-Note: refresh_scripts already returns this report — only call this to re-check state without recompiling.
-All errors are listed; warnings are capped at 10. Use 'errors_only: true' to skip warnings.",
+            Register("get_compile_errors", ToolDocs.Describe("get_compile_errors"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -237,11 +198,7 @@ All errors are listed; warnings are capped at 10. Use 'errors_only: true' to ski
                 (args, ct) => _engine.ForwardToolCall("get_compile_errors", args, ct),
                 new ToolAnnotations { ReadOnlyHint = true });
 
-            Register("get_console_logs",
-                @"Get recent engine console log entries (errors, warnings, info messages).
-Use this for debugging: check after execute calls, after runtime errors, or when something seems wrong.
-Filter by level to focus: 'error', 'warning', 'info', or 'all'.
-Use 'search' to find specific messages.",
+            Register("get_console_logs", ToolDocs.Describe("get_console_logs"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -253,10 +210,7 @@ Use 'search' to find specific messages.",
                 (args, ct) => _engine.ForwardToolCall("get_console_logs", args, ct),
                 new ToolAnnotations { ReadOnlyHint = true });
 
-            Register("select",
-                @"Select a GameObject in the editor hierarchy.
-Highlights it in the Inspector and Scene view. The selected object becomes available as 'selectedObject' in execute scripts.
-Useful to direct the user's attention to a specific object.",
+            Register("select", ToolDocs.Describe("select"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -266,9 +220,7 @@ Useful to direct the user's attention to a specific object.",
                 }"),
                 (args, ct) => _engine.ForwardToolCall("select_object", args, ct));
 
-            Register("get_selection",
-                @"Get the currently selected GameObject in the editor, including its path, components, and property summary.
-Use this to understand what the user is looking at before making contextual modifications.",
+            Register("get_selection", ToolDocs.Describe("get_selection"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {}
@@ -276,27 +228,7 @@ Use this to understand what the user is looking at before making contextual modi
                 (args, ct) => _engine.ForwardToolCall("get_selection", args, ct),
                 new ToolAnnotations { ReadOnlyHint = true });
 
-            Register("execute",
-                @"Execute arbitrary C# code directly in the engine's main thread (powered by Roslyn).
-This is your most powerful tool. Use it for procedural generation, bulk modifications, complex logic, or accessing Editor APIs.
-
-Available globals (no initialization needed):
-- `GameObject? selectedObject`: Currently selected object.
-- `GameObject? Find(string name)`: Shortcut for GameObject.Find.
-- `T[] FindAll<T>()`: Find all components of type T in the scene.
-- `GameObject Create(string name)`: Create a new empty GameObject.
-- `void Log(object message)`: Log to the engine console.
-
-Pre-imported namespaces: System, System.Collections.Generic, System.Linq, UnityEngine, UnityEditor.
-Need another namespace? Just put `using ...;` directives at the TOP of your snippet — they are hoisted to file scope automatically (e.g. `using System.IO;`, `using static UnityEngine.Mathf;`).
-Declaring TYPES works too: class, struct, interface, enum, record and delegate declarations are hoisted to file scope, so helper classes, fake implementations of an interface, MonoBehaviours you then AddComponent, and callback receivers all work directly — no reflection workarounds. Access modifiers are fixed up for you (`private class Foo` is accepted). Local functions inside the body work as usual.
-
-Important rules:
-1. Each script execution is independent — variables do not persist between calls. Write self-contained scripts.
-2. ALWAYS return a meaningful value at the end of your script (e.g. `return ""Spawned 10 items"";`).
-3. If you need to modify many objects, use this tool instead of calling `set_property` in a loop.
-4. Console output (Debug.Log / Log) produced during the run is captured and returned in the 'output' field.
-5. The timeout (default 5000ms, override with 'timeout_ms') only stops WAITING: a running script CANNOT be aborted and keeps running on the engine main thread. Avoid unbounded loops; after a timeout, verify scene state before retrying.",
+            Register("execute", ToolDocs.Describe("execute"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -308,29 +240,7 @@ Important rules:
                 (args, ct) => _engine.ForwardToolCall("execute", args, ct),
                 new ToolAnnotations { DestructiveHint = true });
 
-            Register("take_screenshot",
-                @"Capture a screenshot of the engine editor and return the image (JPEG).
-Use to visually verify scene changes when property values alone aren't enough.
-
-Views:
-- 'game' (default): the Game View — what the player sees, no gizmos.
-- 'scene': the Scene View — full editor view with gizmos, useful for inspecting placement.
-
-WHEN TO USE:
-- After creating/moving/deleting objects — confirm placement looks right.
-- After material/color/texture changes — colors can fail silently (pink fallback shaders).
-- After lighting changes — intensity is hard to predict numerically.
-- After spawning procedural content — verify distribution, density, scale.
-- After UI layout changes — anchoring/scaling bugs are visual-only.
-- When the user asks 'how does it look?', 'show me', 'did it work?'.
-
-WHEN NOT TO USE:
-- After changing non-visual properties (mass, tag, name, layer) — use get_property instead.
-- After every micro-change in a sequence — batch the edits, screenshot once at the end.
-- To verify a script compiled — use get_compile_errors instead.
-
-Output: auto-resized to max 1920px (long side) and JPEG-encoded at quality 85.
-Typical size 150-400 KB, well under model image limits.",
+            Register("take_screenshot", ToolDocs.Describe("take_screenshot"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -344,31 +254,7 @@ Typical size 150-400 KB, well under model image limits.",
                 HandleTakeScreenshot,
                 new ToolAnnotations { ReadOnlyHint = true });
 
-            Register("create_sprite",
-                @"Create a 2D sprite placeholder from a flat-geometric 'shape-spec' (authored by you as JSON).
-The server rasterizes it to a PNG and imports it into the engine as a sprite — this works on ANY engine
-(Unity/Godot/Stride) because the engine receives a ready raster, not vector data.
-
-HOUSE STYLE: keep placeholders flat, geometric, and clean (recognizable silhouette > detail). This is the
-right look for prototypes — abstract-but-clean beats complex-but-ugly. Great for Flappy Bird, Cut the Rope, etc.
-
-shape-spec format:
-{
-  ""width"": 64, ""height"": 64,           // logical coordinate space
-  ""background"": null,                     // null = transparent (usual for sprites)
-  ""shapes"": [                              // drawn in order (painter's)
-    { ""type"":""ellipse"", ""cx"":32,""cy"":32,""rx"":20,""ry"":18, ""fill"":""#FFCC00"", ""stroke"":""#222"",""strokeWidth"":2 },
-    { ""type"":""rect"", ""x"":4,""y"":4,""w"":56,""h"":56,""rx"":8, ""fill"":<paint> },
-    { ""type"":""polygon"", ""points"":[[x,y],...], ""fill"":""#FF8800"" },
-    { ""type"":""line"", ""points"":[[x,y],...], ""stroke"":""#000"",""strokeWidth"":3 },
-    { ""type"":""path"", ""d"":""M0 0 L10 10 Q.. C.. Z"", ""fill"":""#000"" }
-  ]
-}
-A <paint> is a hex string or a linear gradient:
-  { ""gradient"":""linear"", ""x1"":0,""y1"":0,""x2"":0,""y2"":64, ""stops"":[{""offset"":0,""color"":""#fff""},{""offset"":1,""color"":""#888""}] }
-Optional per-shape ""opacity"" (0..1).
-
-After creating sprites, call take_screenshot to verify how they look.",
+            Register("create_sprite", ToolDocs.Describe("create_sprite"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -386,20 +272,7 @@ After creating sprites, call take_screenshot to verify how they look.",
                 }"),
                 HandleCreateSprite);
 
-            Register("create_sound",
-                @"Create a placeholder sound effect from a small procedural 'sound-spec' (jsfxr-style, authored by you).
-The server SYNTHESIZES a WAV and imports it as an audio clip — engine-agnostic, like create_sprite. Perfect for the
-flap/jump/score/hit/pickup SFX that make a prototype feel real (a silent prototype feels broken).
-
-sound-spec fields (all optional except pick a wave + freq):
-  wave: ""square""|""saw""|""sine""|""triangle""|""noise""   freq: start Hz   freq_sweep: Hz added per second (negative = down)
-  attack/sustain/decay: envelope seconds   duration: total seconds (scales the envelope)   volume: 0..1
-  vibrato_depth: 0..1   vibrato_rate: Hz
-Recipes: jump = square, freq 480, freq_sweep +1200, short. coin = square, freq 900 then 1200 (two calls) or freq_sweep up.
-hit/explosion = noise, freq 200, decay ~0.25. laser = saw, freq 1200, freq_sweep -3000.
-
-Example (jump): { ""name"":""jump"", ""spec"":{ ""wave"":""square"",""freq"":480,""freq_sweep"":1400,""attack"":0.005,""sustain"":0.02,""decay"":0.12,""volume"":0.5 } }
-Optionally place a source: add ""scene_path"", ""position"", ""volume"", ""loop"", ""auto_play"" (for looping music/ambience) at the top level.",
+            Register("create_sound", ToolDocs.Describe("create_sound"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -426,17 +299,7 @@ Optionally place a source: add ""scene_path"", ""position"", ""volume"", ""loop"
                 }"),
                 HandleCreateSound);
 
-            Register("add_primitive",
-                @"Drop in a VETTED gameplay behaviour instead of hand-writing (and debugging) it — cuts the
-write_script -> refresh_scripts -> fix loop. The server writes the known-good source for the connected engine;
-you then add the component and set its public fields.
-
-Call with no args to LIST the catalog. Then add_primitive { ""id"": ""..."" } writes it (override 'path' if you like).
-Unity primitives assume the legacy Input Manager is available (Active Input Handling = Both or Input Manager).
-Catalog ids: platformer_controller_2d, auto_runner_2d, camera_follow_2d, killzone_2d, score_overlay.
-
-After it writes: call refresh_scripts, then attach the component (execute: obj.AddComponent<T>()) and configure the
-returned fields via set_property/execute.",
+            Register("add_primitive", ToolDocs.Describe("add_primitive"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -446,11 +309,7 @@ returned fields via set_property/execute.",
                 }"),
                 HandleAddPrimitive);
 
-            Register("new_scene",
-                @"Create a fresh scene in the engine. Use this to start a prototype from a clean slate.
-'two_d: true' (default) sets up a 2D-friendly scene (e.g. orthographic camera, sky background on Unity).
-Pass 'save_path' (engine asset path, e.g. 'Assets/Scenes/Flappy.unity' or 'res://scenes/flappy.tscn') to save it.
-Not available on every engine (e.g. Stride) — it reports so if unsupported.",
+            Register("new_scene", ToolDocs.Describe("new_scene"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -461,8 +320,7 @@ Not available on every engine (e.g. Stride) — it reports so if unsupported.",
                 (args, ct) => _engine.ForwardToolCall(IpcConstants.Methods.NewScene, args, ct),
                 new ToolAnnotations { DestructiveHint = true });
 
-            Register("open_scene",
-                @"Open an existing scene by its engine asset path (e.g. 'Assets/Scenes/Main.unity' or 'res://scenes/main.tscn').",
+            Register("open_scene", ToolDocs.Describe("open_scene"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -473,8 +331,7 @@ Not available on every engine (e.g. Stride) — it reports so if unsupported.",
                 (args, ct) => _engine.ForwardToolCall(IpcConstants.Methods.OpenScene, args, ct),
                 new ToolAnnotations { DestructiveHint = true });
 
-            Register("save_scene",
-                @"Save the active/edited scene. Omit 'path' to save in place; pass 'path' to save to a new location.",
+            Register("save_scene", ToolDocs.Describe("save_scene"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -483,11 +340,7 @@ Not available on every engine (e.g. Stride) — it reports so if unsupported.",
                 }"),
                 (args, ct) => _engine.ForwardToolCall(IpcConstants.Methods.SaveScene, args, ct));
 
-            Register("write_script",
-                @"Write a source file into the engine project (path relative to the project root, e.g.
-'Assets/Scripts/Bird.cs' on Unity, 'scripts/bird.gd' on Godot). Creates intermediate folders.
-The file lands inside the project regardless of where this MCP server runs (it resolves the project root engine-side).
-After writing C# scripts, call refresh_scripts to compile them.",
+            Register("write_script", ToolDocs.Describe("write_script"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -498,19 +351,12 @@ After writing C# scripts, call refresh_scripts to compile them.",
                 }"),
                 (args, ct) => _engine.ForwardToolCall(IpcConstants.Methods.WriteScript, args, ct));
 
-            Register("list_platforms",
-                @"List the build platforms the engine knows about (e.g. Android, iOS, Windows).
-Each entry is flagged whether it is the active build target and whether it can be built on this machine.
-Call this first to discover valid platform names for the other platform/build tools.",
+            Register("list_platforms", ToolDocs.Describe("list_platforms"),
                 ParseSchema(@"{ ""type"": ""object"", ""properties"": {} }"),
                 (args, ct) => _engine.ForwardToolCall(IpcConstants.Methods.ListPlatforms, args, ct),
                 new ToolAnnotations { ReadOnlyHint = true });
 
-            Register("get_platform_settings",
-                @"Read a platform's build/player settings as a flat key-value map.
-ALWAYS call this before set_platform_settings to discover the available keys and current values — keys differ per engine.
-
-Example: { ""platform"": ""Android"" }",
+            Register("get_platform_settings", ToolDocs.Describe("get_platform_settings"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -521,11 +367,7 @@ Example: { ""platform"": ""Android"" }",
                 (args, ct) => _engine.ForwardToolCall(IpcConstants.Methods.GetPlatformSettings, args, ct),
                 new ToolAnnotations { ReadOnlyHint = true });
 
-            Register("set_platform_settings",
-                @"Set one or more of a platform's build/player settings. Pass only the keys you want to change.
-Unknown keys are reported back in 'unknownKeys' (not fatal). Verify with get_platform_settings afterwards.
-
-Example: { ""platform"": ""Android"", ""settings"": { ""applicationIdentifier"": ""com.acme.game"", ""minSdkVersion"": ""24"" } }",
+            Register("set_platform_settings", ToolDocs.Describe("set_platform_settings"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -536,12 +378,7 @@ Example: { ""platform"": ""Android"", ""settings"": { ""applicationIdentifier"":
                 }"),
                 (args, ct) => _engine.ForwardToolCall(IpcConstants.Methods.SetPlatformSettings, args, ct));
 
-            Register("switch_build_target",
-                @"Make a platform the active build target.
-This can trigger a script recompile + domain reload and BLOCKS until done (like refresh_scripts) — typically a few seconds to a minute.
-Switch the target before building for a different platform.
-
-Example: { ""platform"": ""Android"" }",
+            Register("switch_build_target", ToolDocs.Describe("switch_build_target"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -552,12 +389,7 @@ Example: { ""platform"": ""Android"" }",
                 HandleSwitchBuildTarget,
                 new ToolAnnotations { DestructiveHint = true });
 
-            Register("build_player",
-                @"Build the project for a platform (produces an APK/AAB/exe/app bundle, etc.). LONG-RUNNING — can take minutes.
-Returns a build report: result, error count, warning count, output path and artifact size.
-Make sure the platform is the active build target first (switch_build_target) and that its settings are correct (set_platform_settings).
-
-Example: { ""platform"": ""Android"", ""output_path"": ""Build/game.apk"", ""development"": false }",
+            Register("build_player", ToolDocs.Describe("build_player"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -571,14 +403,7 @@ Example: { ""platform"": ""Android"", ""output_path"": ""Build/game.apk"", ""dev
                 HandleBuildPlayer,
                 new ToolAnnotations { DestructiveHint = true });
 
-            Register("engine_status",
-                @"Say WHICH engine is answering these tools, list the others that are running, and optionally pin one.
-
-Call it when an answer does not match the project you think you are driving — the classic sign is `execute` compiling fine but reporting that the engine's own types do not exist. With two editors open the server picks one at discovery, and a Unity domain reload (any script recompile) makes it pick AGAIN: the target can change mid-session, silently.
-
-A pinned engine survives every reconnect, and the server stays disconnected rather than falling back to a different editor. AKER_MCP_ENGINE does the same from the environment. Pass an empty string to unpin.
-
-Example: { ""engine"": ""unity"" }",
+            Register("engine_status", ToolDocs.Describe("engine_status"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -588,19 +413,12 @@ Example: { ""engine"": ""unity"" }",
                 HandleEngineStatus,
                 new ToolAnnotations { ReadOnlyHint = true });
 
-            Register("list_windows",
-                @"List the visible top-level windows on the machine running the server (title, process name, pid).
-OS-level — works regardless of whether an engine is connected. Use it to find a window title to pass to capture_window.",
+            Register("list_windows", ToolDocs.Describe("list_windows"),
                 ParseSchema(@"{ ""type"": ""object"", ""properties"": {} }"),
                 HandleListWindows,
                 new ToolAnnotations { ReadOnlyHint = true });
 
-            Register("capture_window",
-                @"Capture a screenshot of ANY visible window on the machine running the server, matched by a case-insensitive substring of its title. Returns a JPEG.
-Useful for capturing external apps/tools (browsers, editors, dashboards), not just the game engine. Call list_windows first to discover titles.
-The first visible window whose title contains the substring is captured (occluded windows are captured too, without stealing focus).
-
-Example: { ""title"": ""Game Studio"" }",
+            Register("capture_window", ToolDocs.Describe("capture_window"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -611,11 +429,7 @@ Example: { ""title"": ""Game Studio"" }",
                 HandleCaptureWindow,
                 new ToolAnnotations { ReadOnlyHint = true });
 
-            Register("focus_window",
-                @"Bring a window to the foreground on the machine running the server, matched by a case-insensitive substring of its title. Restores the window first if it is minimized.
-Use this before capturing an editor whose internal screenshot needs the window in the foreground (e.g. Stride Game Studio), or to surface any app. Call list_windows first to discover titles.
-
-Example: { ""title"": ""Game Studio"" }",
+            Register("focus_window", ToolDocs.Describe("focus_window"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -627,28 +441,15 @@ Example: { ""title"": ""Game Studio"" }",
 
             // ---- Runtime loop: run the game, observe it, drive it ----
 
-            Register("enter_play",
-                @"Start the project running so you can verify it actually PLAYS — not just how it looks statically.
-For a game engine this enters Play Mode / runs the scene; for an animation editor it plays the timeline.
-
-The runtime loop: enter_play -> (send_input to drive it) -> capture_sequence / get_property to observe -> exit_play.
-
-Notes:
-- Unity: entering Play Mode reloads the domain and briefly drops the connection; this tool waits for the
-  auto-reconnect and reports the settled state — no action needed. take_screenshot('game') shows the running game.
-- Godot: the game runs in a SEPARATE window — screenshot it with capture_window (by its title), not take_screenshot.
-- Returns NOT_SUPPORTED on engines without play control.",
+            Register("enter_play", ToolDocs.Describe("enter_play"),
                 ParseSchema(@"{ ""type"": ""object"", ""properties"": {} }"),
                 HandleEnterPlay);
 
-            Register("exit_play",
-                @"Stop play/playback and return to edit mode (Unity may reload the domain — handled automatically).
-Always exit_play when you finish verifying, so the editor is left in a clean editable state.",
+            Register("exit_play", ToolDocs.Describe("exit_play"),
                 ParseSchema(@"{ ""type"": ""object"", ""properties"": {} }"),
                 HandleExitPlay);
 
-            Register("set_play_pause",
-                @"Pause (true) or resume (false) an in-progress play/playback. Pause before play_step to inspect frame by frame.",
+            Register("set_play_pause", ToolDocs.Describe("set_play_pause"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -657,10 +458,7 @@ Always exit_play when you finish verifying, so the editor is left in a clean edi
                 }"),
                 HandleSetPlayPause);
 
-            Register("play_step",
-                @"Advance play/playback while paused, to inspect a jump arc or collision frame by frame.
-SkelForge steps N whole animation frames exactly. On Unity each call reliably advances ONE frame per editor
-tick — multi-frame stepping is best-effort, so call play_step repeatedly and confirm progress with get_play_state.",
+            Register("play_step", ToolDocs.Describe("play_step"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -669,24 +467,12 @@ tick — multi-frame stepping is best-effort, so call play_step repeatedly and c
                 }"),
                 HandlePlayStep);
 
-            Register("get_play_state",
-                @"Report whether the project is playing/paused, the current time, clip duration, and a frame counter + fps.
-Read-only. Use it to confirm enter_play took effect. LIVENESS: read twice and check frameCount ADVANCED — a frozen /
-soft-locked game keeps isPlaying:true but a stale frameCount, which pixels/time alone can't reveal. On engines that run
-the game in a separate window (Godot), windowTitle names it (send_input/capture_sequence then auto-route to it).",
+            Register("get_play_state", ToolDocs.Describe("get_play_state"),
                 ParseSchema(@"{ ""type"": ""object"", ""properties"": {} }"),
                 HandleGetPlayState,
                 new ToolAnnotations { ReadOnlyHint = true });
 
-            Register("capture_sequence",
-                @"Capture SEVERAL screenshots at an interval and return them as a strip — so you can see MOTION, not just one pose.
-Call this WHILE the project is playing (enter_play first, and don't pause): a moving game/animation is what makes the
-frames differ. Great for verifying a jump arc, a scroll, a spawn, a collision, or an animation cycle.
-
-- count: number of frames (1-8, default 4). interval_ms: gap between frames (0-3000, default 500).
-- view: 'game' (default) or 'scene'.
-- window_title: capture THIS OS window each frame instead of the editor viewport — use it for a SEPARATE-WINDOW
-  game (Godot/Stride) by passing the game window's title; without it, Godot/Stride strips show the editor, not the game.",
+            Register("capture_sequence", ToolDocs.Describe("capture_sequence"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -699,25 +485,7 @@ frames differ. Great for verifying a jump arc, a scroll, a spawn, a collision, o
                 HandleCaptureSequence,
                 new ToolAnnotations { ReadOnlyHint = true });
 
-            Register("send_input",
-                @"Inject synthetic input into the RUNNING game to test interactive mechanics (jump, move, click).
-Call enter_play first. Provide an ordered 'events' array; each event is a key, a mouse button, a mouse move, or a
-named engine action.
-
-Event shapes:
-- { ""type"":""key"", ""key"":""Space"", ""hold_ms"":60 }            press+release after 60ms (omit hold_ms and set 'pressed' for explicit down/up)
-- { ""type"":""key"", ""key"":""Right"", ""pressed"":true }          key down (send a matching pressed:false later to release)
-- { ""type"":""mouse_button"", ""button"":""left"", ""hold_ms"":50 }
-- { ""type"":""mouse_move"", ""x"":960, ""y"":540 }   x/y are pixels, top-left origin. NOTE: the OS-level path maps them to
-     the PRIMARY monitor only, so a windowed game on a secondary monitor / away from the origin may be unreachable — prefer
-     keyboard input for OS-level (Godot/Stride) targets. Unity's in-process path uses game-view pixels.
-Canonical keys: Space, Enter, Escape, Tab, Up/Down/Left/Right, A-Z, 0-9, Shift, Ctrl, Alt.
-
-Delivery: engine-internal injection when available (Unity drives the new Input System directly), otherwise OS-level
-to the focused game window. IMPORTANT: on Godot/Stride the game is a SEPARATE window, so pass 'window_title' with
-the game window's title — otherwise the OS-level path focuses the EDITOR and input goes there. On Unity the game
-runs in the editor's Game View, so no window_title is needed. (The 'action' event type is reserved but not yet
-injectable — drive the key/mouse controls the action is bound to instead.)",
+            Register("send_input", ToolDocs.Describe("send_input"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -744,13 +512,7 @@ injectable — drive the key/mouse controls the action is bound to instead.)",
                 }"),
                 HandleSendInput);
 
-            Register("sample_state",
-                @"Read live RUNTIME values from the running game — the honest way to verify a mechanic, instead of guessing from pixels.
-Call it while playing (after enter_play). Provide 'probes' as { name: ""C# expression"" }; each expression is evaluated in the
-engine (via the same Roslyn host as 'execute'), so use engine-appropriate API. Prefer SCALAR expressions (numbers/bools/strings).
-
-Examples (Unity): { ""probes"": { ""birdY"": ""Find(\""Bird\"").transform.position.y"", ""score"": ""GameManager.Instance.Score"" } }
-Returns each name's value (or a per-probe error).",
+            Register("sample_state", ToolDocs.Describe("sample_state"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -762,14 +524,7 @@ Returns each name's value (or a per-probe error).",
                 HandleSampleState,
                 new ToolAnnotations { ReadOnlyHint = true });
 
-            Register("assert_state",
-                @"Assert RUNTIME conditions against real engine values and get a structured PASS/FAIL — the reliable alternative to
-inferring 'did it work?' from a screenshot. Call during play. Each assertion evaluates a C# 'expression' in the engine and
-compares it with 'op' to 'value'. Polls until all pass or 'timeout_ms' elapses — ideal for 'becomes true' conditions
-(e.g. isGrounded after a jump lands, score increments after passing a pipe).
-
-ops: '=='  '!='  '<'  '<='  '>'  '>='  'approx' (|a-b|<=1e-3)  'truthy'  'falsy'.
-Example: { ""assertions"": [ { ""expression"": ""Find(\""Bird\"").GetComponent<Rigidbody2D>().velocity.y"", ""op"": ""<"", ""value"": 0, ""label"": ""bird falls under gravity"" } ], ""timeout_ms"": 1500 }",
+            Register("assert_state", ToolDocs.Describe("assert_state"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -794,25 +549,7 @@ Example: { ""assertions"": [ { ""expression"": ""Find(\""Bird\"").GetComponent<R
                 HandleAssertState,
                 new ToolAnnotations { ReadOnlyHint = true });
 
-            Register("playtest",
-                @"Run and VERIFY a prototype in ONE call — the closed-loop way to answer 'does the mechanic work?'.
-Drives the game and observes it SERVER-SIDE, so input lands at a precise moment relative to capture/assert (no
-multi-round-trip lag between separate tool calls, which otherwise misses fast transients like a jump arc).
-
-Flow: enter_play -> run 'steps' in order -> check final 'criteria' -> exit_play. Returns ONE verdict (PASS/FAIL),
-a timeline log, the captured frames (a motion strip), and structured assertion/sample evidence.
-
-Each step is ONE of:
-- { ""input"": { ""events"": [ { ""type"":""key"",""key"":""Space"",""hold_ms"":60 } ] } }   (drive it; add window_title for Godot/Stride)
-- { ""wait_ms"": 300 }                                                        (let the game advance)
-- { ""capture"": true }  or  { ""capture"": { ""view"":""game"" } }                 (add a frame to the strip)
-- { ""assert"": [ { ""expression"":""..."", ""op"":""<"", ""value"":0, ""label"":""..."" } ], ""timeout_ms"":1000 }   (verify runtime state, polled)
-- { ""sample"": { ""y"":""Find(\""Bird\"").transform.position.y"" } }               (record values as evidence)
-
-'criteria' is a final assert array. Expressions are C# evaluated in the engine (like execute / assert_state); use
-engine-appropriate API and prefer scalars. Example: verify a jump —
-{ ""steps"": [ {""sample"":{""y0"":""Find(\""P\"").transform.position.y""}}, {""input"":{""events"":[{""type"":""key"",""key"":""Space"",""hold_ms"":60}]}},
-  {""wait_ms"":250}, {""capture"":true}, {""assert"":[{""expression"":""Find(\""P\"").transform.position.y"",""op"":"">"",""value"":0.5,""label"":""rose after jump""}],""timeout_ms"":800} ] }",
+            Register("playtest", ToolDocs.Describe("playtest"),
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
@@ -1780,7 +1517,7 @@ engine-appropriate API and prefer scalars. Example: verify a jump —
                 {
                     Name = name,
                     Description = description,
-                    InputSchema = inputSchema,
+                    InputSchema = StripSchemaTitles(inputSchema),
                     // The table is the one place the four hints are decided; the
                     // per-call argument only covers a tool the table does not know.
                     Annotations = ToolAnnotationTable.For(name, annotations)
@@ -1803,6 +1540,32 @@ engine-appropriate API and prefer scalars. Example: verify a jump —
         private static JsonElement ParseSchema(string json)
         {
             return JsonSerializer.Deserialize<JsonElement>(json);
+        }
+
+        /// <summary>
+        /// Drop the "title" strings a JSON schema may carry on the object and on each
+        /// property: no client shows them and they ride in the context on every turn.
+        /// A property that is itself named "title" (capture_window, focus_window) holds
+        /// an object, not a string, and is left alone.
+        /// </summary>
+        private static JsonElement StripSchemaTitles(JsonElement schema)
+        {
+            var node = System.Text.Json.Nodes.JsonNode.Parse(schema.GetRawText());
+            StripTitles(node);
+            return JsonSerializer.Deserialize<JsonElement>(node!.ToJsonString());
+        }
+
+        private static void StripTitles(System.Text.Json.Nodes.JsonNode? node)
+        {
+            if (node is System.Text.Json.Nodes.JsonObject obj)
+            {
+                if (obj["title"] is System.Text.Json.Nodes.JsonValue) obj.Remove("title");
+                foreach (var kv in obj.ToList()) StripTitles(kv.Value);
+            }
+            else if (node is System.Text.Json.Nodes.JsonArray arr)
+            {
+                foreach (var item in arr) StripTitles(item);
+            }
         }
 
         private class RegisteredTool

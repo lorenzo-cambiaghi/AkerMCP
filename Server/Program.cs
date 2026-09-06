@@ -28,6 +28,21 @@ namespace AkerMcp.Server
             var retryTask = Task.Run(() => RetryEngineConnection(engine, cts.Token));
 
             var toolRegistry = new ToolRegistry(engine);
+            try
+            {
+                var (kept, dropped) = toolRegistry.ApplyProfile(
+                    ToolProfiles.Resolve(ProfileArgument(args)),
+                    ToolProfiles.NamesFromEnvironment("AKER_MCP_TOOLS_INCLUDE"),
+                    ToolProfiles.NamesFromEnvironment("AKER_MCP_TOOLS_EXCLUDE"));
+                StdioTransport.LogInfo(
+                    $"Tool profile '{toolRegistry.Profile}': {kept.Count} tools" +
+                    (dropped.Count > 0 ? $", not loaded: {string.Join(", ", dropped)}" : ""));
+            }
+            catch (ArgumentException ex)
+            {
+                StdioTransport.LogError(ex.Message);
+                Environment.Exit(2);
+            }
             var resourceRegistry = new ResourceRegistry(engine);
             var server = new McpServer(transport, toolRegistry, resourceRegistry);
 
@@ -43,6 +58,17 @@ namespace AkerMcp.Server
                 try { await retryTask.WaitAsync(TimeSpan.FromSeconds(2)); }
                 catch { /* timeout or already-faulted task — process is exiting anyway */ }
             }
+        }
+
+        /// <summary>`--profile core` or `--profile=core` on the command line, else null.</summary>
+        private static string? ProfileArgument(string[] args)
+        {
+            for (var i = 0; i < args.Length; i++)
+            {
+                if (args[i] == "--profile" && i + 1 < args.Length) return args[i + 1];
+                if (args[i].StartsWith("--profile=", StringComparison.Ordinal)) return args[i].Substring("--profile=".Length);
+            }
+            return null;
         }
 
         private static async Task RetryEngineConnection(EngineConnection engine, CancellationToken ct)

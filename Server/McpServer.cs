@@ -164,7 +164,8 @@ namespace AkerMcp.Server
                     Name = "AkerMcp",
                     Version = "1.0.0"
                 },
-                Instructions = ServerInstructions.Handshake,
+                Instructions = ServerInstructions.Handshake(
+                    _toolRegistry.ToolNames, _toolRegistry.HiddenTools, _toolRegistry.Profile),
                 Capabilities = new ServerCapabilities
                 {
                     // We never emit list_changed notifications, so don't advertise them.

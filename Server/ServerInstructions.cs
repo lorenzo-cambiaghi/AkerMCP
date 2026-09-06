@@ -1,3 +1,7 @@
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+
 namespace AkerMcp.Server
 {
     /// <summary>
@@ -18,24 +22,42 @@ namespace AkerMcp.Server
     {
         public const string GuideUri = "aker://guide";
 
-        public const string Handshake =
-            "AkerMCP drives the running game editor (Unity, Godot or Stride); the engine answers " +
-            "on its main thread. Work in the order inspect, modify, verify: `inspect` a scene path " +
-            "('/Player') or a type name ('Rigidbody') before touching it, and never guess property or " +
-            "component names. Change one property with `set_property`; do bulk or complex work in one " +
-            "`execute` script. Then confirm with `get_property` or `inspect`, and with `take_screenshot` " +
-            "when the change is visual (placement, materials, lighting, UI). " +
-            "Property paths are dot notation: transform properties need no prefix ('position', " +
-            "'localScale'), other components take a type prefix ('Rigidbody.mass'), nested paths work " +
-            "('MeshRenderer.material.color.r'), structs are JSON objects ({\"x\":1,\"y\":2,\"z\":3}). " +
-            "Scene paths are case-sensitive, forward slashes from the root; `query` finds objects by " +
-            "name pattern, type or tag. " +
-            "`execute` runs C# through Roslyn: state does not persist between calls, always return a " +
-            "value, put `using` lines at the top, default timeout 5 s (`timeout_ms`). After writing or " +
-            "editing a script call `refresh_scripts`, then `get_compile_errors`; never assume it compiled. " +
-            "If a call times out while the editor shows a modal dialog, `list_windows` names it and " +
-            "`focus_window` followed by `send_input` ({ESC} or {ENTER}) dismisses it. " +
-            "Read the `aker://guide` resource for the full playbook.";
+        /// <summary>
+        /// The handshake text for a session that has <paramref name="loaded"/> tools. Only
+        /// those are recommended; the hidden ones are listed by name with the way to get
+        /// them, so the model asks instead of calling a tool that is not there.
+        /// </summary>
+        public static string Handshake(IEnumerable<string> loaded, IEnumerable<string> hidden, string profile)
+        {
+            var has = new HashSet<string>(loaded);
+            var sb = new StringBuilder();
+            sb.Append("AkerMCP drives the running game editor (Unity, Godot or Stride); the engine answers " +
+                      "on its main thread. Work in the order inspect, modify, verify: `inspect` a scene path " +
+                      "('/Player') or a type name ('Rigidbody') before touching it, and never guess property or " +
+                      "component names. Change one property with `set_property`; do bulk or complex work in one " +
+                      "`execute` script. Then confirm with `get_property` or `inspect`, and with `take_screenshot` " +
+                      "when the change is visual (placement, materials, lighting, UI). " +
+                      "Property paths are dot notation: transform properties need no prefix ('position', " +
+                      "'localScale'), other components take a type prefix ('Rigidbody.mass'), nested paths work " +
+                      "('MeshRenderer.material.color.r'), structs are JSON objects ({\"x\":1,\"y\":2,\"z\":3}). " +
+                      "Scene paths are case-sensitive, forward slashes from the root; `query` finds objects by " +
+                      "name pattern, type or tag. " +
+                      "`execute` runs C# through Roslyn: state does not persist between calls, always return a " +
+                      "value, put `using` lines at the top, default timeout 5 s (`timeout_ms`). After writing or " +
+                      "editing a script call `refresh_scripts`; its result includes the compile errors. ");
+            if (has.Contains("enter_play"))
+                sb.Append("To check that a mechanic works, not only how it looks: `enter_play`, drive it, observe, `exit_play`. ");
+            if (has.Contains("list_windows") && has.Contains("focus_window") && has.Contains("send_input"))
+                sb.Append("If a call times out while the editor shows a modal dialog, `list_windows` names it and " +
+                          "`focus_window` followed by `send_input` ({ESC} or {ENTER}) dismisses it. ");
+            var hiddenList = hidden.ToList();
+            if (hiddenList.Count > 0)
+                sb.Append($"Tool profile '{profile}' ({has.Count} of {has.Count + hiddenList.Count} tools); not loaded: " +
+                          string.Join(", ", hiddenList) + ". They come with `--profile full`, AKER_MCP_PROFILE=full, " +
+                          "or AKER_MCP_TOOLS_INCLUDE=name,name. ");
+            sb.Append("Read the `aker://guide` resource for the full playbook.");
+            return sb.ToString();
+        }
 
         public const string Guide = @"# AkerMCP guide
 
