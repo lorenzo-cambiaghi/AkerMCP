@@ -33,11 +33,14 @@ AI: "Set the player's position to (10, 0, 5)"
 | Selection · console logs · recompile/compile-errors | ✅ | ✅ | ✅ |
 | Scene-view screenshot **with editor gizmos** | ✅ | ✅ | ✅ |
 | Platform/build tools (list · switch · build_player) | ✅ | ✅ | ✅ |
+| OS window capture (`list_windows` · `capture_window` · `focus_window`) | ✅ | ✅ | ✅ |
 | **2D sprites from a JSON shape-spec** (`create_sprite`, rasterized server-side) | ✅ | ✅ | ✅ |
+| **Placeholder audio** (`create_sound`, synthesized server-side) | ✅ | ✅ | ❌ |
+| Gameplay primitive scripts (`add_primitive`) | ✅ | ❌ | ❌ |
 | Scene management (`new_scene` · `open_scene` · `save_scene`) | ✅ | ✅ | ✅ |
 | **Runtime loop** (`enter_play`/`exit_play` · `capture_sequence` · `send_input`) | ✅ | ◑ | ◑ |
 
-Every row is implemented and was verified live in that engine's editor. The OS window tools (`list_windows`, `capture_window`, `focus_window`) work with no engine connected.
+Every ✅ is implemented and was verified live in that engine's editor. A ❌ answers NOT_SUPPORTED and names what is missing rather than failing quietly: Stride has no sound importer yet, and the primitive catalog carries Unity variants only. The window tools are the exception to the whole table, since they talk to the operating system, Windows or macOS, and work with no engine connected at all: they are how you see and dismiss a modal dialog that has frozen the editor's main thread.
 
 
 ### What it does that the others do not
@@ -46,7 +49,7 @@ The other MCP servers for game engines are tied to one engine each: unity-mcp an
 
 `execute` hoists `using` lines and type declarations, so a MonoBehaviour can be written, compiled and attached in one call instead of three. `playtest` drives input and evaluates C# assertions server-side at exact moments on the timeline, which is the only way to catch a transient as short as the top of a jump arc: separate tool calls arrive whenever the round trip lets them, and by then the frame is gone.
 
-Then there is the asset gap. A model writes code, not pixels. `create_sprite` closes it: the model describes the shape in JSON, with ellipses, rectangles, polygons and SVG path data, plus linear gradients and per-shape opacity, and the server rasterises that to an RGBA PNG at 4x supersampling before the plugin imports it as a sprite. The vector never reaches the editor, so Godot and Stride need no SVG support of their own to get the same placeholder Unity gets. `create_sound` does the same for audio, synthesising a WAV from a jsfxr-style spec. The prototype stops waiting for someone to draw the bird.
+Then there is the asset gap. A model writes code, not pixels. `create_sprite` closes it: the model describes the shape in JSON, with ellipses, rectangles, polygons and SVG path data, plus linear gradients and per-shape opacity, and the server rasterises that to an RGBA PNG at 4x supersampling before the plugin imports it as a sprite. The vector never reaches the editor, so Godot and Stride need no SVG support of their own to get the same placeholder Unity gets. `create_sound` does the same for audio on Unity and Godot, synthesising a WAV from a jsfxr-style spec. The prototype stops waiting for someone to draw the bird.
 
 Pair it with [LynxMCP](https://github.com/lorenzo-cambiaghi/LynxMCP) for code search over the project and its library docs: Aker is the hands, Lynx the memory.
 
@@ -356,7 +359,19 @@ Every tool carries the four MCP hints (read-only, destructive, idempotent, open-
 | `create_sound` | full | Synthesise a short jsfxr-style sound and import it as an audio clip |
 | `add_primitive` | full | Write a vetted gameplay script (2D platformer controller, auto-runner, camera follow, kill zone, score overlay) |
 
-> **Engine support:** all three engines implement these. `create_sprite` imports + places a sprite on **Unity** and **Godot**; on **Stride** it persists a real `.sdtex` texture asset in the package (via the editor's `SessionViewModel`) and also adds a runtime preview entity for immediate visibility. `new_scene`/`open_scene`/`save_scene` work on **Unity** and **Godot** (file-on-disk scenes) and on **Stride** (package-managed `SceneAsset` via the editor). `write_script` works on all three. *(Stride's `create_sprite` + scene creation are verified live in Game Studio.)*
+> **Engine support:** `create_sprite` imports + places a sprite on **Unity** and **Godot**; on **Stride** it persists a real `.sdtex` texture asset in the package (via the editor's `SessionViewModel`) and also adds a runtime preview entity for immediate visibility. `create_sound` works on **Unity** and **Godot**; **Stride** has no sound importer yet and says so. `add_primitive` carries Unity variants only for now, and when it cannot serve your engine it names the ones a given primitive exists for. `new_scene`/`open_scene`/`save_scene` work on **Unity** and **Godot** (file-on-disk scenes) and on **Stride** (package-managed `SceneAsset` via the editor). `write_script` works on all three. *(Stride's `create_sprite` + scene creation are verified live in Game Studio.)*
+
+**`add_primitive` next to `write_script`**: `write_script` writes the source you hand it, so the file is whatever the model composed. `add_primitive` writes a file the model did not compose. The server keeps five gameplay scripts that already work, picks the variant for the connected engine and sends it down the same write path. Call it with no `id` and it lists the catalog; call it with one and it reports the file it wrote, the public fields you can set, and what to do next.
+
+| `id` | What it is | Public fields |
+|---|---|---|
+| `platformer_controller_2d` | Move and jump with ground check | `moveSpeed`, `jumpForce`, `gravityScale`, `groundTag`, `jumpKey` |
+| `auto_runner_2d` | Constant forward run, jump on input | `forwardSpeed`, `jumpForce`, `gravityScale`, `groundTag`, `jumpKey` |
+| `camera_follow_2d` | Smoothed follow with offset | `target`, `offset`, `smooth`, `followY` |
+| `killzone_2d` | Kill on contact with a tag | `deadlyTag`, `reloadOnDeath` |
+| `score_overlay` | On-screen score counter | `score`, `label` |
+
+So: `add_primitive` for the piece every 2D prototype needs and nobody wants rewritten from scratch, `write_script` for the part that is yours. The Unity variants read input through the legacy Input Manager. Either way the file lands on disk, so `refresh_scripts` comes next, then attaching the component and setting the fields.
 
 **`create_sprite` shape-spec**: drawn in order (painter's): `ellipse`, `rect` (with `rx` for rounded corners), `polygon`, `line`/`polyline`, and `path` (an SVG path-data subset). Each shape takes a `fill` (hex or linear `gradient`), optional `stroke`/`strokeWidth`, and `opacity`. Example (a flat bird placeholder):
 
@@ -805,6 +820,7 @@ public class MyEnginePlugin : EnginePluginBase
 | `ICompilationSupport` | Script recompilation, error retrieval | No |
 | `IScreenCapture` | Engine-internal render-buffer capture (Game/Scene view) | No; falls back to OS-level capture on Windows (`PrintWindow`) and macOS (Quartz). On Linux, this interface is required |
 | `ISpriteImporter` | Import a server-rasterized PNG as a 2D sprite, optionally placing it in the scene (powers `create_sprite`) | No; `create_sprite` reports it as unavailable if absent |
+| `ISoundImporter` | Import a server-synthesized WAV as an audio clip, optionally placing a source in the scene (powers `create_sound`) | No; `create_sound` reports NOT_SUPPORTED if absent, as on Stride |
 | `ISceneManager` | Create / open / save scenes (powers `new_scene`/`open_scene`/`save_scene`) | No; the scene tools report it as unavailable if absent |
 | `IPlayModeController` | Start/stop play, pause/step, read play state (powers `enter_play`/`exit_play`/`set_play_pause`/`play_step`/`get_play_state`) | No; the play tools report NOT_SUPPORTED if absent |
 | `IInputSimulator` | Inject synthetic input in-process (powers `send_input`) | No; `send_input` falls back to OS-level window injection if absent |
