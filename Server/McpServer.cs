@@ -162,7 +162,9 @@ namespace AkerMcp.Server
                 ServerInfo = new ImplementationInfo
                 {
                     Name = "AkerMcp",
-                    Version = "1.0.0"
+                    // The version the packages and the startup log announce; a
+                    // hard-coded "1.0.0" sat here through six releases.
+                    Version = AkerMcp.Shared.Ipc.IpcConstants.ProtocolVersion
                 },
                 Instructions = ServerInstructions.Handshake(
                     _toolRegistry.ToolNames, _toolRegistry.HiddenTools, _toolRegistry.Profile),

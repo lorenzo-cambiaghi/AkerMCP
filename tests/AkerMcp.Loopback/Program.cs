@@ -110,6 +110,9 @@ namespace AkerMcp.Loopback
             }
             var (inc, _) = new ToolRegistry(engine).ApplyProfile("core", include: new[] { "playtest" }, exclude: new[] { "delete" });
             Check("include/exclude adjust a profile by name", inc.Contains("playtest") && !inc.Contains("delete"));
+            var badProfile = false;
+            try { ToolProfiles.Resolve("turbo"); } catch (System.ArgumentException) { badProfile = true; }
+            Check("an unknown profile name is refused", badProfile);
             var hiddenCall = await Call(new ToolRegistry(engine).Tap(r => r.ApplyProfile("core")), "playtest", new { });
             Check("calling a hidden tool names the profile and the fix", Text(hiddenCall).Contains("not loaded in tool profile 'core'") && Text(hiddenCall).Contains("--profile full"), Text(hiddenCall));
             var tooLong = new List<string>();

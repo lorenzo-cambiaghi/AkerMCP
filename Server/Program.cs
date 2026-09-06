@@ -6,8 +6,21 @@ namespace AkerMcp.Server
 {
     class Program
     {
-        static async Task Main(string[] args)
+        static async Task<int> Main(string[] args)
         {
+            // Resolve the tool profile before anything is opened: a bad name is a
+            // configuration error, answered with exit code 2 and nothing to clean up.
+            string profile;
+            try
+            {
+                profile = ToolProfiles.Resolve(ProfileArgument(args));
+            }
+            catch (ArgumentException ex)
+            {
+                StdioTransport.LogError(ex.Message);
+                return 2;
+            }
+
             using var cts = new CancellationTokenSource();
             Console.CancelKeyPress += (_, e) =>
             {
@@ -28,21 +41,13 @@ namespace AkerMcp.Server
             var retryTask = Task.Run(() => RetryEngineConnection(engine, cts.Token));
 
             var toolRegistry = new ToolRegistry(engine);
-            try
-            {
-                var (kept, dropped) = toolRegistry.ApplyProfile(
-                    ToolProfiles.Resolve(ProfileArgument(args)),
-                    ToolProfiles.NamesFromEnvironment("AKER_MCP_TOOLS_INCLUDE"),
-                    ToolProfiles.NamesFromEnvironment("AKER_MCP_TOOLS_EXCLUDE"));
-                StdioTransport.LogInfo(
-                    $"Tool profile '{toolRegistry.Profile}': {kept.Count} tools" +
-                    (dropped.Count > 0 ? $", not loaded: {string.Join(", ", dropped)}" : ""));
-            }
-            catch (ArgumentException ex)
-            {
-                StdioTransport.LogError(ex.Message);
-                Environment.Exit(2);
-            }
+            var (kept, dropped) = toolRegistry.ApplyProfile(
+                profile,
+                ToolProfiles.NamesFromEnvironment("AKER_MCP_TOOLS_INCLUDE"),
+                ToolProfiles.NamesFromEnvironment("AKER_MCP_TOOLS_EXCLUDE"));
+            StdioTransport.LogInfo(
+                $"Tool profile '{toolRegistry.Profile}': {kept.Count} tools" +
+                (dropped.Count > 0 ? $", not loaded: {string.Join(", ", dropped)}" : ""));
             var resourceRegistry = new ResourceRegistry(engine);
             var server = new McpServer(transport, toolRegistry, resourceRegistry);
 
@@ -56,8 +61,10 @@ namespace AkerMcp.Server
                 // touch a disposed CancellationTokenSource after Main returns.
                 cts.Cancel();
                 try { await retryTask.WaitAsync(TimeSpan.FromSeconds(2)); }
-                catch { /* timeout or already-faulted task — process is exiting anyway */ }
+                catch { /* timeout or already-faulted task: the process is exiting anyway */ }
             }
+
+            return 0;
         }
 
         /// <summary>`--profile core` or `--profile=core` on the command line, else null.</summary>
