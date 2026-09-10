@@ -178,7 +178,9 @@ ui_action action=type text=""3.5"" keys sent to what the click focused
 
 Coordinates are always image pixels from the top-left of the last screenshot — the
 server knows the scale it was shrunk by and where the window sits, and converts them.
-Never compute screen coordinates yourself. If the window is resized the call is refused,
+Never compute screen coordinates yourself. Menus and tooltips the window opens are
+drawn into the screenshot where they are, so a dropdown can be read and clicked
+like anything else. If the window is resized the call is refused,
 because the layout no longer matches the image the coordinates came from: take a new
 screenshot and read it again.
 

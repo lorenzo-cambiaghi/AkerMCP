@@ -450,6 +450,8 @@ Coordinates are **pixels of the last screenshot**, measured from its top-left �
 {"action": "key", "keys": "ctrl+s"}
 ```
 
+**Menus are in the picture.** A dropdown is a window of its own, floating above the one that owns it, so a plain window capture renders the interface with the menu missing — the click that opened it looks like it did nothing. Popups belonging to the same process are composited onto the capture where they really are, read off the screen (a layered, composited menu comes back blank from `PrintWindow`). And focusing is skipped when that process already owns the foreground, because raising a window that is already in front closes the menu you were halfway through. Input needed no change: a click is sent in screen coordinates and already lands on whatever is topmost there.
+
 It is the last resort, not the way to edit a scene: `set_property` changes a value whatever the inspector looks like, while a click depends on the window's size, its layout and which panel has focus. Use it for what no API exposes — a modal dialog, an import wizard, a plugin's own window, a preference the engine only offers in its UI — and remember the two costs: it needs the foreground, so it takes the mouse from whoever is at the machine, and every step puts another screenshot in the context. It ships in the `full` profile; to add it to `standard` alone, set `AKER_MCP_TOOLS_INCLUDE=ui_action`.
 
 Typing goes in one character at a time with a pause between them, because a window's tolerance for synthetic text is a property of that window: measured against Windows 11 Notepad, 12 ms dropped a character and 25 ms and above were exact, so the default is 30 ms. `AKER_MCP_TYPE_GAP_MS` overrides it for a slower target.
