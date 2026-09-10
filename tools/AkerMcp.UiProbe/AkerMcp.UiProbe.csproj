@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <RootNamespace>AkerMcp.UiProbe</RootNamespace>
+    <AssemblyName>AkerMcp.UiProbe</AssemblyName>
+
+    <!-- A bench, not a shipped artifact: build-package.bat publishes the server explicitly
+         and never sweeps the solution, so this stays out of every release. It is in the
+         solution only so that `dotnet build` keeps compiling it. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+</Project>
