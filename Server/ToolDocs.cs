@@ -236,15 +236,16 @@ namespace AkerMcp.Server
                 "and to reach a modal dialog.",
 
             ["ui_action"] =
-                "Drive an interface with mouse and keyboard the way a person would: action " +
-                "screenshot | mouse_move | left_click | right_click | middle_click | double_click | " +
-                "triple_click | left_click_drag | scroll | type | key | wait. x/y are pixels of the " +
-                "last screenshot, from its top-left — the server converts them, so never pass screen " +
-                "coordinates. Every call returns the screenshot taken after the action, so one call " +
-                "is one look-act-look step; window_title chooses the window and sticks. type and key " +
-                "go to the focused control, or click x/y first when given. For what the engine API " +
-                "cannot reach — modal dialogs, import wizards, third-party or plugin windows. Scene " +
-                "edits belong to set_property, which does not depend on where a widget is drawn.",
+                "Drive an interface with mouse and keyboard the way a person would; the action enum " +
+                "lists the clicks, drag, scroll, type, key, screenshot and wait. x/y are pixels of the " +
+                "last screenshot from its top-left — the server converts them, so never pass screen " +
+                "coordinates. The answer carries the screenshot taken afterwards: one call is one " +
+                "look-act-look step. 'steps' runs up to 12 of these objects in order, for a gesture " +
+                "already decided (click, type, Enter), with one screenshot at the end. window_title " +
+                "picks the window and sticks; type and key go to the focused control, or click x/y " +
+                "first when given. For what the engine API cannot reach: modal dialogs, import " +
+                "wizards, plugin windows. Scene edits belong to set_property, which does not depend " +
+                "on where a widget is drawn.",
         };
     }
 }

@@ -36,9 +36,18 @@ namespace AkerMcp.Server
         // whole rather than mutated in place.
         private volatile CaptureAnchor? _lastCapture;
 
+        // Asks the engine whether the agent may act, for the calls that go around the engine
+        // rather than through it. Costs one IPC round trip per session against an engine with
+        // no policy, and nothing after that.
+        private readonly ConsentGate _consent;
+
         public ToolRegistry(EngineConnection engine)
         {
             _engine = engine;
+            _consent = new ConsentGate(engine);
+            // A new plugin is a new policy, and a new window: neither the previous engine's
+            // consent nor its screenshot describes this one.
+            engine.OnConnected += () => { _consent.Reset(); _lastCapture = null; };
             _jsonOptions = new JsonSerializerOptions
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -454,7 +463,12 @@ namespace AkerMcp.Server
                             ""type"": ""string"",
                             ""enum"": [""screenshot"", ""mouse_move"", ""left_click"", ""right_click"", ""middle_click"",
                                        ""double_click"", ""triple_click"", ""left_click_drag"", ""scroll"", ""type"", ""key"", ""wait""],
-                            ""description"": ""What to do""
+                            ""description"": ""What to do (omit when using 'steps')""
+                        },
+                        ""steps"": {
+                            ""type"": ""array"",
+                            ""description"": ""Up to 12 actions run in order, each shaped like this object; one screenshot at the end"",
+                            ""items"": { ""type"": ""object"" }
                         },
                         ""x"": { ""type"": ""number"", ""description"": ""Target, in pixels of the last screenshot from its top-left"" },
                         ""y"": { ""type"": ""number"" },
@@ -468,8 +482,7 @@ namespace AkerMcp.Server
                         ""window_title"": { ""type"": ""string"", ""description"": ""Title substring of the window to act on; sticks until changed"" },
                         ""settle_ms"": { ""type"": ""integer"", ""description"": ""Pause before the follow-up screenshot (default 250)"" },
                         ""screenshot"": { ""type"": ""boolean"", ""description"": ""Return the screenshot after the action (default true)"" }
-                    },
-                    ""required"": [""action""]
+                    }
                 }"),
                 HandleUiAction);
 
@@ -602,22 +615,25 @@ namespace AkerMcp.Server
                 HandlePlaytest);
         }
 
-        private Task<ToolResult> HandleFocusWindow(JsonElement? args, CancellationToken ct)
+        private async Task<ToolResult> HandleFocusWindow(JsonElement? args, CancellationToken ct)
         {
+            if (await _consent.Refuse("Focusing a window", ct) is { } sessionRefusal)
+                return ToolResult.Error(sessionRefusal);
+
             var capture = PlatformScreenCapture.Current;
             if (capture == null)
-                return Task.FromResult(ToolResult.Error(PlatformScreenCapture.UnsupportedPlatformMessage));
+                return ToolResult.Error(PlatformScreenCapture.UnsupportedPlatformMessage);
 
             string? title = null;
             if (args is JsonElement a && a.ValueKind == JsonValueKind.Object && a.TryGetProperty("title", out var t))
                 title = t.GetString();
             if (string.IsNullOrWhiteSpace(title))
-                return Task.FromResult(ToolResult.Error("Missing required 'title' (window title substring)."));
+                return ToolResult.Error("Missing required 'title' (window title substring).");
 
             var ok = capture.FocusWindowByTitle(title, out var err);
-            return Task.FromResult(ok
+            return ok
                 ? ToolResult.Text($"Brought window matching '{title}' to the foreground.")
-                : ToolResult.Error(err ?? "Failed to focus the window."));
+                : ToolResult.Error(err ?? "Failed to focus the window.");
         }
 
         /// <summary>
@@ -676,32 +692,41 @@ namespace AkerMcp.Server
             return ToolResult.Text(JsonSerializer.Serialize(payload, _jsonOptions));
         }
 
-        private Task<ToolResult> HandleListWindows(JsonElement? args, CancellationToken ct)
+        private async Task<ToolResult> HandleListWindows(JsonElement? args, CancellationToken ct)
         {
+            // Consent is asked before capability: a refusal is the answer even where the
+            // platform could have obliged. The titles of every window on the machine
+            // describe the user, not the project.
+            if (await _consent.Refuse("Listing windows", ct) is { } refusal)
+                return ToolResult.Error(refusal);
+
             var capture = PlatformScreenCapture.Current;
             if (capture == null)
-                return Task.FromResult(ToolResult.Error(PlatformScreenCapture.UnsupportedPlatformMessage));
+                return ToolResult.Error(PlatformScreenCapture.UnsupportedPlatformMessage);
             var json = JsonSerializer.Serialize(new { windows = capture.ListWindows() }, _jsonOptions);
-            return Task.FromResult(ToolResult.Text(json));
+            return ToolResult.Text(json);
         }
 
-        private Task<ToolResult> HandleCaptureWindow(JsonElement? args, CancellationToken ct)
+        private async Task<ToolResult> HandleCaptureWindow(JsonElement? args, CancellationToken ct)
         {
+            if (await _consent.Refuse("Capturing a window", ct) is { } refusal)
+                return ToolResult.Error(refusal);
+
             string? title = null;
             if (args is JsonElement a && a.ValueKind == JsonValueKind.Object && a.TryGetProperty("title", out var t))
                 title = t.GetString();
             if (string.IsNullOrWhiteSpace(title))
-                return Task.FromResult(ToolResult.Error("Missing required 'title' (window title substring)."));
+                return ToolResult.Error("Missing required 'title' (window title substring).");
 
             var (jpeg, anchor, note, error) = CaptureWindowAnchored(title!);
             if (jpeg == null)
-                return Task.FromResult(ToolResult.Error(error ?? "Window capture failed."));
+                return ToolResult.Error(error ?? "Window capture failed.");
 
             var content = new List<ContentItem>();
             if (anchor != null) content.Add(ContentItem.FromText(anchor.Describe()));
             else if (note != null) content.Add(ContentItem.FromText(note));
             content.Add(ContentItem.FromImage(Convert.ToBase64String(jpeg), "image/jpeg"));
-            return Task.FromResult(new ToolResult { Content = content });
+            return new ToolResult { Content = content };
         }
 
         /// <summary>
@@ -711,8 +736,11 @@ namespace AkerMcp.Server
         /// The geometry is read before the capture, not after: taken afterwards it could
         /// describe a window the user has since dragged, and every coordinate derived from
         /// it would be wrong by the width of that drag with nothing to show for it. When
-        /// the platform cannot report geometry (macOS today) the capture still succeeds —
-        /// the image is worth having on its own — and only the anchor is missing.
+        /// the platform cannot report geometry the capture still succeeds — the image is
+        /// worth having on its own — and only the anchor is missing.
+        ///
+        /// Consent is the caller's to check, not this method's: every path into it is already
+        /// a tool that asked.
         /// </summary>
         private (byte[]? jpeg, CaptureAnchor? anchor, string? note, string? error) CaptureWindowAnchored(string title)
         {
@@ -778,20 +806,34 @@ namespace AkerMcp.Server
         /// </summary>
         private async Task<ToolResult> HandleUiAction(JsonElement? args, CancellationToken ct)
         {
-            var action = (ReadString(args, "action") ?? "").Trim().ToLowerInvariant();
-            if (action.Length == 0 || Array.IndexOf(UiActions, action) < 0)
-                return ToolResult.Error(
-                    $"'action' must be one of: {string.Join(", ", UiActions)}." +
-                    (action.Length == 0 ? "" : $" Got '{action}'."));
+            // One step or a list of them. A list is not a convenience: a click, the text it
+            // focuses and the Enter that commits it are one intention, and splitting them over
+            // three round trips inserts a model turn — and a screenshot — into the middle of a
+            // gesture that was never in doubt. The list ends with one image, of the result.
+            var steps = ReadUiSteps(args, out var stepsError);
+            if (stepsError != null) return ToolResult.Error(stepsError);
 
             var capture = PlatformScreenCapture.Current;
             if (capture == null)
                 return ToolResult.Error(PlatformScreenCapture.UnsupportedPlatformMessage);
 
-            bool actsOnScreen = action != "screenshot" && action != "wait";
+            bool anyActsOnScreen = false;
+            foreach (var s in steps)
+            {
+                var a = ActionOf(s);
+                if (a.Length == 0 || Array.IndexOf(UiActions, a) < 0)
+                    return ToolResult.Error(
+                        $"'action' must be one of: {string.Join(", ", UiActions)}." +
+                        (a.Length == 0 ? "" : $" Got '{a}'."));
+                if (ActsOnScreen(a)) anyActsOnScreen = true;
+            }
+
             var injector = PlatformInput.Current;
-            if (actsOnScreen && injector == null)
+            if (anyActsOnScreen && injector == null)
                 return ToolResult.Error(PlatformInput.UnsupportedPlatformMessage);
+
+            if (await _consent.Refuse("Driving the interface", ct) is { } refusal)
+                return ToolResult.Error(refusal);
 
             // Which window this call is about: the one asked for, else the one already
             // anchored, else the running game's, else the editor's.
@@ -813,7 +855,7 @@ namespace AkerMcp.Server
                 if (fresh == null)
                     return ToolResult.Error(err ?? note ?? $"Cannot anchor to window '{title}'.");
                 anchor = fresh;
-                if (actsOnScreen)
+                if (anyActsOnScreen)
                     return ToolResult.Error(
                         $"No screenshot of '{anchor.WindowTitle}' had been taken yet, so image " +
                         "coordinates had no meaning. It is anchored now — call ui_action with " +
@@ -821,50 +863,76 @@ namespace AkerMcp.Server
             }
 
             var log = new List<string>();
+            bool focused = false;
+            ToolResult? failure = null;
 
-            if (action == "wait")
+            for (int i = 0; i < steps.Count && failure == null; i++)
             {
-                var waitMs = (int)Math.Clamp(ReadNumber(args, "duration_ms") ?? 500, 0, 10_000);
-                await Task.Delay(waitMs, ct);
-                log.Add($"Waited {waitMs} ms.");
-            }
-            else if (actsOnScreen)
-            {
-                // Synthetic input goes to the foreground window, so the target has to be it.
-                if (!capture.FocusWindowByTitle(title!, out var focusErr))
-                    return ToolResult.Error($"Cannot act on '{title}': {focusErr}");
-                await Task.Delay(FocusSettleMs, ct);
+                var step = steps[i];
+                var action = ActionOf(step);
+                string label = steps.Count > 1 ? $"[{i + 1}] " : "";
 
-                // The window may have moved or been resized since the capture. A move only
-                // shifts the origin and the image still describes what is on screen; a resize
-                // re-lays out the contents, and every coordinate read off the old image now
-                // points at something else — so that one is refused rather than guessed at.
-                if (capture.TryGetWindowGeometry(title!, out var geometry, out _) && geometry != null)
+                if (action == "wait")
                 {
-                    if (geometry.Width != anchor.SourceWidth || geometry.Height != anchor.SourceHeight)
-                        return ToolResult.Error(
-                            $"'{anchor.WindowTitle}' was resized since the last screenshot " +
-                            $"({anchor.SourceWidth}x{anchor.SourceHeight} to {geometry.Width}x{geometry.Height}), " +
-                            "so its layout no longer matches the image those coordinates came from. " +
-                            "Call ui_action with action 'screenshot' and read the new one.");
-
-                    if (geometry.OriginX != anchor.OriginX || geometry.OriginY != anchor.OriginY)
+                    var waitMs = (int)Math.Clamp(ReadNumber(step, "duration_ms") ?? 500, 0, 10_000);
+                    await Task.Delay(waitMs, ct);
+                    log.Add($"{label}waited {waitMs} ms.");
+                }
+                else if (ActsOnScreen(action))
+                {
+                    // Synthetic input goes to the foreground window, so the target has to be
+                    // it. Once per call: refocusing between steps would fight any menu or
+                    // popup a previous step opened.
+                    if (!focused)
                     {
-                        log.Add($"Window moved to {geometry.OriginX},{geometry.OriginY}; coordinates followed it.");
-                        anchor = anchor.WithOrigin(geometry.OriginX, geometry.OriginY);
-                        _lastCapture = anchor;
+                        if (!capture.FocusWindowByTitle(title!, out var focusErr))
+                        {
+                            failure = ToolResult.Error($"Cannot act on '{title}': {focusErr}");
+                            break;
+                        }
+                        await Task.Delay(FocusSettleMs, ct);
+                        focused = true;
                     }
+
+                    var moved = FollowWindow(capture, title!, ref anchor, out var geometryError);
+                    if (geometryError != null) { failure = ToolResult.Error(geometryError); break; }
+                    if (moved != null) log.Add(moved);
+
+                    var stepLog = new List<string>();
+                    failure = PerformUiAction(action, step, anchor!, injector!, stepLog);
+                    foreach (var line in stepLog) log.Add(label + char.ToLowerInvariant(line[0]) + line.Substring(1));
                 }
 
-                var result = PerformUiAction(action, args, anchor, injector!, log);
-                if (result != null) return result;
+                // A per-step pause, for the one step that opens something slow. The pause after
+                // the last step is the settle before the screenshot, so it is not applied twice.
+                var stepSettle = ReadNumber(step, "settle_ms");
+                if (stepSettle.HasValue && i < steps.Count - 1)
+                    await Task.Delay((int)Math.Clamp(stepSettle.Value, 0, 5_000), ct);
             }
 
-            var settleMs = (int)Math.Clamp(ReadNumber(args, "settle_ms") ?? DefaultSettleMs, 0, 5_000);
+            var lastStep = steps.Count > 0 ? steps[steps.Count - 1] : args;
+            var settleMs = (int)Math.Clamp(
+                ReadNumber(lastStep, "settle_ms") ?? ReadNumber(args, "settle_ms") ?? DefaultSettleMs, 0, 5_000);
             if (settleMs > 0) await Task.Delay(settleMs, ct);
 
+            var report = string.Join(" ", log);
+            if (failure != null)
+            {
+                // Still show where it got to: a sequence that stopped halfway is a picture
+                // worth having, and the alternative is a blind retry.
+                var reached = CaptureWindowAnchored(title!);
+                var why = failure.Content.Count > 0 ? failure.Content[0].Text : "the step failed";
+                var errorContent = new List<ContentItem>
+                {
+                    ContentItem.FromText((report.Length > 0 ? report + "\n" : "") + why)
+                };
+                if (reached.jpeg != null)
+                    errorContent.Add(ContentItem.FromImage(Convert.ToBase64String(reached.jpeg), "image/jpeg"));
+                return new ToolResult { Content = errorContent, IsError = true };
+            }
+
             if (!ReadBool(args ?? default, "screenshot", true))
-                return ToolResult.Text(string.Join(" ", log));
+                return ToolResult.Text(report.Length > 0 ? report : "Done.");
 
             var (jpeg, after, afterNote, captureErr) = CaptureWindowAnchored(title!);
             if (jpeg == null)
@@ -875,12 +943,87 @@ namespace AkerMcp.Server
 
             var content = new List<ContentItem>
             {
-                ContentItem.FromText(string.Join(" ", log) + (log.Count > 0 ? "\n" : "")
+                ContentItem.FromText(report + (report.Length > 0 ? "\n" : "")
                                      + (after?.Describe() ?? afterNote ?? ""))
             };
             content.Add(ContentItem.FromImage(Convert.ToBase64String(jpeg), "image/jpeg"));
             return new ToolResult { Content = content };
         }
+
+        private static string ActionOf(JsonElement? step)
+            => (ReadString(step, "action") ?? "").Trim().ToLowerInvariant();
+
+        private static bool ActsOnScreen(string action)
+            => action != "screenshot" && action != "wait";
+
+        /// <summary>
+        /// The steps to run: an explicit 'steps' array, or the call itself read as one step.
+        /// </summary>
+        private static List<JsonElement?> ReadUiSteps(JsonElement? args, out string? error)
+        {
+            error = null;
+            var steps = new List<JsonElement?>();
+
+            if (args is JsonElement a && a.ValueKind == JsonValueKind.Object
+                && a.TryGetProperty("steps", out var list) && list.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in list.EnumerateArray())
+                {
+                    if (item.ValueKind != JsonValueKind.Object)
+                    {
+                        error = "Each entry of 'steps' must be an object, e.g. " +
+                                "{\"action\":\"left_click\",\"x\":100,\"y\":200}.";
+                        return steps;
+                    }
+                    steps.Add(item);
+                }
+                if (steps.Count == 0)
+                    error = "'steps' is empty. Give at least one step, or use 'action' for a single one.";
+                if (steps.Count > MaxUiSteps)
+                    error = $"'steps' has {steps.Count} entries; {MaxUiSteps} is the limit. A sequence " +
+                            "longer than that is not a gesture any more — look at a screenshot in between.";
+                return steps;
+            }
+
+            steps.Add(args);
+            return steps;
+        }
+
+        /// <summary>
+        /// Keeps the anchor pointing at the window after the user has touched it. A move only
+        /// shifts the origin and the image still describes what is on screen, so it is followed
+        /// silently; a resize re-lays out the contents, and every coordinate read off the old
+        /// image now points at something else, so that one is refused rather than guessed at.
+        /// </summary>
+        private string? FollowWindow(
+            IPlatformScreenCapture capture, string title, ref CaptureAnchor? anchor, out string? error)
+        {
+            error = null;
+            if (anchor == null) return null;
+            if (!capture.TryGetWindowGeometry(title, out var geometry, out _) || geometry == null) return null;
+
+            if (geometry.Width != anchor.SourceWidth || geometry.Height != anchor.SourceHeight)
+            {
+                error = $"'{anchor.WindowTitle}' was resized since the last screenshot " +
+                        $"({anchor.SourceWidth}x{anchor.SourceHeight} to {geometry.Width}x{geometry.Height}), " +
+                        "so its layout no longer matches the image those coordinates came from. " +
+                        "Call ui_action with action 'screenshot' and read the new one.";
+                return null;
+            }
+
+            if (geometry.OriginX == anchor.OriginX && geometry.OriginY == anchor.OriginY) return null;
+
+            anchor = anchor.WithOrigin(geometry.OriginX, geometry.OriginY);
+            _lastCapture = anchor;
+            return $"Window moved to {geometry.OriginX},{geometry.OriginY}; coordinates followed it.";
+        }
+
+        /// <summary>
+        /// How many steps one call may carry. Past this the sequence is being used to navigate
+        /// blind rather than to complete a gesture, and the screenshot at the end is too late
+        /// to tell anyone where it went wrong.
+        /// </summary>
+        private const int MaxUiSteps = 12;
 
         /// <summary>
         /// Runs the pointer/keyboard half of ui_action. Returns null when it worked (the
@@ -1315,6 +1458,15 @@ namespace AkerMcp.Server
                 // when Game Studio isn't the foreground window, so the back-buffer
                 // readback never runs — exactly the situation during MCP use. OS-level
                 // PrintWindow captures background/occluded windows, so it still works.)
+                //
+                // Unless the engine was not failing but refusing. An adapter that gates the
+                // agent's access returns no image on purpose, and it returns it the same way
+                // an adapter with no capture at all does; falling back then hands over the
+                // very picture the editor declined to take. So the policy is asked first, and
+                // only here — the engine's own capture above already answered to it.
+                if (await _consent.Refuse("Screenshot", ct) is { } refusal)
+                    return (null, refusal);
+
                 var capture = PlatformScreenCapture.Current;
                 if (capture == null)
                     return (null,
@@ -1460,7 +1612,12 @@ namespace AkerMcp.Server
                 }
             }
 
-            // Strategy 2: OS-level fallback (focus the target window, then SendInput).
+            // Strategy 2: OS-level fallback (focus the target window, then SendInput). Same
+            // reasoning as the screenshot fallback: an engine that refused in-process injection
+            // must not be typed at from outside instead.
+            if (await _consent.Refuse("Sending input", ct) is { } inputRefusal)
+                return ToolResult.Error(inputRefusal);
+
             var injector = PlatformInput.Current;
             if (injector == null)
                 return ToolResult.Error(PlatformInput.UnsupportedPlatformMessage);

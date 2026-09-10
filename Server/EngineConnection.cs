@@ -210,17 +210,56 @@ namespace AkerMcp.Server
                 StdioTransport.LogInfo(
                     $"Connected to {candidate} via {candidate.Pipe} (Client Protocol: v{candidate.ProtocolVersion})");
 
-                if (candidate.ProtocolVersion != IpcConstants.ProtocolVersion)
-                {
-                    StdioTransport.LogError($"PROTOCOL MISMATCH! Server is v{IpcConstants.ProtocolVersion} " +
-                                            $"but Client is v{candidate.ProtocolVersion}. Expect connection errors.");
-                }
+                var skew = DescribeVersionSkew(candidate.ProtocolVersion, IpcConstants.ProtocolVersion);
+                if (skew.breaking) StdioTransport.LogError(skew.message!);
+                else if (skew.message != null) StdioTransport.LogInfo(skew.message);
 
+                OnConnected?.Invoke();
                 return true;
             }
 
             StdioTransport.LogInfo("No engine plugin available after discovery scan.");
             return false;
+        }
+
+        /// <summary>Raised once a plugin is connected, so per-session state can be cleared.</summary>
+        public event Action? OnConnected;
+
+        /// <summary>
+        /// What to say about a plugin speaking a different protocol version than the server.
+        ///
+        /// Only the major matters. A minor difference means one side knows a method the other
+        /// does not, which is precisely what every optional capability here already is: the
+        /// older peer answers NOT_SUPPORTED and the caller carries on. Reporting that as
+        /// "PROTOCOL MISMATCH! Expect connection errors" — which is what this did before —
+        /// taught everyone to ignore the one line that would have mattered when a major really
+        /// did change.
+        /// </summary>
+        public static (bool breaking, string? message) DescribeVersionSkew(string clientVersion, string serverVersion)
+        {
+            if (string.Equals(clientVersion, serverVersion, StringComparison.Ordinal))
+                return (false, null);
+
+            static int Major(string v)
+            {
+                var dot = v.IndexOf('.');
+                var head = dot > 0 ? v.Substring(0, dot) : v;
+                return int.TryParse(head, out var n) ? n : -1;
+            }
+
+            int clientMajor = Major(clientVersion), serverMajor = Major(serverVersion);
+            if (clientMajor < 0 || serverMajor < 0)
+                return (true, $"PROTOCOL MISMATCH! Server is v{serverVersion} but the plugin reports " +
+                              $"'{clientVersion}', which is not a version number. Expect connection errors.");
+
+            if (clientMajor != serverMajor)
+                return (true, $"PROTOCOL MISMATCH! Server is v{serverVersion} but the plugin is " +
+                              $"v{clientVersion}: different major versions do not interoperate. " +
+                              "Update the plugin's bundled AkerMcp.Client/AkerMcp.Shared.");
+
+            var older = string.CompareOrdinal(clientVersion, serverVersion) < 0 ? "plugin" : "server";
+            return (false, $"Protocol v{clientVersion} (plugin) vs v{serverVersion} (server): compatible. " +
+                           $"Anything added after the {older}'s version answers NOT_SUPPORTED.");
         }
 
         private static string DescribeAll(List<EngineIdentity> engines)

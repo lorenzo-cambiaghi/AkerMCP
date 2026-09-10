@@ -49,6 +49,13 @@ namespace AkerMcp.Client
         protected virtual IInputSimulator? CreateInputSimulator() => null;
         protected virtual ISoundImporter? CreateSoundImporter() => null;
 
+        /// <summary>
+        /// Override in an editor where the user can grant and revoke the agent's access. The
+        /// server then declines in the engine's name instead of routing around a refusal it
+        /// cannot tell apart from a missing capability — see <see cref="IAgentConsent"/>.
+        /// </summary>
+        protected virtual IAgentConsent? CreateAgentConsent() => null;
+
         protected abstract void Log(string message);
         protected abstract void LogError(string message);
 
@@ -76,7 +83,8 @@ namespace AkerMcp.Client
                 CreateSceneManager(),
                 CreatePlayModeController(),
                 CreateInputSimulator(),
-                CreateSoundImporter());
+                CreateSoundImporter(),
+                CreateAgentConsent());
 
             _cts = new CancellationTokenSource();
 

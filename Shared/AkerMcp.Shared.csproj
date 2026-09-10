@@ -13,7 +13,7 @@
       Build with: dotnet pack Shared -c Release -o <out>
     -->
     <IsPackable>true</IsPackable>
-    <Version>1.6.0</Version>
+    <Version>1.7.0</Version>
     <PackageId>AkerMcp.Shared</PackageId>
     <Authors>Lorenzo Cambiaghi</Authors>
     <Description>AkerMCP shared contracts: engine abstraction, IPC protocol and models.</Description>

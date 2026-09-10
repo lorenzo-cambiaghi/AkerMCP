@@ -26,6 +26,7 @@ namespace AkerMcp.Client
         private readonly IPlayModeController? _playModeController;
         private readonly IInputSimulator? _inputSimulator;
         private readonly ISoundImporter? _soundImporter;
+        private readonly IAgentConsent? _agentConsent;
         private readonly IEngineCapabilities _capabilities;
         private readonly IMainThreadDispatcher _dispatcher;
         private readonly PropertyPathResolver _pathResolver;
@@ -63,7 +64,8 @@ namespace AkerMcp.Client
             ISceneManager? sceneManager = null,
             IPlayModeController? playModeController = null,
             IInputSimulator? inputSimulator = null,
-            ISoundImporter? soundImporter = null)
+            ISoundImporter? soundImporter = null,
+            IAgentConsent? agentConsent = null)
         {
             _sceneGraph = sceneGraph;
             _capabilities = capabilities;
@@ -80,6 +82,7 @@ namespace AkerMcp.Client
             _playModeController = playModeController;
             _inputSimulator = inputSimulator;
             _soundImporter = soundImporter;
+            _agentConsent = agentConsent;
             _pathResolver = new PropertyPathResolver();
             _inspector = new ReflectionInspector();
             _methodInvoker = new MethodInvoker();
@@ -101,6 +104,14 @@ namespace AkerMcp.Client
 
                 if (request.Method == IpcConstants.Methods.ImportSound)
                     return await HandleImportSound(request, ct);
+
+                // Answered before the switch, and off the main thread on purpose: the server
+                // asks this when it is about to reach around the engine, which is most useful
+                // exactly when the editor's main thread is stuck behind a modal dialog. A
+                // consent read that queues behind that dialog would time out and tell the
+                // server nothing at the one moment it needed an answer.
+                if (request.Method == IpcConstants.Methods.GetConsent)
+                    return HandleGetConsent(request);
 
                 var result = request.Method switch
                 {
@@ -153,6 +164,21 @@ namespace AkerMcp.Client
                 var detail = frame != null ? $" ({frame})" : "";
                 return IpcResponse.Fail(request.Id, $"{ex.GetType().Name}: {ex.Message}{detail}");
             }
+        }
+
+        private IpcResponse HandleGetConsent(IpcRequest request)
+        {
+            if (_agentConsent == null)
+                return IpcResponse.FailWithCode(request.Id,
+                    IpcConstants.ErrorCodes.NotSupported,
+                    "Engine does not implement IAgentConsent; no consent policy governs this session.");
+
+            // Deliberately not dispatched to the main thread: see the note at the call site.
+            // An adapter's GetConsent must therefore be safe to read from any thread — it is
+            // specified as a cheap read of current state, not a prompt.
+            var state = _agentConsent.GetConsent() ?? new ConsentState();
+            return IpcResponse.Ok(request.Id,
+                Encoding.UTF8.GetBytes(JsonSerializer.Serialize(state, _compactJsonOptions)));
         }
 
         private async Task<IpcResponse> HandleTakeScreenshot(IpcRequest request, CancellationToken ct)

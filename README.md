@@ -456,6 +456,47 @@ Typing goes in one character at a time with a pause between them, because a wind
 
 **Platforms.** On Windows this is `SendInput` against the virtual desktop, measured exact to the pixel on a scaled capture and on a second monitor. On macOS it is Quartz `CGEvent`, and it needs **Accessibility** permission (System Settings → Privacy & Security → Accessibility) on top of the Screen Recording permission captures already need — without it `CGEventPost` discards events silently, so the tool checks first and says which switch to flip instead of reporting a click that never happened. The macOS path compiles but has not been run on a Mac yet: the parts to check first are the ANSI keycode table used by `key`, the click-state field that makes a double click a double click, and whether activating the owning process through System Events reliably brings the target window forward. Linux reports that OS-level input is not implemented.
 
+#### When the editor can say no
+
+An editor whose user grants and revokes the agent's access has a problem the server used to make
+worse. Its refusals go through the adapter, and an adapter refuses a screenshot by returning no
+image — which is also what an adapter with no screen capture returns. The server, reading "no
+image", did the helpful thing and grabbed the window with `PrintWindow` instead. The user revoked
+the session and got a photograph of their screen anyway, taken by the half of the system their
+revocation never reached. `ui_action` would have widened that from looking to clicking.
+
+`IAgentConsent` closes it by letting the engine say *refused* where it could only say *nothing*:
+
+```csharp
+protected override IAgentConsent? CreateAgentConsent() => new MyConsent(access);
+
+public ConsentState GetConsent() => new ConsentState
+{
+    Granted = access.SessionOpen,
+    Reason  = access.SessionOpen ? null : "the user has not allowed a session",
+};
+```
+
+The server asks before every call that reaches around the engine — the screenshot fallback,
+`list_windows`, `capture_window`, `focus_window`, `ui_action`, and `send_input`'s OS-level path —
+and declines with the engine's own sentence. It never asks on the ordinary inspect/modify/verify
+path, which the adapter already governs.
+
+Three properties make it cheap and safe to leave on:
+
+- **An engine without it pays one round trip per connection.** The NOT_SUPPORTED answer is final,
+  so Unity, Godot and Stride are asked once and never again.
+- **An answer is cached for five seconds**, so a twelve-step `ui_action` is not twelve IPC calls.
+- **Silence keeps the last answer.** A revocation already heard survives a frozen editor; an engine
+  that never answered was not claiming a policy. Without this, an editor stuck behind a modal dialog
+  could not be unblocked from outside — which is the one thing the OS-level tools are for. There is
+  also no consent call at all when no engine is connected: asking would queue behind the reconnect
+  grace period, and it once turned a three-step `ui_action` into 22 seconds.
+
+`GetConsent` is read off the pipe thread, deliberately, so it must be a cheap read of current state
+that any thread can make — never a prompt, never a wait on the main thread. That is the whole point:
+it is asked when the main thread may be the thing that is stuck.
+
 #### How `take_screenshot` works
 
 The tool follows a **hybrid capture strategy** that prefers quality but always succeeds:
@@ -845,6 +886,7 @@ public class MyEnginePlugin : EnginePluginBase
 | `ISceneManager` | Create / open / save scenes (powers `new_scene`/`open_scene`/`save_scene`) | No; the scene tools report it as unavailable if absent |
 | `IPlayModeController` | Start/stop play, pause/step, read play state (powers `enter_play`/`exit_play`/`set_play_pause`/`play_step`/`get_play_state`) | No; the play tools report NOT_SUPPORTED if absent |
 | `IInputSimulator` | Inject synthetic input in-process (powers `send_input`) | No; `send_input` falls back to OS-level window injection if absent |
+| `IAgentConsent` | Whether the user currently allows the agent to act, and why not | No; without it no policy governs the session and the engine is asked once per connection, then never again |
 
 > **Tip for the macOS OS-level fallback:** `IEngineCapabilities.EngineName` is used as a window-title preference signal: the macOS capture path prefers PID-owned windows whose title *contains* this string (anywhere in the title) to disambiguate the editor's main window from inspector/floating panels. The match is case-insensitive and works for both prefix-style titles (Unity: `"Unity 6000.x …"`) and suffix-style titles (Godot: `"Scene - Project - Godot Engine"`). If no window matches, the largest PID-owned window is used as a fallback, so even a non-matching `EngineName` won't break the capture.
 

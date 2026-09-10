@@ -189,8 +189,25 @@ which panel has focus, and it cannot be verified except by looking again. Reach 
 window, a preference the engine only offers in its UI — and verify the result with
 `get_property` or `inspect` whenever the thing you changed is readable that way.
 
+When the gesture is already decided — click a field, type a value, press Enter — send
+it as one call:
+
+```
+ui_action steps=[{""action"":""left_click"",""x"":1420,""y"":305},
+                 {""action"":""type"",""text"":""3.5""},
+                 {""action"":""key"",""keys"":""enter""}]
+```
+
+Up to twelve steps, one screenshot at the end, and a step may carry its own
+`settle_ms` when it opens something slow. If a step fails the sequence stops there
+and the answer says which one, with a picture of where it got to. Use it for a
+gesture you can predict, not to navigate blind: exploring still means looking
+between the steps.
+
 Two costs worth knowing: it needs the foreground, so it takes the mouse away from
 whoever is at the machine, and every step puts another screenshot in the context.
+An editor may also refuse — if the user has revoked the agent's session, the OS-level
+tools decline in the engine's own words rather than working around it.
 
 ## Anti-patterns
 

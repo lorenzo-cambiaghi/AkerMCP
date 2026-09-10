@@ -167,6 +167,19 @@ namespace AkerMcp.Loopback
                 shrunk.Describe().Contains("1920x1080") && shrunk.Describe().Contains("2560x1440"),
                 shrunk.Describe());
 
+            // Protocol skew. Every optional capability here is "the older peer answers
+            // NOT_SUPPORTED", so a minor difference is normal operation and must not be
+            // reported as breakage — a warning that cries wolf on every release is one nobody
+            // reads on the release that matters.
+            Check("a minor protocol difference is compatible, not a mismatch",
+                !EngineConnection.DescribeVersionSkew("1.6.0", "1.7.0").breaking
+                && !EngineConnection.DescribeVersionSkew("1.7.0", "1.6.0").breaking);
+            Check("the same version says nothing at all",
+                EngineConnection.DescribeVersionSkew("1.7.0", "1.7.0").message == null);
+            Check("a major difference is a real mismatch",
+                EngineConnection.DescribeVersionSkew("2.0.0", "1.7.0").breaking
+                && EngineConnection.DescribeVersionSkew("nonsense", "1.7.0").breaking);
+
             // One version, three places: IpcConstants.ProtocolVersion and the <Version> of the two
             // packable csproj. The packages are versioned by the protocol they speak, so a drift
             // here ships a package that announces a contract it does not implement.
@@ -240,6 +253,47 @@ namespace AkerMcp.Loopback
 
             var cap = await Call(reg, "capture_sequence", new { count = 2, interval_ms = 10 });
             Check("capture_sequence returns 2 images", CountImages(cap) == 2, $"images={CountImages(cap)}; " + Text(cap));
+
+            // Consent. The tools that reach around the engine to the OS are the ones an
+            // in-process gate cannot see, so this is where a revoked session used to keep
+            // working: the adapter returned nothing, the server read that as "cannot" rather
+            // than "will not", and photographed the window itself.
+            var callsBefore = fake.Consent.Calls;
+            var lw = await Call(reg, "list_windows", new { });
+            Check("list_windows works while consent is granted", !Text(lw).Contains("refused"), Text(lw));
+            for (int i = 0; i < 4; i++) await Call(reg, "list_windows", new { });
+            Check("a granted answer is cached, not asked once per call",
+                fake.Consent.Calls - callsBefore <= 2, $"{fake.Consent.Calls - callsBefore} asks for 5 calls");
+
+            fake.Consent.Granted = false;
+            await Task.Delay(5200);   // let the cached answer go stale
+
+            var lwDenied = await Call(reg, "list_windows", new { });
+            Check("list_windows is refused once the session is revoked",
+                lwDenied.IsError && Text(lwDenied).Contains("revoked the session"), Text(lwDenied));
+
+            var cwDenied = await Call(reg, "capture_window", new { title = "anything" });
+            Check("capture_window is refused too", cwDenied.IsError && Text(cwDenied).Contains("revoked"), Text(cwDenied));
+
+            var fwDenied = await Call(reg, "focus_window", new { title = "anything" });
+            Check("focus_window is refused too", fwDenied.IsError && Text(fwDenied).Contains("revoked"), Text(fwDenied));
+
+            var uiDenied = await Call(reg, "ui_action", new { action = "screenshot", window_title = "anything" });
+            Check("ui_action is refused too", uiDenied.IsError && Text(uiDenied).Contains("revoked"), Text(uiDenied));
+
+            var siDenied = await Call(reg, "send_input", new
+            {
+                events = new[] { new { type = "key", key = "Space" } },
+                coords = "image",   // forces the OS-level path, where the refusal has to hold
+            });
+            Check("send_input's OS-level path is refused too",
+                siDenied.IsError && Text(siDenied).Contains("revoked"), Text(siDenied));
+
+            fake.Consent.Granted = true;
+            await Task.Delay(5200);
+            var lwAgain = await Call(reg, "list_windows", new { });
+            Check("granting it again lets the tools through",
+                !Text(lwAgain).Contains("refused"), Text(lwAgain));
 
             var sam = await Call(reg, "sample_state", new { probes = new { x = "1+1" } });
             Check("sample_state ok", !sam.IsError, Text(sam));

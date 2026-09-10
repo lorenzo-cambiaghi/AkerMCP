@@ -17,6 +17,7 @@ namespace AkerMcp.Loopback
         // Cached so state + recorded input persist across a Stop()/Start() (a simulated reload).
         public readonly FakePlayModeController Play = new FakePlayModeController();
         public readonly FakeInputSimulator Input = new FakeInputSimulator();
+        public readonly FakeAgentConsent Consent = new FakeAgentConsent();
 
         private readonly string _engineName;
 
@@ -34,9 +35,27 @@ namespace AkerMcp.Loopback
         protected override IScreenCapture? CreateScreenCapture() => new FakeScreenCapture();
         protected override IPlayModeController? CreatePlayModeController() => Play;
         protected override IInputSimulator? CreateInputSimulator() => Input;
+        protected override IAgentConsent? CreateAgentConsent() => Consent;
 
         protected override void Log(string message) => Console.Error.WriteLine("[fake] " + message);
         protected override void LogError(string message) => Console.Error.WriteLine("[fake][err] " + message);
+    }
+
+    /// <summary>
+    /// An engine whose user can revoke the session, so the test can check that a refusal is
+    /// honoured by the half of the system that never goes through the engine at all.
+    /// </summary>
+    public sealed class FakeAgentConsent : IAgentConsent
+    {
+        public volatile bool Granted = true;
+        public string Reason = "the loopback test revoked the session";
+        public int Calls;
+
+        public ConsentState GetConsent()
+        {
+            System.Threading.Interlocked.Increment(ref Calls);
+            return new ConsentState { Granted = Granted, Reason = Granted ? null : Reason };
+        }
     }
 
     public sealed class FakeDispatcher : IMainThreadDispatcher

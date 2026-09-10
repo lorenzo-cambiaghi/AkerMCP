@@ -4,7 +4,11 @@ namespace AkerMcp.Shared.Ipc
     {
         public const string PipePrefix = "aker-mcp-";
         public const string DiscoveryDirectory = "aker-mcp";
-        public const string ProtocolVersion = "1.6.0"; // Bump on any IPC schema change
+        // Bump the MINOR on an addition an older peer can ignore, the MAJOR on a change that
+        // breaks one. The server compares only the major (EngineConnection.DescribeVersionSkew):
+        // a plugin one minor behind speaks a subset, which is what "optional capability" has
+        // meant here all along.
+        public const string ProtocolVersion = "1.7.0";
         // 1.2.0: added windowTitlePrefix to GetWindowInfo payload (Mac fallback support)
         // 1.3.0: added platform/build methods (list_platforms, get/set_platform_settings,
         //        switch_build_target, build_player) backed by the optional IBuildManager
@@ -17,6 +21,11 @@ namespace AkerMcp.Shared.Ipc
         //        send_input backed by the optional IInputSimulator (with an OS-level fallback);
         //        plus import_sound (create_sound) backed by the optional ISoundImporter — a
         //        server-synthesized WAV shipped over the inbound binary channel like import_sprite
+        // 1.7.0: added get_consent, backed by the optional IAgentConsent, so an engine that
+        //        lets the user revoke an agent's access can say "refused" where it could only
+        //        say "no image" before — and the server declines instead of taking the picture
+        //        itself from the OS. Additive: an engine without it answers NOT_SUPPORTED and
+        //        is never asked again for that connection.
 
         public static class Methods
         {
@@ -66,6 +75,11 @@ namespace AkerMcp.Shared.Ipc
 
             // Procedural audio: import a server-synthesized WAV (optional ISoundImporter).
             public const string ImportSound = "import_sound";
+
+            // Whether the agent may act at all (optional IAgentConsent). Asked once per
+            // connection, and thereafter only before the server would reach around the
+            // engine to the OS.
+            public const string GetConsent = "get_consent";
         }
 
         public static class ErrorCodes
