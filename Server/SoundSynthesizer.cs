@@ -26,7 +26,20 @@ namespace AkerMcp.Server
     {
         public static byte[] RenderToWav(JsonElement spec)
         {
+            var samples = RenderSamples(spec, out int rate);
+            return WriteWav(samples, rate);
+        }
+
+        /// <summary>
+        /// The same voice, as raw mono samples the caller can place and mix. This is what
+        /// <see cref="MusicSequencer"/> builds on: a chiptune note is one sfxr voice among
+        /// many, so the sequencer gets every filter and envelope here for free rather than
+        /// growing a second, worse synth beside this one.
+        /// </summary>
+        public static short[] RenderSamples(JsonElement spec, out int sampleRateOut)
+        {
             int sampleRate = Clamp((int)ReadNum(spec, "sample_rate", 44100), 8000, 48000);
+            sampleRateOut = sampleRate;
 
             string wave = ReadStr(spec, "wave", "square").ToLowerInvariant();
             double baseFreq = ReadNum(spec, "freq", 440);
@@ -201,10 +214,10 @@ namespace AkerMcp.Server
                 phaserNow = Clamp(phaserNow + phaserSweep / sampleRate, 0, 0.99);
             }
 
-            return WriteWav(samples, sampleRate);
+            return samples;
         }
 
-        private static byte[] WriteWav(short[] samples, int sampleRate)
+        internal static byte[] WriteWav(short[] samples, int sampleRate)
         {
             int dataSize = samples.Length * 2;
             using var ms = new MemoryStream(44 + dataSize);

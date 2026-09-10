@@ -327,6 +327,44 @@ namespace AkerMcp.Server
                 }"),
                 HandleCreateSound);
 
+            Register("create_music", ToolDocs.Describe("create_music"),
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""name"": { ""type"": ""string"" },
+                        ""spec"": {
+                            ""type"": ""object"",
+                            ""properties"": {
+                                ""bpm"": { ""type"": ""number"" },
+                                ""steps_per_beat"": { ""type"": ""integer"", ""description"": ""default 4, so one step is a sixteenth"" },
+                                ""repeat"": { ""type"": ""integer"", ""description"": ""play the whole score N times (1-8)"" },
+                                ""volume"": { ""type"": ""number"" },
+                                ""channels"": {
+                                    ""type"": ""array"",
+                                    ""items"": {
+                                        ""type"": ""object"",
+                                        ""properties"": {
+                                            ""instrument"": { ""type"": ""string"", ""enum"": [""lead"", ""bass"", ""pad"", ""arp"", ""pluck"", ""drums""] },
+                                            ""notes"": { ""type"": ""string"" },
+                                            ""volume"": { ""type"": ""number"" }
+                                        },
+                                        ""required"": [""instrument"", ""notes""]
+                                    }
+                                },
+                                ""sample_rate"": { ""type"": ""integer"" }
+                            },
+                            ""required"": [""channels""]
+                        },
+                        ""scene_path"": { ""type"": ""string"" },
+                        ""position"": { ""type"": ""object"" },
+                        ""volume"": { ""type"": ""number"" },
+                        ""loop"": { ""type"": ""boolean"" },
+                        ""auto_play"": { ""type"": ""boolean"" }
+                    },
+                    ""required"": [""name"", ""spec""]
+                }"),
+                HandleCreateMusic);
+
             Register("add_primitive", ToolDocs.Describe("add_primitive"),
                 ParseSchema(@"{
                     ""type"": ""object"",
@@ -1232,7 +1270,20 @@ namespace AkerMcp.Server
             return result;
         }
 
-        private async Task<ToolResult> HandleCreateSound(JsonElement? args, CancellationToken ct)
+        private Task<ToolResult> HandleCreateSound(JsonElement? args, CancellationToken ct)
+            => HandleCreateAudio(args, ct, SoundSynthesizer.RenderToWav, "sound-spec");
+
+        private Task<ToolResult> HandleCreateMusic(JsonElement? args, CancellationToken ct)
+            => HandleCreateAudio(args, ct, MusicSequencer.RenderToWav, "score");
+
+        /// <summary>
+        /// Render a spec to WAV and hand it to the engine's importer. Shared by create_sound
+        /// and create_music because everything except the renderer is the same: both produce
+        /// mono WAV bytes and both ride the existing import_sound channel, so a whole second
+        /// tool costs no protocol at all.
+        /// </summary>
+        private async Task<ToolResult> HandleCreateAudio(
+            JsonElement? args, CancellationToken ct, Func<JsonElement, byte[]> render, string specName)
         {
             if (args is not JsonElement a || a.ValueKind != JsonValueKind.Object)
                 return ToolResult.Error("Missing arguments.");
@@ -1243,11 +1294,11 @@ namespace AkerMcp.Server
             var name = nameEl.GetString()!;
 
             if (!a.TryGetProperty("spec", out var spec) || spec.ValueKind != JsonValueKind.Object)
-                return ToolResult.Error("Missing required 'spec' (sound-spec object).");
+                return ToolResult.Error($"Missing required 'spec' ({specName} object).");
 
             byte[] wav;
-            try { wav = SoundSynthesizer.RenderToWav(spec); }
-            catch (Exception ex) { return ToolResult.Error($"Sound synthesis failed: {ex.Message}"); }
+            try { wav = render(spec); }
+            catch (Exception ex) { return ToolResult.Error($"Audio synthesis failed: {ex.Message}"); }
 
             var metadata = new Dictionary<string, object?> { ["name"] = name };
             if (a.TryGetProperty("volume", out var v) && v.ValueKind == JsonValueKind.Number)

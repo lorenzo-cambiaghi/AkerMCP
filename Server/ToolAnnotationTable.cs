@@ -57,6 +57,7 @@ namespace AkerMcp.Server
             // authoring
             ["create_sprite"] = Edit(idempotent: false),
             ["create_sound"] = Edit(idempotent: false),
+            ["create_music"] = Edit(idempotent: false),
             ["add_primitive"] = Edit(idempotent: false),
             ["new_scene"] = Destructive(idempotent: false),
             ["open_scene"] = Destructive(idempotent: true),

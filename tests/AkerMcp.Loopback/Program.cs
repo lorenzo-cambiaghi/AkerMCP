@@ -101,8 +101,10 @@ namespace AkerMcp.Loopback
             // with no annotations and 40,466 with them). Raise a ceiling only with a reason next to it.
             // The full ceiling moved from 29,500 to 31,000 for ui_action: twelve actions and their
             // parameters are 2,500 characters that only a session driving the interface by hand pays,
-            // which is why the tool sits in 'full' and not in 'standard'.
-            var budget = new Dictionary<string, int> { ["core"] = 10_000, ["standard"] = 17_500, ["full"] = 31_000 };
+            // which is why the tool sits in 'full' and not in 'standard'. Then to 33,000 for
+            // create_music, whose channel/note grammar has to be written out — a model cannot guess
+            // that "-" holds a note — and which likewise only the authoring profile pays for.
+            var budget = new Dictionary<string, int> { ["core"] = 10_000, ["standard"] = 17_500, ["full"] = 33_000 };
             foreach (var profile in new[] { "core", "standard", "full" })
             {
                 var r2 = new ToolRegistry(engine);
@@ -364,6 +366,70 @@ namespace AkerMcp.Loopback
             var repeated = Rms(Render("{\"wave\":\"square\",\"freq\":500,\"duration\":0.6,\"decay\":0.1,\"repeat\":8}"), 0.7, 1.0);
             Check("repeat retriggers the envelope instead of leaving silence",
                 repeated > once * 2, $"rms late {once:0} vs {repeated:0}");
+
+            // ---- chiptune -----------------------------------------------------------
+            static short[] Music(string json)
+            {
+                var wav = MusicSequencer.RenderToWav(JsonSerializer.Deserialize<JsonElement>(json));
+                var pcm = new short[(wav.Length - 44) / 2];
+                for (int i = 0; i < pcm.Length; i++) pcm[i] = BitConverter.ToInt16(wav, 44 + i * 2);
+                return pcm;
+            }
+
+            Check("A4 is 440 Hz and the octaves and accidentals follow from it",
+                MusicSequencer.TryNoteToFrequency("A4", out var a4) && Math.Abs(a4 - 440) < 0.01
+                && MusicSequencer.TryNoteToFrequency("A5", out var a5) && Math.Abs(a5 - 880) < 0.01
+                && MusicSequencer.TryNoteToFrequency("C4", out var c4) && Math.Abs(c4 - 261.63) < 0.05
+                && MusicSequencer.TryNoteToFrequency("Bb4", out var bb) && Math.Abs(bb - 466.16) < 0.05
+                && !MusicSequencer.TryNoteToFrequency("H4", out _));
+
+            // Tempo has to reach the length of the audio, or the score is decorative.
+            var atCrotchet = Music("{\"bpm\":120,\"steps_per_beat\":4,\"channels\":[{\"instrument\":\"lead\",\"notes\":\"C4 D4 E4 F4\"}]}");
+            var atDouble = Music("{\"bpm\":240,\"steps_per_beat\":4,\"channels\":[{\"instrument\":\"lead\",\"notes\":\"C4 D4 E4 F4\"}]}");
+            Check("twice the tempo is about half the audio", atDouble.Length < atCrotchet.Length,
+                $"{atCrotchet.Length} vs {atDouble.Length} samples");
+
+            var oneBar = Music("{\"bpm\":120,\"channels\":[{\"instrument\":\"lead\",\"notes\":\"C4 D4 E4 F4\"}]}");
+            var twice = Music("{\"bpm\":120,\"repeat\":2,\"channels\":[{\"instrument\":\"lead\",\"notes\":\"C4 D4 E4 F4\"}]}");
+            // Measured against the musical part only: both carry the same half-second tail for
+            // the last note's decay, and at this tempo that tail is longer than the bar itself,
+            // so a ratio over the whole file says almost nothing.
+            const int tailSamples = 44100 / 2;
+            Check("repeat plays the score exactly twice",
+                twice.Length - tailSamples == 2 * (oneBar.Length - tailSamples),
+                $"{oneBar.Length - tailSamples} vs {twice.Length - tailSamples} samples of music");
+
+            // A hold must sound as one long note, not silence: the naive reading of "-" is to
+            // play nothing, which turns a melody into a stutter.
+            var held = Music("{\"bpm\":60,\"channels\":[{\"instrument\":\"pad\",\"notes\":\"C4 - - -\"}]}");
+            double lateEnergy = Rms(held, 0.5, 0.8);
+            Check("a held note keeps sounding through the steps it spans", lateEnergy > 500,
+                $"rms {lateEnergy:0}");
+
+            var quiet = Music("{\"bpm\":120,\"volume\":0.2,\"channels\":[{\"instrument\":\"lead\",\"notes\":\"C4 E4 G4 C5\"}]}");
+            var loud = Music("{\"bpm\":120,\"volume\":0.9,\"channels\":[{\"instrument\":\"lead\",\"notes\":\"C4 E4 G4 C5\"}]}");
+            Check("master volume scales the mix", Rms(loud, 0, 1) > Rms(quiet, 0, 1) * 2,
+                $"rms {Rms(quiet, 0, 1):0} vs {Rms(loud, 0, 1):0}");
+
+            // Four channels summed overshoot almost always; a clipped chiptune is exactly the
+            // harshness this work set out to remove.
+            var full = Music("{\"bpm\":120,\"channels\":[" +
+                "{\"instrument\":\"lead\",\"notes\":\"C5 E5 G5 C6\"}," +
+                "{\"instrument\":\"bass\",\"notes\":\"C3*4\"}," +
+                "{\"instrument\":\"pad\",\"notes\":\"E4*4\"}," +
+                "{\"instrument\":\"drums\",\"notes\":\"k s k s\"}]}");
+            int clipped = 0;
+            foreach (var s in full) if (s >= short.MaxValue - 1 || s <= short.MinValue + 1) clipped++;
+            Check("a four-channel mix is normalised, not clipped", clipped < full.Length / 200,
+                $"{clipped} clipped of {full.Length}");
+
+            var drums = Music("{\"bpm\":120,\"channels\":[{\"instrument\":\"drums\",\"notes\":\"k . s . h . o .\"}]}");
+            Check("the drum alphabet makes sound", Rms(drums, 0, 1) > 200, $"rms {Rms(drums, 0, 1):0}");
+
+            var kick = Music("{\"bpm\":120,\"channels\":[{\"instrument\":\"drums\",\"notes\":\"k k k k\"}]}");
+            var hats = Music("{\"bpm\":120,\"channels\":[{\"instrument\":\"drums\",\"notes\":\"h h h h\"}]}");
+            Check("a kick is low and a hat is bright", Zcr(hats) > Zcr(kick) * 3,
+                $"zcr {Zcr(kick):0.0000} kick vs {Zcr(hats):0.0000} hat");
 
             Check("an old spec still renders the length it asks for",
                 Render("{\"wave\":\"saw\",\"freq\":1200,\"freq_sweep\":-3000,\"duration\":0.25}").Length == 11025);

@@ -6,7 +6,7 @@ namespace AkerMcp.Server
 {
     /// <summary>
     /// Which tools a session gets. Every tool definition rides in the client's
-    /// context on every turn, and forty-one of them cost about 9,000 tokens before
+    /// context on every turn, and forty-two of them cost about 9,000 tokens before
     /// the first call. Most sessions inspect, edit, run a script and look at the
     /// result; the authoring, playtest and build tools are for the sessions that
     /// need them. So the tools are layered:
@@ -41,7 +41,7 @@ namespace AkerMcp.Server
 
         public static readonly string[] Full = Standard.Concat(new[]
         {
-            "create_sprite", "create_sound", "add_primitive",
+            "create_sprite", "create_sound", "create_music", "add_primitive",
             "play_step", "capture_sequence", "sample_state", "assert_state", "playtest",
             "list_platforms", "get_platform_settings", "set_platform_settings",
             "switch_build_target", "build_player",
