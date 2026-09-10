@@ -64,11 +64,13 @@ re-measuring against a new target that misbehaves.
 ### On macOS
 
 `coords` reads the pointer through `CGEventGetLocation`, so it works there too, and it is the
-first thing to run: the macOS input path compiles but has never been executed. Three things to
+first thing to run: the macOS input path compiles but has never been executed. Four things to
 expect trouble from, in order — the ANSI keycode table behind `key`, the click-state field
-that makes a double click a double click, and whether activating the owning process through
-System Events reliably brings the window forward. Both Accessibility and Screen Recording
-permission are required, and the tools say so when they are missing.
+that makes a double click a double click, whether activating the owning process through System
+Events reliably brings the window forward, and whether `CGWindowListCreateImageFromArray`
+composes a menu into the capture the way the Windows path does (`shot` with a menu open
+answers that one in a glance). Both Accessibility and Screen Recording permission are
+required, and the tools say so when they are missing.
 
 The capture there is taken at nominal resolution and the bounds are in points, so the
 client/window offset that bit on Windows should not exist — but that is an assumption, not a

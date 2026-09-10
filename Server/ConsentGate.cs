@@ -29,6 +29,14 @@ namespace AkerMcp.Server
     /// the editor's main thread, and refusing to unblock the editor because the editor is
     /// blocked would be a trap with no way out. A revocation already observed survives that
     /// silence; an engine that never answered was never claiming a policy to begin with.
+    ///
+    /// One limit, worth stating because it is a design choice and not an oversight: the policy
+    /// is the CONNECTED engine's, and it governs every OS-level call regardless of which window
+    /// that call names. So a second editor's window is refused while this one has revoked — the
+    /// safe direction — but it is not protected by ITS own policy, which this server never asked
+    /// for and cannot see. A server talks to one engine at a time; a window belonging to someone
+    /// else is, from here, just a window. Pin the engine whose rules should apply
+    /// (engine_status, or AKER_MCP_ENGINE).
     /// </summary>
     public sealed class ConsentGate
     {

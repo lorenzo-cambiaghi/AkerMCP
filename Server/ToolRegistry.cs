@@ -682,7 +682,16 @@ namespace AkerMcp.Server
                 available = available.ConvertAll(x => new { engine = x.Engine, version = x.Version, pid = x.Pid }),
                 note = now == null
                     ? (_engine.PinnedEngine != null
-                        ? $"Not connected: nothing named '{_engine.PinnedEngine}' is running. Start it, or unpin with an empty string."
+                        // "Not connected" and "not running" are different things, and pinning
+                        // makes the difference visible: the pin drops the live connection and
+                        // the reconnect happens in the background, so for a moment the target
+                        // is both listed and unconnected. Saying it is not running then sends
+                        // someone off to start an editor that is already open.
+                        ? (available.Exists(e => e.Is(_engine.PinnedEngine))
+                            ? $"Pinned to '{_engine.PinnedEngine}', which is running; the connection is still being " +
+                              "made. Call engine_status again in a moment."
+                            : $"Not connected: nothing named '{_engine.PinnedEngine}' is running. " +
+                              "Start it, or unpin with an empty string.")
                         : "Not connected: no engine plugin is running.")
                     : available.Count > 1 && _engine.PinnedEngine == null
                         ? "More than one engine is running and none is pinned: a reconnect (any script recompile) may switch the target."

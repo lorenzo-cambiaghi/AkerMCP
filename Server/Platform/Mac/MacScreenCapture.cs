@@ -80,19 +80,78 @@ namespace AkerMcp.Server.Platform.Mac
         public byte[]? CaptureWindowByTitle(string titleSubstring, out string? error)
         {
             if (!TryFindWindow(titleSubstring, out var window, out error)) return null;
+            return CaptureWithItsPopups(window, out error);
+        }
 
-            using var image = new CGImageHandle(CGWindowListCreateImage(
-                CGRect.Null,
-                kCGWindowListOptionIncludingWindow,
-                window.WindowId,
-                kCGWindowImageBoundsIgnoreFraming | kCGWindowImageNominalResolution));
+        /// <summary>
+        /// The window, plus the menus and popups it has open, in one image.
+        ///
+        /// A dropdown is a window of its own here as much as on Windows — a different layer of
+        /// the same process — so capturing the window alone renders the interface with its
+        /// menus missing, and the click that opened one looks like it did nothing. Quartz can
+        /// compose a specific set of windows in a single call, so the fix is to hand it the
+        /// window and its popups rather than compositing bitmaps by hand.
+        ///
+        /// The set is limited to the owning process, matching the Windows path: an unrelated
+        /// application overlapping the editor is not pasted into the picture, and a window that
+        /// is covered still captures, because Quartz composes from the window list rather than
+        /// from the screen.
+        /// </summary>
+        private static byte[]? CaptureWithItsPopups(MacWindow window, out string? error)
+        {
+            error = null;
 
-            if (image.IsInvalid)
+            var ids = new List<IntPtr> { new IntPtr(window.WindowId) };
+            var bounds = new CGRect { X = window.X, Y = window.Y, Width = window.Width, Height = window.Height };
+
+            foreach (var candidate in EnumerateWindows(includeAllLayers: true))
             {
-                error = ScreenRecordingDenied;
+                if (candidate.WindowId == window.WindowId) continue;
+                if (candidate.Pid != window.Pid) continue;
+                if (candidate.Layer <= 0) continue;   // layer 0 is an ordinary window, not a popup
+                if (candidate.X + candidate.Width <= window.X || candidate.X >= window.X + window.Width) continue;
+                if (candidate.Y + candidate.Height <= window.Y || candidate.Y >= window.Y + window.Height) continue;
+                ids.Add(new IntPtr(candidate.WindowId));
+            }
+
+            // One window and no popups is the ordinary case; keep it on the simpler call.
+            if (ids.Count == 1)
+            {
+                using var single = new CGImageHandle(CGWindowListCreateImage(
+                    CGRect.Null,
+                    kCGWindowListOptionIncludingWindow,
+                    window.WindowId,
+                    kCGWindowImageBoundsIgnoreFraming | kCGWindowImageNominalResolution));
+                if (single.IsInvalid)
+                {
+                    error = ScreenRecordingDenied;
+                    return null;
+                }
+                return EncodePng(single.DangerousGetHandle(), out error);
+            }
+
+            IntPtr array = CFArrayCreate(IntPtr.Zero, ids.ToArray(), ids.Count, IntPtr.Zero);
+            if (array == IntPtr.Zero)
+            {
+                error = "CFArrayCreate failed while composing the window's popups.";
                 return null;
             }
-            return EncodePng(image.DangerousGetHandle(), out error);
+
+            try
+            {
+                // An explicit rectangle, not CGRectNull: the union of the windows would grow by
+                // however far a menu hangs past the edge, and the image has to stay the size the
+                // geometry describes or every coordinate read off it shifts.
+                using var image = new CGImageHandle(CGWindowListCreateImageFromArray(
+                    bounds, array, kCGWindowImageBoundsIgnoreFraming | kCGWindowImageNominalResolution));
+                if (image.IsInvalid)
+                {
+                    error = ScreenRecordingDenied;
+                    return null;
+                }
+                return EncodePng(image.DangerousGetHandle(), out error);
+            }
+            finally { CFRelease(array); }
         }
 
         public bool TryGetWindowGeometry(string titleSubstring, out WindowGeometry? geometry, out string? error)
@@ -128,6 +187,8 @@ namespace AkerMcp.Server.Platform.Mac
         {
             public uint WindowId;
             public int Pid;
+            /// <summary>0 for an ordinary window; above it sit the menu bar, the dock, and popups.</summary>
+            public int Layer;
             public string Title;
             public string OwnerName;
             public double X, Y, Width, Height;
@@ -165,7 +226,7 @@ namespace AkerMcp.Server.Platform.Mac
             return found;
         }
 
-        private static IEnumerable<MacWindow> EnumerateWindows()
+        private static IEnumerable<MacWindow> EnumerateWindows(bool includeAllLayers = false)
         {
             using var windowList = new CFArrayHandle(CGWindowListCopyWindowInfo(
                 kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
@@ -177,8 +238,11 @@ namespace AkerMcp.Server.Platform.Mac
             {
                 IntPtr dict = CFArrayGetValueAtIndex(windowList.DangerousGetHandle(), i);
                 if (dict == IntPtr.Zero) continue;
-                if (!TryGetIntFromDict(dict, "kCGWindowLayer", out var layer) || layer != 0)
-                    continue; // menu bar, dock and status items are not windows a user clicks in
+                if (!TryGetIntFromDict(dict, "kCGWindowLayer", out var layer)) continue;
+                // Layer 0 is an ordinary window. Above it live the menu bar, the dock, status
+                // items — and the popups a window opens, which is why composing those back into
+                // a capture is the one caller that asks for the whole range.
+                if (!includeAllLayers && layer != 0) continue;
                 if (!TryGetIntFromDict(dict, "kCGWindowNumber", out var windowNumber)) continue;
 
                 var rect = TryGetWindowRect(dict);
@@ -189,6 +253,7 @@ namespace AkerMcp.Server.Platform.Mac
                 {
                     WindowId = (uint)windowNumber,
                     Pid = ownerPid,
+                    Layer = layer,
                     Title = TryGetStringFromDict(dict, "kCGWindowName") ?? "",
                     OwnerName = TryGetStringFromDict(dict, "kCGWindowOwnerName") ?? "",
                     X = rect.x,
@@ -507,6 +572,20 @@ namespace AkerMcp.Server.Platform.Mac
         [DllImport(CoreGraphics, EntryPoint = "CGWindowListCreateImage")]
         private static extern IntPtr CGWindowListCreateImage(
             CGRect screenBounds, uint listOption, uint windowID, uint imageOption);
+
+        /// <summary>Composes an explicit set of windows — a window and its open menus — in one image.</summary>
+        [DllImport(CoreGraphics, EntryPoint = "CGWindowListCreateImageFromArray")]
+        private static extern IntPtr CGWindowListCreateImageFromArray(
+            CGRect screenBounds, IntPtr windowArray, uint imageOption);
+
+        /// <summary>
+        /// Window ids travel as the array's pointer values, which is how Quartz's own header
+        /// documents this call: they are numbers, never dereferenced, so a null callback table
+        /// is correct and no retain/release runs over them.
+        /// </summary>
+        [DllImport(CoreFoundation)]
+        private static extern IntPtr CFArrayCreate(
+            IntPtr allocator, IntPtr[] values, long numValues, IntPtr callBacks);
 
         [DllImport(CoreGraphics)]
         private static extern void CGImageRelease(IntPtr image);
