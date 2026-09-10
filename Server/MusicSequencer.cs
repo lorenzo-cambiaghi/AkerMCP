@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace AkerMcp.Server
 {
@@ -25,7 +27,27 @@ namespace AkerMcp.Server
     /// </summary>
     public static class MusicSequencer
     {
+        /// <summary>
+        /// Render a score. Synchronous entry point, kept for callers that cannot await; the
+        /// SoundFont engine needs a file that may have to be fetched, so it goes through
+        /// <see cref="RenderToWavAsync"/> instead.
+        /// </summary>
         public static byte[] RenderToWav(JsonElement spec)
+            => RenderToWavAsync(spec, CancellationToken.None).GetAwaiter().GetResult();
+
+        public static async Task<byte[]> RenderToWavAsync(JsonElement spec, CancellationToken ct)
+        {
+            var engine = ReadStr(spec, "engine", "chiptune").ToLowerInvariant();
+            if (engine is "soundfont" or "gm" or "instruments")
+            {
+                var (path, error) = await SoundFontLibrary.Resolve(ct).ConfigureAwait(false);
+                if (path == null) throw new InvalidOperationException(error ?? "No SoundFont available.");
+                return RenderWithSoundFont(spec, path);
+            }
+            return RenderChiptune(spec);
+        }
+
+        private static byte[] RenderChiptune(JsonElement spec)
         {
             int sampleRate = ClampInt(ReadInt(spec, "sample_rate", 44100), 8000, 48000);
             double bpm = Clamp(ReadNum(spec, "bpm", 120), 20, 300);
@@ -104,6 +126,42 @@ namespace AkerMcp.Server
                 samples[i] = (short)(Math.Clamp(mix[i] * gain, -1, 1) * short.MaxValue);
 
             return SoundSynthesizer.WriteWav(samples, sampleRate);
+        }
+
+        /// <summary>
+        /// The same score, played by sampled instruments. Only the parsing is shared — which
+        /// is the point: a tune written for the tracker plays here unchanged, and the choice
+        /// of engine is a property of the render, not of the music.
+        /// </summary>
+        private static byte[] RenderWithSoundFont(JsonElement spec, string soundFontPath)
+        {
+            int sampleRate = ClampInt(ReadInt(spec, "sample_rate", 44100), 8000, 48000);
+            double bpm = Clamp(ReadNum(spec, "bpm", 120), 20, 300);
+            int stepsPerBeat = ClampInt(ReadInt(spec, "steps_per_beat", 4), 1, 16);
+            double masterVolume = Clamp(ReadNum(spec, "volume", 0.8), 0, 1);
+            int repeatCount = ClampInt(ReadInt(spec, "repeat", 1), 1, 8);
+
+            var channels = new List<(string, IReadOnlyList<(string, int, bool, bool)>, double)>();
+            if (spec.ValueKind == JsonValueKind.Object
+                && spec.TryGetProperty("channels", out var chans) && chans.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var c in chans.EnumerateArray())
+                {
+                    if (c.ValueKind != JsonValueKind.Object) continue;
+                    var steps = ParseSteps(ReadStr(c, "notes", ""));
+                    var plain = new List<(string, int, bool, bool)>(steps.Count);
+                    foreach (var s in steps) plain.Add((s.Token, s.Steps, s.Held, s.IsRest));
+                    channels.Add((
+                        ReadStr(c, "instrument", "lead").ToLowerInvariant(),
+                        plain,
+                        Clamp(ReadNum(c, "volume", 1.0), 0, 1)));
+                }
+            }
+            if (channels.Count == 0)
+                throw new ArgumentException("A score needs at least one channel.");
+
+            return SoundFontRenderer.Render(
+                soundFontPath, channels, 60.0 / bpm / stepsPerBeat, repeatCount, sampleRate, masterVolume);
         }
 
         private readonly struct Step

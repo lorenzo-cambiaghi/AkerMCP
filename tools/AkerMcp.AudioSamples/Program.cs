@@ -88,7 +88,31 @@ namespace AkerMcp.AudioSamples
                 "{\"instrument\":\"lead\",\"notes\":\"C5 E5 G5 C6*4\"}," +
                 "{\"instrument\":\"arp\",\"notes\":\"C4 E4 G4 C5*4\"}," +
                 "{\"instrument\":\"drums\",\"notes\":\"k s k o*4\"}]}", IsMusic: true),
+
+            // The A/B: identical score, one word different. Worth more than either alone.
+            new("engine-chiptune", "The same score — chiptune", "Square waves and noise. Nothing to download, nothing to licence.",
+                "{\"bpm\":100,\"repeat\":2,\"channels\":[" +
+                "{\"instrument\":\"lead\",\"notes\":\"E5 . D5 . C5 - D5 . E5 . E5 . E5 - - .\"}," +
+                "{\"instrument\":\"pad\",\"notes\":\"C4*8 G3*8\"}," +
+                "{\"instrument\":\"bass\",\"notes\":\"C3*4 C3*4 G2*4 G2*4\"}," +
+                "{\"instrument\":\"drums\",\"notes\":\"k . h . s . h . k . h . s . h .\"}]}", IsMusic: true),
+
+            new("engine-soundfont", "The same score — SoundFont", "One word changed, plus instrument names: flute and strings instead of lead and pad. The notes are untouched.",
+                "{\"engine\":\"soundfont\",\"bpm\":100,\"repeat\":2,\"channels\":[" +
+                "{\"instrument\":\"flute\",\"notes\":\"E5 . D5 . C5 - D5 . E5 . E5 . E5 - - .\"}," +
+                "{\"instrument\":\"strings\",\"notes\":\"C4*8 G3*8\"}," +
+                "{\"instrument\":\"bass\",\"notes\":\"C3*4 C3*4 G2*4 G2*4\"}," +
+                "{\"instrument\":\"drums\",\"notes\":\"k . h . s . h . k . h . s . h .\"}]}", IsMusic: true),
+
+            new("sf-adventure", "Adventure theme — SoundFont", "Trumpet, strings and timpani, from the same grammar.",
+                "{\"engine\":\"soundfont\",\"bpm\":124,\"repeat\":2,\"channels\":[" +
+                "{\"instrument\":\"trumpet\",\"notes\":\"G4 . C5 . E5 - D5 . C5 . G4 - - . . .\"}," +
+                "{\"instrument\":\"strings\",\"notes\":\"C4*16\",\"volume\":0.6}," +
+                "{\"instrument\":\"timpani\",\"notes\":\"C2 . . . G2 . . . C2 . . . G2 . . .\"}," +
+                "{\"instrument\":\"drums\",\"notes\":\"k . . . s . . . k . k . s . . .\"}]}", IsMusic: true),
         };
+
+        private static bool NeedsSoundFont(Sample s) => s.Spec.Contains("\"engine\":\"soundfont\"");
 
         public static int Main(string[] args)
         {
@@ -104,8 +128,17 @@ namespace AkerMcp.AudioSamples
 
             Footer(page);
 
+            bool haveFont = SoundFontLibrary.IsAvailableLocally();
+            if (!haveFont)
+                Console.WriteLine($"  (no SoundFont locally: set {SoundFontLibrary.PathVariable} to include " +
+                                  "those samples; the existing files are left alone)\n");
+
             foreach (var s in Samples)
             {
+                // Regenerating without a font must not delete the samples already committed:
+                // a gallery that empties itself on the wrong machine is worse than a stale one.
+                if (NeedsSoundFont(s) && !haveFont) { Console.WriteLine($"  {s.Id,-18} skipped"); continue; }
+
                 var spec = JsonSerializer.Deserialize<JsonElement>(s.Spec);
                 var wav = s.IsMusic ? MusicSequencer.RenderToWav(spec) : SoundSynthesizer.RenderToWav(spec);
                 File.WriteAllBytes(Path.Combine(wavDir, s.Id + ".wav"), wav);

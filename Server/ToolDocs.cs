@@ -110,15 +110,16 @@ namespace AkerMcp.Server
                 "silhouettes clean: recognisable beats detailed.",
 
             ["create_music"] =
-                "Write a short chiptune loop and import it as an audio clip: bpm, steps_per_beat " +
-                "(default 4 = sixteenths), repeat, and channels of instrument + notes. Notes are " +
-                "space-separated tokens, one step each: C4 E4 G4 for pitches (name, optional # or b, " +
-                "optional octave), . for a rest, - to hold the note before it, C4*4 for a four-step " +
-                "note. Instruments: lead, bass, pad, arp, pluck, and drums whose tokens are k s h o " +
-                "(kick, snare, hat, open hat). Channels are mixed and normalised. Example: " +
+                "Write a short loop and import it as an audio clip: bpm, steps_per_beat (default 4 = " +
+                "sixteenths), repeat, and channels of instrument + notes. Notes are space-separated " +
+                "tokens, one step each: C4 E4 G4 for pitches, . for a rest, - to hold the note before " +
+                "it, C4*4 for a four-step note. Instruments: lead, bass, pad, arp, pluck, drums (tokens " +
+                "k s h o). Channels are mixed and normalised. Example: " +
                 "{\"bpm\":120,\"channels\":[{\"instrument\":\"lead\",\"notes\":\"C4 E4 G4 C5 - - . .\"}," +
                 "{\"instrument\":\"bass\",\"notes\":\"C3*4 G2*4\"},{\"instrument\":\"drums\",\"notes\":\"k . h . s . h .\"}]}. " +
-                "For a one-shot effect use create_sound instead.",
+                "engine=soundfont plays the same score on sampled General MIDI instruments (piano, " +
+                "strings, trumpet, flute, harp, choir, or a program number). For a one-shot effect " +
+                "use create_sound.",
 
             ["create_sound"] =
                 "Synthesise a short placeholder sound from an sfxr-style spec and import it as an audio " +

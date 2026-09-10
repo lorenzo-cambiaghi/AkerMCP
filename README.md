@@ -54,6 +54,8 @@ Then there is the asset gap. A model writes code, not pixels. `create_sprite` cl
 
 **And it stops waiting for someone to record the gunshot.** `create_sound` is a full sfxr voice — pitched noise, a resonant low-pass, duty cycle, arpeggio, punch, retrigger — and `create_music` is a tracker over that same voice, so a melody inherits the filters instead of reimplementing them. Both hand the engine a finished WAV. Chiptune rather than General MIDI on purpose: the small GM SoundFont everyone reaches for first is GPL, and its samples end up inside the audio produced, which for a tool whose output lands in someone else's game is the wrong thing to inherit. Square waves cost nothing, carry no licence, and are the idiom a prototype is expected to sound like.
 
+When a prototype outgrows square waves, the same score plays on sampled instruments: `"engine": "soundfont"` renders it through MeltySynth and FluidR3 (MIT), so `lead` becomes a flute and `pad` becomes strings without rewriting a note. The 151 MB font is neither in this repository nor in the release package — it is fetched once on first use, pinned by SHA-256, and cached per user; `AKER_MCP_SOUNDFONT` points at your own instead. See [the licence notice](docs/FluidR3-LICENSE.txt): its terms cover redistributing sound libraries, not the audio you generate.
+
 **▶ [Listen to what it generates](docs/audio-samples.html)** — gunshots, lasers, footsteps and four pieces of music, each with the spec that produced it. (Open the page from a checkout or GitHub Pages; GitHub strips `<audio>` from markdown, which is why the samples are not embedded here.)
 
 Pair it with [LynxMCP](https://github.com/lorenzo-cambiaghi/LynxMCP) for code search over the project and its library docs: Aker is the hands, Lynx the memory.

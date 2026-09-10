@@ -431,6 +431,53 @@ namespace AkerMcp.Loopback
             Check("a kick is low and a hat is bright", Zcr(hats) > Zcr(kick) * 3,
                 $"zcr {Zcr(kick):0.0000} kick vs {Zcr(hats):0.0000} hat");
 
+            // ---- the SoundFont engine ------------------------------------------------
+            // The font is 151 MB and not in the repository, so CI renders chiptune only. What
+            // is worth pinning here is the behaviour when it is absent: a score must fail with
+            // an instruction, not a stack trace, and must never silently come out as chiptune
+            // when real instruments were asked for — that would be a placeholder that changes
+            // timbre depending on which machine rendered it.
+            var previousFont = Environment.GetEnvironmentVariable(SoundFontLibrary.PathVariable);
+            var previousUrl = Environment.GetEnvironmentVariable(SoundFontLibrary.UrlVariable);
+            try
+            {
+                Environment.SetEnvironmentVariable(SoundFontLibrary.PathVariable, "/definitely/not/here.sf2");
+                string message = "";
+                try { Music("{\"engine\":\"soundfont\",\"channels\":[{\"instrument\":\"piano\",\"notes\":\"C4\"}]}"); }
+                catch (Exception ex) { message = ex.Message; }
+
+                Check("a missing SoundFont says which switch to flip, and names the alternative",
+                    message.Contains(SoundFontLibrary.PathVariable) && message.Contains("chiptune"), message);
+
+                // The other half of the same promise: an unreachable download is refused rather
+                // than quietly substituted.
+                Environment.SetEnvironmentVariable(SoundFontLibrary.PathVariable, null);
+                Environment.SetEnvironmentVariable(SoundFontLibrary.UrlVariable,
+                    "https://127.0.0.1:9/aker-no-such-host.sf2");
+                if (!SoundFontLibrary.IsAvailableLocally())
+                {
+                    message = "";
+                    try { Music("{\"engine\":\"soundfont\",\"channels\":[{\"instrument\":\"piano\",\"notes\":\"C4\"}]}"); }
+                    catch (Exception ex) { message = ex.Message; }
+                    Check("an unreachable font is an error, never a silent fallback to chiptune",
+                        message.Contains("No SoundFont available"), message);
+                }
+                else
+                {
+                    Check("an unreachable font is an error, never a silent fallback to chiptune",
+                        true, "(skipped: a font is cached on this machine)");
+                }
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(SoundFontLibrary.PathVariable, previousFont);
+                Environment.SetEnvironmentVariable(SoundFontLibrary.UrlVariable, previousUrl);
+            }
+
+            Check("the published SoundFont is pinned by hash, so a mirror cannot swap it",
+                SoundFontLibrary.ExpectedSha256.Length == 64
+                && SoundFontLibrary.DefaultUrl.EndsWith(SoundFontLibrary.FileName, StringComparison.Ordinal));
+
             Check("an old spec still renders the length it asks for",
                 Render("{\"wave\":\"saw\",\"freq\":1200,\"freq_sweep\":-3000,\"duration\":0.25}").Length == 11025);
 

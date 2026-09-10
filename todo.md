@@ -86,3 +86,18 @@ Listed so nobody spends an afternoon rediscovering them as bugs.
   the pointer after the tool has placed it, which reads as an error of hundreds of pixels;
   a real conversion error is deterministic and survives the retry. If a point reports a
   non-zero error twice, believe it.
+
+## The SoundFont, once
+
+- [ ] Upload `FluidR3_GM_GS.sf2` as the `soundfont-v1` release asset, so the default URL
+      resolves. Until then, `engine: "soundfont"` works only with `AKER_MCP_SOUNDFONT` set to
+      a local copy — which is what the error message says.
+
+The file is 151,001,312 bytes with SHA-256
+`545B2833936F15F04DF5F0C5C4096B3BA6CED46EC7031F61991CAE46F8681986`, already pinned in
+`SoundFontLibrary`, so the upload has to be *that* file: any other download is rejected.
+Source: the FluidR3 GM+GS bank published on archive.org by Frank Wen, MIT, with the notice
+in `docs/FluidR3-LICENSE.txt`.
+
+It goes in a release rather than the repository for the same reason the binaries do — and
+GitHub refuses a file over 100 MB in a checkout regardless.

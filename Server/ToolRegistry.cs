@@ -335,6 +335,11 @@ namespace AkerMcp.Server
                         ""spec"": {
                             ""type"": ""object"",
                             ""properties"": {
+                                ""engine"": {
+                                    ""type"": ""string"",
+                                    ""enum"": [""chiptune"", ""soundfont""],
+                                    ""description"": ""chiptune (default, always available) or soundfont for sampled General MIDI instruments""
+                                },
                                 ""bpm"": { ""type"": ""number"" },
                                 ""steps_per_beat"": { ""type"": ""integer"", ""description"": ""default 4, so one step is a sixteenth"" },
                                 ""repeat"": { ""type"": ""integer"", ""description"": ""play the whole score N times (1-8)"" },
@@ -344,7 +349,7 @@ namespace AkerMcp.Server
                                     ""items"": {
                                         ""type"": ""object"",
                                         ""properties"": {
-                                            ""instrument"": { ""type"": ""string"", ""enum"": [""lead"", ""bass"", ""pad"", ""arp"", ""pluck"", ""drums""] },
+                                            ""instrument"": { ""type"": ""string"", ""description"": ""chiptune: lead, bass, pad, arp, pluck, drums. soundfont: also piano, strings, trumpet, flute, guitar, choir, organ, harp and any GM program number"" },
                                             ""notes"": { ""type"": ""string"" },
                                             ""volume"": { ""type"": ""number"" }
                                         },
@@ -1274,7 +1279,10 @@ namespace AkerMcp.Server
             => HandleCreateAudio(args, ct, SoundSynthesizer.RenderToWav, "sound-spec");
 
         private Task<ToolResult> HandleCreateMusic(JsonElement? args, CancellationToken ct)
-            => HandleCreateAudio(args, ct, MusicSequencer.RenderToWav, "score");
+            // Async under the hood: the SoundFont engine may have to fetch its font, and that
+            // must not block the pipe. Chiptune never touches it.
+            => HandleCreateAudio(args, ct, spec => MusicSequencer.RenderToWavAsync(spec, ct)
+                                                                 .GetAwaiter().GetResult(), "score");
 
         /// <summary>
         /// Render a spec to WAV and hand it to the engine's importer. Shared by create_sound

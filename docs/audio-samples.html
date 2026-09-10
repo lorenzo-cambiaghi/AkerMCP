@@ -165,6 +165,36 @@ no asset packs, no downloads, nothing to licence.</p>
 {"instrument":"arp", "notes":"C4 E4 G4 C5*4"}, {"instrument":"drums",
 "notes":"k s k o*4"}]}</code></pre>
 </figure>
+<figure>
+  <figcaption>The same score — chiptune</figcaption>
+  <audio controls preload="none" src="samples/engine-chiptune.wav"></audio>
+  <p class="note">Square waves and noise. Nothing to download, nothing to licence.</p>
+  <pre><code>{"bpm":100, "repeat":2, "channels":[{"instrument":"lead",
+"notes":"E5 . D5 . C5 - D5 . E5 . E5 . E5 - - ."},
+{"instrument":"pad", "notes":"C4*8 G3*8"}, {"instrument":"bass",
+"notes":"C3*4 C3*4 G2*4 G2*4"}, {"instrument":"drums",
+"notes":"k . h . s . h . k . h . s . h ."}]}</code></pre>
+</figure>
+<figure>
+  <figcaption>The same score — SoundFont</figcaption>
+  <audio controls preload="none" src="samples/engine-soundfont.wav"></audio>
+  <p class="note">One word changed, plus instrument names: flute and strings instead of lead and pad. The notes are untouched.</p>
+  <pre><code>{"engine":"soundfont", "bpm":100, "repeat":2, "channels":[{"instrument":"flute",
+"notes":"E5 . D5 . C5 - D5 . E5 . E5 . E5 - - ."},
+{"instrument":"strings", "notes":"C4*8 G3*8"}, {"instrument":"bass",
+"notes":"C3*4 C3*4 G2*4 G2*4"}, {"instrument":"drums",
+"notes":"k . h . s . h . k . h . s . h ."}]}</code></pre>
+</figure>
+<figure>
+  <figcaption>Adventure theme — SoundFont</figcaption>
+  <audio controls preload="none" src="samples/sf-adventure.wav"></audio>
+  <p class="note">Trumpet, strings and timpani, from the same grammar.</p>
+  <pre><code>{"engine":"soundfont", "bpm":124, "repeat":2, "channels":[{"instrument":"trumpet",
+"notes":"G4 . C5 . E5 - D5 . C5 . G4 - - . . ."},
+{"instrument":"strings", "notes":"C4*16", "volume":0.6},
+{"instrument":"timpani", "notes":"C2 . . . G2 . . . C2 . . . G2 . . ."},
+{"instrument":"drums", "notes":"k . . . s . . . k . k . s . . ."}]}</code></pre>
+</figure>
 </div>
 <footer>
 <p><strong>Why this is here.</strong> A prototype stops for want of a jump sound as surely as for
