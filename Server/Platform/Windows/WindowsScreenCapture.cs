@@ -26,6 +26,9 @@ namespace AkerMcp.Server.Platform.Windows
         private static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
 
         [DllImport("user32.dll")]
+        private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+        [DllImport("user32.dll")]
         private static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
 
         [DllImport("user32.dll")]
@@ -274,26 +277,52 @@ namespace AkerMcp.Server.Platform.Windows
             return match;
         }
 
+        /// <summary>
+        /// Capture a window's CLIENT AREA — the part a user points at, without the title bar
+        /// and the invisible resize border Windows draws around it.
+        ///
+        /// The two-step matters, and getting it wrong is silent. PrintWindow always renders the
+        /// WHOLE window, starting at the window rect's top-left; asking it to draw into a
+        /// client-sized bitmap does not crop anything, it just cuts the bottom-right off. The
+        /// picture then shows the title bar at its top while the caller believes the top row is
+        /// the first row of the client area, and every coordinate read off it is low by the
+        /// title bar's height. Measured on a real editor: 31 px down and 8 px right, enough to
+        /// hit the checkbox below the field being aimed at, with nothing in the result to say
+        /// so. So: render the window at full size, then cut the client rectangle out of it.
+        /// </summary>
         private static byte[]? CaptureHwnd(IntPtr hWnd, out string? error)
         {
             error = null;
 
-            if (!GetClientRect(hWnd, out var rect))
+            if (!GetClientRect(hWnd, out var client) || !GetWindowRect(hWnd, out var window))
             {
-                error = "GetClientRect failed.";
+                error = "GetClientRect/GetWindowRect failed.";
                 return null;
             }
 
-            int w = rect.Right - rect.Left;
-            int h = rect.Bottom - rect.Top;
-            if (w <= 0 || h <= 0)
+            int clientW = client.Right - client.Left;
+            int clientH = client.Bottom - client.Top;
+            if (clientW <= 0 || clientH <= 0)
             {
-                error = $"Invalid window dimensions: {w}x{h}";
+                error = $"Invalid window dimensions: {clientW}x{clientH}";
                 return null;
             }
 
-            using var bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb);
-            using (var gfx = Graphics.FromImage(bmp))
+            int windowW = Math.Max(clientW, window.Right - window.Left);
+            int windowH = Math.Max(clientH, window.Bottom - window.Top);
+
+            // Where the client area starts inside that full-window render.
+            var origin = new POINT { X = 0, Y = 0 };
+            if (!ClientToScreen(hWnd, ref origin))
+            {
+                error = "ClientToScreen failed.";
+                return null;
+            }
+            int offsetX = origin.X - window.Left;
+            int offsetY = origin.Y - window.Top;
+
+            using var full = new Bitmap(windowW, windowH, PixelFormat.Format32bppArgb);
+            using (var gfx = Graphics.FromImage(full))
             {
                 IntPtr hdc = gfx.GetHdc();
                 try
@@ -306,6 +335,15 @@ namespace AkerMcp.Server.Platform.Windows
                 }
                 finally { gfx.ReleaseHdc(hdc); }
             }
+
+            // Clamp, so a window whose frame metrics disagree with its bitmap still yields an
+            // image rather than an exception.
+            offsetX = Math.Max(0, Math.Min(offsetX, windowW - 1));
+            offsetY = Math.Max(0, Math.Min(offsetY, windowH - 1));
+            int cropW = Math.Min(clientW, windowW - offsetX);
+            int cropH = Math.Min(clientH, windowH - offsetY);
+
+            using var bmp = full.Clone(new Rectangle(offsetX, offsetY, cropW, cropH), full.PixelFormat);
 
             using var ms = new MemoryStream();
             bmp.Save(ms, ImageFormat.Png);
