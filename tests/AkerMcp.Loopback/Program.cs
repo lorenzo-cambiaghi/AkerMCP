@@ -295,6 +295,19 @@ namespace AkerMcp.Loopback
             Check("granting it again lets the tools through",
                 !Text(lwAgain).Contains("refused"), Text(lwAgain));
 
+            // "No policy here" arrives in three different sentences and only one of them was
+            // being read. A plugin older than the method answers "Unknown method: get_consent",
+            // never the word NOT_SUPPORTED — so every OS-level call kept paying an IPC round
+            // trip for the whole session, invisibly, because the fallback is permissive.
+            Check("an engine with no IAgentConsent is recognised, however it says so",
+                ConsentGate.IsNoPolicyAnswer("NOT_SUPPORTED: whatever")
+                && ConsentGate.IsNoPolicyAnswer("Engine does not implement IAgentConsent; ...")
+                && ConsentGate.IsNoPolicyAnswer("InvalidOperationException: Unknown method: get_consent"));
+            Check("a transient failure is not mistaken for an absent policy",
+                !ConsentGate.IsNoPolicyAnswer("[ENGINE_DISCONNECTED] the pipe dropped")
+                && !ConsentGate.IsNoPolicyAnswer("TimeoutException: the engine did not answer")
+                && !ConsentGate.IsNoPolicyAnswer("NullReferenceException in the adapter"));
+
             var sam = await Call(reg, "sample_state", new { probes = new { x = "1+1" } });
             Check("sample_state ok", !sam.IsError, Text(sam));
 

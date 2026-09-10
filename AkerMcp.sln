@@ -13,6 +13,16 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{07C2787E
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AkerMcp.UiProbe", "tools\AkerMcp.UiProbe\AkerMcp.UiProbe.csproj", "{1E6AA7CB-011F-4A36-8939-C73FBECA0705}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AkerMcp.Loopback", "tests\AkerMcp.Loopback\AkerMcp.Loopback.csproj", "{377498C9-C7D1-42E3-9844-C0E7B58A3C9C}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Shared", "Shared", "{4F52FD11-658E-A102-6CD3-7D7C16FFA15B}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Client", "Client", "{2CB42F12-E813-91B3-7D11-3220E40BEF4A}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Server", "Server", "{DAD03CFC-D5FA-AC94-41C7-9ABAB326F09E}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -71,11 +81,24 @@ Global
 		{1E6AA7CB-011F-4A36-8939-C73FBECA0705}.Release|x64.Build.0 = Release|Any CPU
 		{1E6AA7CB-011F-4A36-8939-C73FBECA0705}.Release|x86.ActiveCfg = Release|Any CPU
 		{1E6AA7CB-011F-4A36-8939-C73FBECA0705}.Release|x86.Build.0 = Release|Any CPU
+		{377498C9-C7D1-42E3-9844-C0E7B58A3C9C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{377498C9-C7D1-42E3-9844-C0E7B58A3C9C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{377498C9-C7D1-42E3-9844-C0E7B58A3C9C}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{377498C9-C7D1-42E3-9844-C0E7B58A3C9C}.Debug|x64.Build.0 = Debug|Any CPU
+		{377498C9-C7D1-42E3-9844-C0E7B58A3C9C}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{377498C9-C7D1-42E3-9844-C0E7B58A3C9C}.Debug|x86.Build.0 = Debug|Any CPU
+		{377498C9-C7D1-42E3-9844-C0E7B58A3C9C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{377498C9-C7D1-42E3-9844-C0E7B58A3C9C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{377498C9-C7D1-42E3-9844-C0E7B58A3C9C}.Release|x64.ActiveCfg = Release|Any CPU
+		{377498C9-C7D1-42E3-9844-C0E7B58A3C9C}.Release|x64.Build.0 = Release|Any CPU
+		{377498C9-C7D1-42E3-9844-C0E7B58A3C9C}.Release|x86.ActiveCfg = Release|Any CPU
+		{377498C9-C7D1-42E3-9844-C0E7B58A3C9C}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{1E6AA7CB-011F-4A36-8939-C73FBECA0705} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
+		{377498C9-C7D1-42E3-9844-C0E7B58A3C9C} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

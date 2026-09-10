@@ -395,6 +395,17 @@ namespace AkerMcp.Server.Platform.Windows
                 GetWindowThreadProcessId(owner, out var ownerPid);
                 if (ownerPid == 0) return;
 
+                // Only while that process is in front. The popups themselves are identified by
+                // owner, but their PIXELS come off the screen, and the screen shows whatever is
+                // topmost at those coordinates. If the window is behind something else, that
+                // something else would be pasted into the capture — another application's
+                // content, in a picture of this one. A background window has no menu open worth
+                // capturing anyway, so the safe case and the useful case are the same case.
+                var foreground = GetForegroundWindow();
+                if (foreground == IntPtr.Zero) return;
+                GetWindowThreadProcessId(foreground, out var foregroundPid);
+                if (foregroundPid != ownerPid) return;
+
                 var popups = new List<IntPtr>();
                 EnumWindows((hWnd, _) =>
                 {
@@ -436,8 +447,13 @@ namespace AkerMcp.Server.Platform.Windows
             catch { /* the window beneath is still worth returning */ }
         }
 
-        /// <summary>A guard against pasting something absurd if a popup reports a silly size.</summary>
-        private const long MaxPopupPixels = 8000L * 8000L;
+        /// <summary>
+        /// A guard against pasting something absurd if a popup reports a silly size. Four
+        /// million pixels is roughly 2000x2000 — enormous for a menu, and still only 16 MB of
+        /// bitmap. The previous 8000x8000 would have allowed a quarter of a gigabyte to be
+        /// allocated on the strength of a number reported by a window.
+        /// </summary>
+        private const long MaxPopupPixels = 4_000_000L;
 
         /// <summary>
         /// A popup's pixels, read off the screen rather than asked of the window.

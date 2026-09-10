@@ -123,27 +123,44 @@ namespace AkerMcp.UiProbe
             int worst = 0;
             foreach (var (px, py) in points)
             {
-                var moved = await mcp.Call("ui_action", new
-                {
-                    action = "mouse_move",
-                    x = px,
-                    y = py,
-                    screenshot = false,
-                });
-                if (moved.IsError) { Console.Error.WriteLine(moved.Text); return 1; }
+                var (wantX, wantY) = anchor.ToScreen(px, py);
+                int gotX = 0, gotY = 0, dx = 0, dy = 0;
+                bool retried = false;
 
-                await Task.Delay(120);
-                if (!Pointer.TryGetPosition(out int gotX, out int gotY, out var err))
+                // Twice, if the first answer is wrong. A hand on the physical mouse moves the
+                // pointer after the tool has put it somewhere, and the reading is then a
+                // measurement of the hand, not of the conversion: one such false alarm here
+                // read 265 px and sent me looking for a regression that did not exist. A real
+                // conversion error is deterministic and survives the second attempt; an
+                // interfering hand almost never lands on the same wrong pixel twice.
+                for (int attempt = 0; attempt < 2; attempt++)
                 {
-                    Console.Error.WriteLine(err);
-                    return 1;
+                    var moved = await mcp.Call("ui_action", new
+                    {
+                        action = "mouse_move",
+                        x = px,
+                        y = py,
+                        screenshot = false,
+                    });
+                    if (moved.IsError) { Console.Error.WriteLine(moved.Text); return 1; }
+
+                    await Task.Delay(120);
+                    if (!Pointer.TryGetPosition(out gotX, out gotY, out var err))
+                    {
+                        Console.Error.WriteLine(err);
+                        return 1;
+                    }
+
+                    dx = Math.Abs(gotX - wantX);
+                    dy = Math.Abs(gotY - wantY);
+                    if (dx == 0 && dy == 0) break;
+                    retried = attempt == 0;
                 }
 
-                var (wantX, wantY) = anchor.ToScreen(px, py);
-                int dx = Math.Abs(gotX - wantX), dy = Math.Abs(gotY - wantY);
                 worst = Math.Max(worst, Math.Max(dx, dy));
                 Console.WriteLine(
-                    $"  image ({px,5},{py,5}) -> expected ({wantX,5},{wantY,5})  pointer ({gotX,5},{gotY,5})  off by {dx},{dy}");
+                    $"  image ({px,5},{py,5}) -> expected ({wantX,5},{wantY,5})  pointer ({gotX,5},{gotY,5})  " +
+                    $"off by {dx},{dy}{(retried && dx == 0 && dy == 0 ? "  (first read disagreed: something moved the mouse)" : "")}");
             }
 
             Console.WriteLine($"  worst error: {worst} px");

@@ -97,6 +97,25 @@ namespace AkerMcp.Server
                    "or click in one, that the editor itself would decline to show or change.";
         }
 
+        /// <summary>
+        /// Does this error mean "there is no policy here", as opposed to "not right now"?
+        ///
+        /// Three sentences say it, and only one of them was being read. An engine that
+        /// implements the contract but not the interface answers NOT_SUPPORTED and names
+        /// IAgentConsent. An engine older than the method — every plugin still shipping the
+        /// 1.6.0 contract — has never heard of it and answers "Unknown method: get_consent",
+        /// which is the same information in a different voice. Missing that one cost a round
+        /// trip on every OS-level call for the life of the session, quietly, because the
+        /// fallback is permissive: it worked, it was just never cached.
+        ///
+        /// Anything else — a timeout, a disconnect, an adapter that threw — is deliberately
+        /// NOT final. A transient failure must not switch the policy off for the session.
+        /// </summary>
+        public static bool IsNoPolicyAnswer(string errorText)
+            => errorText.Contains(IpcConstants.ErrorCodes.NotSupported, StringComparison.OrdinalIgnoreCase)
+            || errorText.Contains("IAgentConsent", StringComparison.OrdinalIgnoreCase)
+            || errorText.Contains("Unknown method", StringComparison.OrdinalIgnoreCase);
+
         private async Task<(bool granted, string? reason)> Evaluate(CancellationToken ct)
         {
             lock (_lock)
@@ -136,9 +155,7 @@ namespace AkerMcp.Server
             if (result.IsError)
             {
                 var text = result.Content.Count > 0 ? result.Content[0].Text ?? "" : "";
-                // NOT_SUPPORTED is an answer, and a final one: this engine has no policy.
-                if (text.Contains(IpcConstants.ErrorCodes.NotSupported, StringComparison.OrdinalIgnoreCase)
-                    || text.Contains("IAgentConsent", StringComparison.OrdinalIgnoreCase))
+                if (IsNoPolicyAnswer(text))
                 {
                     lock (_lock) { _policyKnownAbsent = true; }
                     return (true, null);

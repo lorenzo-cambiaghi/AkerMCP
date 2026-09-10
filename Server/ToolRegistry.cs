@@ -1558,6 +1558,14 @@ namespace AkerMcp.Server
             if (string.IsNullOrWhiteSpace(windowTitle)) windowTitle = _gameWindowTitle; // auto-route to the game window
             bool byWindow = !string.IsNullOrWhiteSpace(windowTitle);
 
+            // Asked once for the whole sequence, and asked HERE rather than per frame, because
+            // the window_title branch below goes straight to the OS: it does not pass through
+            // the engine, so nothing else in this method would ever consult the policy. That
+            // half was governed and this half was not, which is the same shape of hole the
+            // consent gate exists to close.
+            if (await _consent.Refuse("Capturing a sequence", ct) is { } refusal)
+                return ToolResult.Error(refusal);
+
             var content = new List<ContentItem>();
             var sw = System.Diagnostics.Stopwatch.StartNew();
             for (int i = 0; i < count; i++)
