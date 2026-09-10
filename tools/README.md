@@ -1,7 +1,25 @@
 # tools/
 
-Benches. Nothing here ships: `build-package.bat` publishes the server explicitly and never
-sweeps the solution, so these are only built by `dotnet build`.
+Benches and generators. Nothing here ships: `build-package.bat` publishes the server
+explicitly and never sweeps the solution, so these are only built by `dotnet build`.
+
+## AkerMcp.AudioSamples
+
+Writes `docs/audio-samples.html` and the WAVs it plays, both from one list of specs.
+
+```
+dotnet run --project tools/AkerMcp.AudioSamples -- docs
+```
+
+One source, two outputs, deliberately. A gallery whose specs are retyped beside the files
+drifts the first time a default changes, and then it teaches the wrong recipe — worse than
+no gallery, because it looks authoritative. Here the spec that plays is the spec that
+rendered. Re-run it after touching `SoundSynthesizer` or `MusicSequencer`, and listen: these
+are the only tests for the half of "does it sound right" that no measurement covers.
+
+It is a page rather than the README because **GitHub strips `<audio>` from markdown**. Plain
+HTML with relative paths, so it works the same opened from a checkout and served from GitHub
+Pages.
 
 ## AkerMcp.UiProbe
 

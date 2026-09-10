@@ -36,7 +36,7 @@ AI: "Set the player's position to (10, 0, 5)"
 | OS window capture (`list_windows` · `capture_window` · `focus_window`) | ✅ | ✅ | ✅ |
 | Driving a window by hand (`ui_action`: click · drag · scroll · type) | ✅ | ✅ | ✅ |
 | **2D sprites from a JSON shape-spec** (`create_sprite`, rasterized server-side) | ✅ | ✅ | ✅ |
-| **Placeholder audio** (`create_sound`, synthesized server-side) | ✅ | ✅ | ❌ |
+| **Placeholder audio** (`create_sound` sfxr voice · `create_music` chiptune tracker, both synthesized server-side) | ✅ | ✅ | ❌ |
 | Gameplay primitive scripts (`add_primitive`) | ✅ | ❌ | ❌ |
 | Scene management (`new_scene` · `open_scene` · `save_scene`) | ✅ | ✅ | ✅ |
 | **Runtime loop** (`enter_play`/`exit_play` · `capture_sequence` · `send_input`) | ✅ | ◑ | ◑ |
@@ -50,7 +50,11 @@ The other MCP servers for game engines are tied to one engine each: unity-mcp an
 
 `execute` hoists `using` lines and type declarations, so a MonoBehaviour can be written, compiled and attached in one call instead of three. `playtest` drives input and evaluates C# assertions server-side at exact moments on the timeline, which is the only way to catch a transient as short as the top of a jump arc: separate tool calls arrive whenever the round trip lets them, and by then the frame is gone.
 
-Then there is the asset gap. A model writes code, not pixels. `create_sprite` closes it: the model describes the shape in JSON, with ellipses, rectangles, polygons and SVG path data, plus linear gradients and per-shape opacity, and the server rasterises that to an RGBA PNG at 4x supersampling before the plugin imports it as a sprite. The vector never reaches the editor, so Godot and Stride need no SVG support of their own to get the same placeholder Unity gets. `create_sound` does the same for audio on Unity and Godot, synthesising a WAV from a jsfxr-style spec. The prototype stops waiting for someone to draw the bird.
+Then there is the asset gap. A model writes code, not pixels. `create_sprite` closes it: the model describes the shape in JSON, with ellipses, rectangles, polygons and SVG path data, plus linear gradients and per-shape opacity, and the server rasterises that to an RGBA PNG at 4x supersampling before the plugin imports it as a sprite. The vector never reaches the editor, so Godot and Stride need no SVG support of their own to get the same placeholder Unity gets. The prototype stops waiting for someone to draw the bird.
+
+**And it stops waiting for someone to record the gunshot.** `create_sound` is a full sfxr voice — pitched noise, a resonant low-pass, duty cycle, arpeggio, punch, retrigger — and `create_music` is a tracker over that same voice, so a melody inherits the filters instead of reimplementing them. Both hand the engine a finished WAV. Chiptune rather than General MIDI on purpose: the small GM SoundFont everyone reaches for first is GPL, and its samples end up inside the audio produced, which for a tool whose output lands in someone else's game is the wrong thing to inherit. Square waves cost nothing, carry no licence, and are the idiom a prototype is expected to sound like.
+
+**▶ [Listen to what it generates](docs/audio-samples.html)** — gunshots, lasers, footsteps and four pieces of music, each with the spec that produced it. (Open the page from a checkout or GitHub Pages; GitHub strips `<audio>` from markdown, which is why the samples are not embedded here.)
 
 Pair it with [LynxMCP](https://github.com/lorenzo-cambiaghi/LynxMCP) for code search over the project and its library docs: Aker is the hands, Lynx the memory.
 
@@ -357,7 +361,8 @@ Every tool carries the four MCP hints (read-only, destructive, idempotent, open-
 | `open_scene` | standard | Open a scene by its engine asset path |
 | `save_scene` | standard | Save the edited scene in place or to a path |
 | `create_sprite` | full | Author a flat, geometric shape-spec; the server rasterises it to a PNG and imports it as a sprite on any engine |
-| `create_sound` | full | Synthesise a short jsfxr-style sound and import it as an audio clip |
+| `create_sound` | full | Synthesise a short sfxr-style sound and import it as an audio clip ([samples](docs/audio-samples.html)) |
+| `create_music` | full | Sequence a chiptune loop over the same voice and import it as an audio clip |
 | `add_primitive` | full | Write a vetted gameplay script (2D platformer controller, auto-runner, camera follow, kill zone, score overlay) |
 
 > **Engine support:** `create_sprite` imports + places a sprite on **Unity** and **Godot**; on **Stride** it persists a real `.sdtex` texture asset in the package (via the editor's `SessionViewModel`) and also adds a runtime preview entity for immediate visibility. `create_sound` works on **Unity** and **Godot**; **Stride** has no sound importer yet and says so. `add_primitive` carries Unity variants only for now, and when it cannot serve your engine it names the ones a given primitive exists for. `new_scene`/`open_scene`/`save_scene` work on **Unity** and **Godot** (file-on-disk scenes) and on **Stride** (package-managed `SceneAsset` via the editor). `write_script` works on all three. *(Stride's `create_sprite` + scene creation are verified live in Game Studio.)*

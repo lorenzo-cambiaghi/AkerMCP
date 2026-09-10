@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AkerMCP — audio the model writes</title>
+<style>
+  :root { color-scheme: dark; --bg:#12141a; --card:#191c24; --line:#2a2f3a;
+          --ink:#e6e8ee; --dim:#9aa3b2; --accent:#7fd6c1; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:32px 16px 64px; background:var(--bg); color:var(--ink);
+         font:15px/1.6 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: clamp(24px, 4vw, 34px); margin:0 0 8px; letter-spacing:-0.02em; }
+  h2 { font-size: 20px; margin: 44px 0 4px; }
+  .sub { color:var(--dim); margin:0 0 8px; }
+  .lead { color:var(--dim); margin:0 0 20px; max-width:70ch; }
+  .grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fill, minmax(310px, 1fr)); }
+  figure { margin:0; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  figcaption { font-weight:600; margin-bottom:10px; }
+  audio { width:100%; height:34px; }
+  .note { color:var(--dim); font-size:13px; margin:10px 0 8px; }
+  pre { margin:0; background:#0e1015; border:1px solid var(--line); border-radius:7px;
+        padding:10px; overflow-x:auto; }
+  code { font:12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color:var(--accent); }
+  a { color:var(--accent); }
+  footer { color:var(--dim); margin-top:48px; font-size:13px; max-width:70ch; }
+</style>
+</head>
+<body>
+<main>
+<h1>Audio the model writes</h1>
+<p class="sub">Placeholder sound and music for a prototype, generated on the spot from a spec —
+no asset packs, no downloads, nothing to licence.</p>
+<h2>Sound effects</h2>
+<p class="lead">Every sample below was produced by <code>create_sound</code> from the spec beside it. No samples, no recordings, no asset packs: the server renders the WAV and hands it to the engine.</p>
+<div class="grid">
+<figure>
+  <figcaption>Pistol</figcaption>
+  <audio controls preload="none" src="samples/gun-pistol.wav"></audio>
+  <p class="note">A gunshot is a transient, not a tone: nearly all of it is the first 20 ms. Punch for the crack, a low-pass diving to take the fizz away.</p>
+  <pre><code>{"wave":"noise", "freq":900, "lowpass":2600, "lowpass_sweep":-9,
+"highpass":220, "punch":1, "attack":0.001, "sustain":0.012,
+"decay":0.19, "volume":0.9}</code></pre>
+</figure>
+<figure>
+  <figcaption>Shotgun</figcaption>
+  <audio controls preload="none" src="samples/gun-shotgun.wav"></audio>
+  <p class="note">The same shape with a bigger chamber: coarser grain, longer tail, the filter falls further.</p>
+  <pre><code>{"wave":"noise", "freq":420, "lowpass":1800, "lowpass_sweep":-7,
+"highpass":120, "punch":1, "attack":0.001, "sustain":0.03,
+"decay":0.45, "volume":0.95}</code></pre>
+</figure>
+<figure>
+  <figcaption>Laser</figcaption>
+  <audio controls preload="none" src="samples/laser-shot.wav"></audio>
+  <p class="note">The opposite of a gunshot: pure pitch falling fast. The resonance is what gives it the whistle.</p>
+  <pre><code>{"wave":"saw", "freq":1800, "freq_sweep":-4200, "lowpass":3000,
+"resonance":0.5, "attack":0.002, "sustain":0.04,
+"decay":0.2, "volume":0.8}</code></pre>
+</figure>
+<figure>
+  <figcaption>Heavy laser</figcaption>
+  <audio controls preload="none" src="samples/laser-heavy.wav"></audio>
+  <p class="note">Square instead of saw, a slower fall, and a little vibrato wobble.</p>
+  <pre><code>{"wave":"square", "freq":900, "freq_sweep":-1400,
+"duty":0.35, "lowpass":2200, "resonance":0.6, "vibrato_depth":0.05,
+"vibrato_rate":40, "attack":0.003, "sustain":0.08,
+"decay":0.28, "volume":0.85}</code></pre>
+</figure>
+<figure>
+  <figcaption>Footstep, dirt</figcaption>
+  <audio controls preload="none" src="samples/footstep-dirt.wav"></audio>
+  <p class="note">Footsteps live or die on the low-pass: a step is a dull thud, not a hiss.</p>
+  <pre><code>{"wave":"noise", "freq":420, "lowpass":760, "punch":0.35,
+"attack":0.001, "sustain":0.008, "decay":0.085, "volume":0.6}</code></pre>
+</figure>
+<figure>
+  <figcaption>Footstep, metal</figcaption>
+  <audio controls preload="none" src="samples/footstep-metal.wav"></audio>
+  <p class="note">Three numbers away from the one above — finer grain, resonance, a high-pass — and it is another surface.</p>
+  <pre><code>{"wave":"noise", "freq":1500, "lowpass":3200, "resonance":0.7,
+"highpass":600, "punch":0.5, "attack":0.001, "sustain":0.006,
+"decay":0.16, "volume":0.6}</code></pre>
+</figure>
+<figure>
+  <figcaption>Bullet impact</figcaption>
+  <audio controls preload="none" src="samples/bullet-impact.wav"></audio>
+  <p class="note">Shorter and duller than the shot, so the two read as cause and effect.</p>
+  <pre><code>{"wave":"noise", "freq":700, "lowpass":1500, "lowpass_sweep":-6,
+"punch":0.8, "attack":0.001, "sustain":0.01, "decay":0.12,
+"volume":0.75}</code></pre>
+</figure>
+<figure>
+  <figcaption>Reload click</figcaption>
+  <audio controls preload="none" src="samples/reload-click.wav"></audio>
+  <p class="note">Very short, band-limited, no tail: a mechanism, not a sound.</p>
+  <pre><code>{"wave":"noise", "freq":2400, "lowpass":4200, "highpass":900,
+"punch":0.7, "attack":0.0005, "sustain":0.004, "decay":0.035,
+"volume":0.7}</code></pre>
+</figure>
+<figure>
+  <figcaption>Jump</figcaption>
+  <audio controls preload="none" src="samples/jump.wav"></audio>
+  <p class="note">The classic: a square sweeping up, kept short.</p>
+  <pre><code>{"wave":"square", "freq":480, "freq_sweep":1400,
+"duty":0.4, "duration":0.15, "lowpass":4000}</code></pre>
+</figure>
+<figure>
+  <figcaption>Coin</figcaption>
+  <audio controls preload="none" src="samples/coin.wav"></audio>
+  <p class="note">A pickup is a pitch jump, which is what arpeggio does in one parameter.</p>
+  <pre><code>{"wave":"square", "freq":900, "arpeggio":1.5, "arpeggio_delay":0.06,
+"decay":0.2, "duration":0.3, "lowpass":5000}</code></pre>
+</figure>
+<figure>
+  <figcaption>Explosion</figcaption>
+  <audio controls preload="none" src="samples/explosion.wav"></audio>
+  <p class="note">Low grain, a filter collapsing over most of a second, and all the punch there is.</p>
+  <pre><code>{"wave":"noise", "freq":120, "lowpass":900, "lowpass_sweep":-3,
+"punch":1, "decay":0.7, "duration":0.9}</code></pre>
+</figure>
+<figure>
+  <figcaption>Power-up</figcaption>
+  <audio controls preload="none" src="samples/powerup.wav"></audio>
+  <p class="note">repeat retriggers the envelope, so one spec becomes a run of notes.</p>
+  <pre><code>{"wave":"square", "freq":400, "freq_sweep":600, "arpeggio":1.5,
+"repeat":6, "duration":0.7, "lowpass":4000}</code></pre>
+</figure>
+</div>
+<h2>Music</h2>
+<p class="lead">Every sample below was produced by <code>create_music</code> from the spec beside it. No samples, no recordings, no asset packs: the server renders the WAV and hands it to the engine.</p>
+<div class="grid">
+<figure>
+  <figcaption>Overworld</figcaption>
+  <audio controls preload="none" src="samples/music-overworld.wav"></audio>
+  <p class="note">Lead, bass and drums. '-' holds a note, '.' is a rest, 'C3*4' spans four steps.</p>
+  <pre><code>{"bpm":132, "repeat":2, "channels":[{"instrument":"lead",
+"notes":"C5 . E5 . G5 - E5 . F5 . D5 - C5 - - ."},
+{"instrument":"bass", "notes":"C3*4 A2*4 F2*4 G2*4"},
+{"instrument":"drums", "notes":"k . h . s . h . k . h . s . h ."}]}</code></pre>
+</figure>
+<figure>
+  <figcaption>Menu</figcaption>
+  <audio controls preload="none" src="samples/music-menu.wav"></audio>
+  <p class="note">Slower, no drums: a pad underneath and a pluck picking out the melody.</p>
+  <pre><code>{"bpm":88, "repeat":2, "channels":[{"instrument":"pad",
+"notes":"C4*8 F4*8"}, {"instrument":"pluck", "notes":"C5 . G4 . E5 . G4 . F5 . C5 . A4 . C5 ."},
+{"instrument":"bass", "notes":"C2*8 F2*8"}]}</code></pre>
+</figure>
+<figure>
+  <figcaption>Boss</figcaption>
+  <audio controls preload="none" src="samples/music-boss.wav"></audio>
+  <p class="note">Fast, minor, and a busy drum line.</p>
+  <pre><code>{"bpm":168, "repeat":2, "channels":[{"instrument":"lead",
+"notes":"C4 C4 D#4 F4 C4 C4 F4 D#4 C4 C4 D#4 F4 G4 - F4 D#4"},
+{"instrument":"bass", "notes":"C2 C2 C2 C2 C2 C2 C2 C2 A#1 A#1 A#1 A#1 G1 G1 G1 G1"},
+{"instrument":"drums", "notes":"k h s h k h s h k h s h k s s s"}]}</code></pre>
+</figure>
+<figure>
+  <figcaption>Victory</figcaption>
+  <audio controls preload="none" src="samples/music-victory.wav"></audio>
+  <p class="note">A four-chord fanfare, over in a second and a half.</p>
+  <pre><code>{"bpm":140, "channels":[{"instrument":"lead", "notes":"C5 E5 G5 C6*4"},
+{"instrument":"arp", "notes":"C4 E4 G4 C5*4"}, {"instrument":"drums",
+"notes":"k s k o*4"}]}</code></pre>
+</figure>
+</div>
+<footer>
+<p><strong>Why this is here.</strong> A prototype stops for want of a jump sound as surely as for
+want of a jump. The synthesiser is sfxr's — pitched noise, a resonant low-pass, duty cycle,
+arpeggio, punch, retrigger — and the music is a tracker over the same voice, so a melody inherits
+the filters rather than reimplementing them. Chiptune rather than General MIDI on purpose: the
+small GM SoundFont everyone reaches for first is GPL, and its samples end up inside the audio
+produced, which for a tool whose output lands in someone else's game is the wrong thing to
+inherit.</p>
+<p>Copy any spec into <code>create_sound</code> or <code>create_music</code> and it produces
+exactly the file you just played.</p>
+</footer>
+</main>
+</body>
+</html>
