@@ -62,7 +62,7 @@ Background music for a level is one call. Four bars of A minor, a token per eigh
 {
   "name": "level-theme",
   "spec": {
-    "bpm": 108, "steps_per_beat": 2, "repeat": 2,
+    "bpm": 108, "steps_per_beat": 2,
     "channels": [
       { "instrument": "lead",  "notes": "E5 . . . D5 . C5 . A4 . C5 . D5 - - . E5 . G5 . E5 . D5 . C5 - - . B4 . . ." },
       { "instrument": "pad",   "notes": "A4*8 F4*8 C5*8 G4*8", "volume": 0.5 },
@@ -74,7 +74,7 @@ Background music for a level is one call. Four bars of A minor, a token per eigh
 }
 ```
 
-The melody rests where the bass walks to the next chord, which is what keeps a short loop from nagging after the third pass. Add `"engine": "soundfont"` and swap the instrument names — `ocarina`, `strings`, `acoustic_bass` — and those same notes come back played rather than bleeped. Both versions are on the page below.
+The melody rests where the bass walks to the next chord, which is what keeps a short loop from nagging after the third pass. One pass through the score is enough — `"loop": true` leaves the repeating to the engine, which is both smaller and seamless; the score's own `repeat` is for when you want the piece itself to be longer. Add `"engine": "soundfont"` and swap the instrument names — `ocarina`, `strings`, `acoustic_bass` — and those same notes come back played rather than bleeped. Both versions are on the page below.
 
 **▶ [Listen to what it generates](docs/audio-samples.html)** — that level theme both ways, gunshots, lasers, footsteps and half a dozen other pieces, each next to the spec that produced it. (Open the page from a checkout or GitHub Pages; GitHub strips `<audio>` from markdown, which is why the samples are not embedded here.)
 

@@ -66,19 +66,19 @@ namespace AkerMcp.AudioSamples
                 "{\"wave\":\"square\",\"freq\":400,\"freq_sweep\":600,\"arpeggio\":1.5,\"repeat\":6,\"duration\":0.7,\"lowpass\":4000}"),
 
             new("music-overworld", "Overworld", "Lead, bass and drums. '-' holds a note, '.' is a rest, 'C3*4' spans four steps.",
-                "{\"bpm\":132,\"repeat\":2,\"channels\":[" +
+                "{\"bpm\":132,\"channels\":[" +
                 "{\"instrument\":\"lead\",\"notes\":\"C5 . E5 . G5 - E5 . F5 . D5 - C5 - - .\"}," +
                 "{\"instrument\":\"bass\",\"notes\":\"C3*4 A2*4 F2*4 G2*4\"}," +
                 "{\"instrument\":\"drums\",\"notes\":\"k . h . s . h . k . h . s . h .\"}]}", IsMusic: true),
 
             new("music-menu", "Menu", "Slower, no drums: a pad underneath and a pluck picking out the melody.",
-                "{\"bpm\":88,\"repeat\":2,\"channels\":[" +
+                "{\"bpm\":88,\"channels\":[" +
                 "{\"instrument\":\"pad\",\"notes\":\"C4*8 F4*8\"}," +
                 "{\"instrument\":\"pluck\",\"notes\":\"C5 . G4 . E5 . G4 . F5 . C5 . A4 . C5 .\"}," +
                 "{\"instrument\":\"bass\",\"notes\":\"C2*8 F2*8\"}]}", IsMusic: true),
 
             new("music-boss", "Boss", "Fast, minor, and a busy drum line.",
-                "{\"bpm\":168,\"repeat\":2,\"channels\":[" +
+                "{\"bpm\":168,\"channels\":[" +
                 "{\"instrument\":\"lead\",\"notes\":\"C4 C4 D#4 F4 C4 C4 F4 D#4 C4 C4 D#4 F4 G4 - F4 D#4\"}," +
                 "{\"instrument\":\"bass\",\"notes\":\"C2 C2 C2 C2 C2 C2 C2 C2 A#1 A#1 A#1 A#1 G1 G1 G1 G1\"}," +
                 "{\"instrument\":\"drums\",\"notes\":\"k h s h k h s h k h s h k s s s\"}]}", IsMusic: true),
@@ -94,7 +94,7 @@ namespace AkerMcp.AudioSamples
             // walks to the next chord instead of sitting on the root.
             new("level-loop", "Level theme (the README example)",
                 "Written at two steps per beat, so a token is an eighth note and a bar is eight tokens. The melody rests where the bass moves, which is what keeps a short loop from nagging.",
-                "{\"bpm\":108,\"steps_per_beat\":2,\"repeat\":2,\"channels\":[" +
+                "{\"bpm\":108,\"steps_per_beat\":2,\"channels\":[" +
                 "{\"instrument\":\"lead\",\"notes\":\"E5 . . . D5 . C5 . A4 . C5 . D5 - - . E5 . G5 . E5 . D5 . C5 - - . B4 . . .\"}," +
                 "{\"instrument\":\"pad\",\"notes\":\"A4*8 F4*8 C5*8 G4*8\",\"volume\":0.5}," +
                 "{\"instrument\":\"bass\",\"notes\":\"A2 . A2 . E3 . A2 . F2 . F2 . C3 . F2 . C3 . C3 . G3 . C3 . G2 . G2 . D3 . G2 .\"}," +
@@ -103,7 +103,7 @@ namespace AkerMcp.AudioSamples
 
             new("level-loop-soundfont", "Level theme — SoundFont",
                 "The same four bars with sampled instruments: the notes below are identical, only the instrument names and one word changed.",
-                "{\"engine\":\"soundfont\",\"bpm\":108,\"steps_per_beat\":2,\"repeat\":2,\"channels\":[" +
+                "{\"engine\":\"soundfont\",\"bpm\":108,\"steps_per_beat\":2,\"channels\":[" +
                 "{\"instrument\":\"ocarina\",\"notes\":\"E5 . . . D5 . C5 . A4 . C5 . D5 - - . E5 . G5 . E5 . D5 . C5 - - . B4 . . .\"}," +
                 "{\"instrument\":\"strings\",\"notes\":\"A4*8 F4*8 C5*8 G4*8\",\"volume\":0.5}," +
                 "{\"instrument\":\"acoustic_bass\",\"notes\":\"A2 . A2 . E3 . A2 . F2 . F2 . C3 . F2 . C3 . C3 . G3 . C3 . G2 . G2 . D3 . G2 .\"}," +
@@ -112,21 +112,21 @@ namespace AkerMcp.AudioSamples
 
             // The A/B: identical score, one word different. Worth more than either alone.
             new("engine-chiptune", "The same score — chiptune", "Square waves and noise. Nothing to download, nothing to licence.",
-                "{\"bpm\":100,\"repeat\":2,\"channels\":[" +
+                "{\"bpm\":100,\"channels\":[" +
                 "{\"instrument\":\"lead\",\"notes\":\"E5 . D5 . C5 - D5 . E5 . E5 . E5 - - .\"}," +
                 "{\"instrument\":\"pad\",\"notes\":\"C4*8 G3*8\"}," +
                 "{\"instrument\":\"bass\",\"notes\":\"C3*4 C3*4 G2*4 G2*4\"}," +
                 "{\"instrument\":\"drums\",\"notes\":\"k . h . s . h . k . h . s . h .\"}]}", IsMusic: true),
 
             new("engine-soundfont", "The same score — SoundFont", "One word changed, plus instrument names: flute and strings instead of lead and pad. The notes are untouched.",
-                "{\"engine\":\"soundfont\",\"bpm\":100,\"repeat\":2,\"channels\":[" +
+                "{\"engine\":\"soundfont\",\"bpm\":100,\"channels\":[" +
                 "{\"instrument\":\"flute\",\"notes\":\"E5 . D5 . C5 - D5 . E5 . E5 . E5 - - .\"}," +
                 "{\"instrument\":\"strings\",\"notes\":\"C4*8 G3*8\"}," +
                 "{\"instrument\":\"bass\",\"notes\":\"C3*4 C3*4 G2*4 G2*4\"}," +
                 "{\"instrument\":\"drums\",\"notes\":\"k . h . s . h . k . h . s . h .\"}]}", IsMusic: true),
 
             new("sf-adventure", "Adventure theme — SoundFont", "Trumpet, strings and timpani, from the same grammar.",
-                "{\"engine\":\"soundfont\",\"bpm\":124,\"repeat\":2,\"channels\":[" +
+                "{\"engine\":\"soundfont\",\"bpm\":124,\"channels\":[" +
                 "{\"instrument\":\"trumpet\",\"notes\":\"G4 . C5 . E5 - D5 . C5 . G4 - - . . .\"}," +
                 "{\"instrument\":\"strings\",\"notes\":\"C4*16\",\"volume\":0.6}," +
                 "{\"instrument\":\"timpani\",\"notes\":\"C2 . . . G2 . . . C2 . . . G2 . . .\"}," +
