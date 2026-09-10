@@ -299,6 +299,75 @@ namespace AkerMcp.Loopback
             // being read. A plugin older than the method answers "Unknown method: get_consent",
             // never the word NOT_SUPPORTED — so every OS-level call kept paying an IPC round
             // trip for the whole session, invisibly, because the fallback is permissive.
+            // ---- sfxr ---------------------------------------------------------------
+            // "Sounds better" is not testable, but the things that make it better are. Two
+            // cheap measures do the work: the zero-crossing rate stands in for brightness
+            // (a hiss crosses zero constantly, a rumble rarely), and RMS over a slice stands
+            // in for the envelope's shape.
+            static short[] Render(string json)
+            {
+                var wav = SoundSynthesizer.RenderToWav(JsonSerializer.Deserialize<JsonElement>(json));
+                var pcm = new short[(wav.Length - 44) / 2];
+                for (int i = 0; i < pcm.Length; i++) pcm[i] = BitConverter.ToInt16(wav, 44 + i * 2);
+                return pcm;
+            }
+            static double Zcr(short[] pcm)
+            {
+                int crossings = 0;
+                for (int i = 1; i < pcm.Length; i++)
+                    if ((pcm[i - 1] < 0) != (pcm[i] < 0)) crossings++;
+                return pcm.Length > 1 ? (double)crossings / pcm.Length : 0;
+            }
+            static double Rms(short[] pcm, double from, double to)
+            {
+                int a = (int)(pcm.Length * from), b = (int)(pcm.Length * to);
+                if (b <= a) return 0;
+                double sum = 0;
+                for (int i = a; i < b; i++) sum += (double)pcm[i] * pcm[i];
+                return Math.Sqrt(sum / (b - a));
+            }
+
+            // The bug that made every impact sound the same: the noise oscillator ignored
+            // frequency, so this ratio used to be 1.0 whatever was asked for.
+            var noiseLow = Zcr(Render("{\"wave\":\"noise\",\"freq\":200,\"duration\":0.4}"));
+            var noiseHigh = Zcr(Render("{\"wave\":\"noise\",\"freq\":4000,\"duration\":0.4}"));
+            Check("noise takes a pitch: 4000 Hz is far brighter than 200 Hz",
+                noiseHigh > noiseLow * 3, $"zcr {noiseLow:0.0000} vs {noiseHigh:0.0000}");
+
+            // The single biggest reason a raw square is unpleasant: every harmonic up to Nyquist.
+            var openSquare = Zcr(Render("{\"wave\":\"square\",\"freq\":800,\"duration\":0.3}"));
+            var filtered = Zcr(Render("{\"wave\":\"square\",\"freq\":800,\"duration\":0.3,\"lowpass\":900}"));
+            Check("a low-pass takes the edge off", filtered < openSquare,
+                $"zcr {openSquare:0.0000} open vs {filtered:0.0000} filtered");
+
+            var noPunch = Rms(Render("{\"wave\":\"square\",\"freq\":440,\"duration\":0.4}"), 0, 0.15);
+            var withPunch = Rms(Render("{\"wave\":\"square\",\"freq\":440,\"duration\":0.4,\"punch\":0.8}"), 0, 0.15);
+            Check("punch puts the energy at the start", withPunch > noPunch * 1.1,
+                $"rms {noPunch:0} vs {withPunch:0}");
+
+            var linearTail = Rms(Render("{\"wave\":\"square\",\"freq\":440,\"duration\":0.4,\"decay\":0.3,\"decay_curve\":\"linear\"}"), 0.6, 0.9);
+            var expTail = Rms(Render("{\"wave\":\"square\",\"freq\":440,\"duration\":0.4,\"decay\":0.3}"), 0.6, 0.9);
+            Check("the default decay is exponential, so the tail dies sooner than linear",
+                expTail < linearTail, $"rms tail {expTail:0} exp vs {linearTail:0} linear");
+
+            var flat = Zcr(Render("{\"wave\":\"square\",\"freq\":600,\"duration\":0.3}"));
+            var thin = Zcr(Render("{\"wave\":\"square\",\"freq\":600,\"duration\":0.3,\"duty\":0.1}"));
+            Check("duty cycle changes the tone without changing the pitch",
+                Math.Abs(thin - flat) < flat * 0.25 && thin > 0, $"zcr {flat:0.0000} vs {thin:0.0000}");
+
+            var plain = Render("{\"wave\":\"square\",\"freq\":300,\"duration\":0.5}");
+            var arped = Render("{\"wave\":\"square\",\"freq\":300,\"duration\":0.5,\"arpeggio\":2.0,\"arpeggio_delay\":0.1}");
+            Check("arpeggio lifts the pitch partway through",
+                Zcr(arped) > Zcr(plain) * 1.4, $"zcr {Zcr(plain):0.0000} vs {Zcr(arped):0.0000}");
+
+            var once = Rms(Render("{\"wave\":\"square\",\"freq\":500,\"duration\":0.6,\"decay\":0.1}"), 0.7, 1.0);
+            var repeated = Rms(Render("{\"wave\":\"square\",\"freq\":500,\"duration\":0.6,\"decay\":0.1,\"repeat\":8}"), 0.7, 1.0);
+            Check("repeat retriggers the envelope instead of leaving silence",
+                repeated > once * 2, $"rms late {once:0} vs {repeated:0}");
+
+            Check("an old spec still renders the length it asks for",
+                Render("{\"wave\":\"saw\",\"freq\":1200,\"freq_sweep\":-3000,\"duration\":0.25}").Length == 11025);
+
             Check("an engine with no IAgentConsent is recognised, however it says so",
                 ConsentGate.IsNoPolicyAnswer("NOT_SUPPORTED: whatever")
                 && ConsentGate.IsNoPolicyAnswer("Engine does not implement IAgentConsent; ...")

@@ -110,12 +110,15 @@ namespace AkerMcp.Server
                 "silhouettes clean: recognisable beats detailed.",
 
             ["create_sound"] =
-                "Synthesise a short placeholder sound from a jsfxr-style spec and import it as an audio " +
-                "clip on any engine: wave square|saw|sine|triangle|noise, freq Hz, freq_sweep Hz per " +
-                "second (negative sweeps down), attack/sustain/decay seconds, duration, volume 0..1, " +
-                "vibrato_depth, vibrato_rate. Recipes: jump = square 480 sweep +1400, short; hit = noise " +
-                "200 decay 0.25; laser = saw 1200 sweep -3000. Top-level scene_path, position, volume, " +
-                "loop and auto_play place a source.",
+                "Synthesise a short placeholder sound from an sfxr-style spec and import it as an audio " +
+                "clip on any engine. Beyond wave/freq/freq_sweep and the envelope: lowpass (Hz) is what " +
+                "stops a square sounding harsh, punch puts the energy at the start, arpeggio jumps the " +
+                "pitch once, repeat retriggers, duty thins a square. On noise, freq is the grain — low " +
+                "rumbles, high hisses. Recipes: jump = square 480 sweep +1400 duty 0.4 duration 0.15; " +
+                "coin = square 900 arpeggio 1.5 arpeggio_delay 0.06 decay 0.2; laser = saw 1200 sweep " +
+                "-3000 lowpass 2200; hit = noise 400 lowpass 1200 punch 0.5 decay 0.25; explosion = " +
+                "noise 120 lowpass 900 lowpass_sweep -3 punch 1 decay 0.7. Top-level scene_path, " +
+                "position, volume, loop and auto_play place a source.",
 
             ["add_primitive"] =
                 "Write a vetted gameplay script for the connected engine instead of hand-writing it. " +
