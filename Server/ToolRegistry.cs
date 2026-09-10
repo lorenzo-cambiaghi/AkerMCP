@@ -29,6 +29,13 @@ namespace AkerMcp.Server
         // so send_input/capture_sequence auto-route to that window without a manual window_title.
         private volatile string? _gameWindowTitle;
 
+        // The last OS window capture, and what its pixels mean on screen. ui_action converts
+        // the coordinates a model read off that image; without it the model would have to
+        // undo the 1920-px normalization and add the window origin itself, from numbers no
+        // tool ever told it. Written and read from tool-handler threads, so it is swapped
+        // whole rather than mutated in place.
+        private volatile CaptureAnchor? _lastCapture;
+
         public ToolRegistry(EngineConnection engine)
         {
             _engine = engine;
@@ -439,6 +446,33 @@ namespace AkerMcp.Server
                 }"),
                 HandleFocusWindow);
 
+            Register("ui_action", ToolDocs.Describe("ui_action"),
+                ParseSchema(@"{
+                    ""type"": ""object"",
+                    ""properties"": {
+                        ""action"": {
+                            ""type"": ""string"",
+                            ""enum"": [""screenshot"", ""mouse_move"", ""left_click"", ""right_click"", ""middle_click"",
+                                       ""double_click"", ""triple_click"", ""left_click_drag"", ""scroll"", ""type"", ""key"", ""wait""],
+                            ""description"": ""What to do""
+                        },
+                        ""x"": { ""type"": ""number"", ""description"": ""Target, in pixels of the last screenshot from its top-left"" },
+                        ""y"": { ""type"": ""number"" },
+                        ""to_x"": { ""type"": ""number"", ""description"": ""Drag destination, same units"" },
+                        ""to_y"": { ""type"": ""number"" },
+                        ""text"": { ""type"": ""string"", ""description"": ""For 'type': the text to enter"" },
+                        ""keys"": { ""type"": ""string"", ""description"": ""For 'key': 'ctrl+s', 'alt+F4', 'Escape'"" },
+                        ""scroll_direction"": { ""type"": ""string"", ""enum"": [""up"", ""down"", ""left"", ""right""] },
+                        ""scroll_amount"": { ""type"": ""integer"", ""description"": ""Wheel notches (1-30, default 3)"" },
+                        ""duration_ms"": { ""type"": ""integer"", ""description"": ""For 'wait' (default 500)"" },
+                        ""window_title"": { ""type"": ""string"", ""description"": ""Title substring of the window to act on; sticks until changed"" },
+                        ""settle_ms"": { ""type"": ""integer"", ""description"": ""Pause before the follow-up screenshot (default 250)"" },
+                        ""screenshot"": { ""type"": ""boolean"", ""description"": ""Return the screenshot after the action (default true)"" }
+                    },
+                    ""required"": [""action""]
+                }"),
+                HandleUiAction);
+
             // ---- Runtime loop: run the game, observe it, drive it ----
 
             Register("enter_play", ToolDocs.Describe("enter_play"),
@@ -506,7 +540,12 @@ namespace AkerMcp.Server
                                 }
                             }
                         },
-                        ""window_title"": { ""type"": ""string"", ""description"": ""OS-level path only: title substring of the window to focus before injecting"" }
+                        ""window_title"": { ""type"": ""string"", ""description"": ""OS-level path only: title substring of the window to focus before injecting"" },
+                        ""coords"": {
+                            ""type"": ""string"",
+                            ""enum"": [""screen"", ""image""],
+                            ""description"": ""What mouse_move x/y mean: 'screen' (default) OS pixels, or 'image' pixels of the last capture_window screenshot""
+                        }
                     },
                     ""required"": [""events""]
                 }"),
@@ -648,29 +687,336 @@ namespace AkerMcp.Server
 
         private Task<ToolResult> HandleCaptureWindow(JsonElement? args, CancellationToken ct)
         {
-            var capture = PlatformScreenCapture.Current;
-            if (capture == null)
-                return Task.FromResult(ToolResult.Error(PlatformScreenCapture.UnsupportedPlatformMessage));
-
             string? title = null;
             if (args is JsonElement a && a.ValueKind == JsonValueKind.Object && a.TryGetProperty("title", out var t))
                 title = t.GetString();
             if (string.IsNullOrWhiteSpace(title))
                 return Task.FromResult(ToolResult.Error("Missing required 'title' (window title substring)."));
 
+            var (jpeg, anchor, note, error) = CaptureWindowAnchored(title!);
+            if (jpeg == null)
+                return Task.FromResult(ToolResult.Error(error ?? "Window capture failed."));
+
+            var content = new List<ContentItem>();
+            if (anchor != null) content.Add(ContentItem.FromText(anchor.Describe()));
+            else if (note != null) content.Add(ContentItem.FromText(note));
+            content.Add(ContentItem.FromImage(Convert.ToBase64String(jpeg), "image/jpeg"));
+            return Task.FromResult(new ToolResult { Content = content });
+        }
+
+        /// <summary>
+        /// Capture one OS window and remember what the delivered image's pixels mean on
+        /// screen, so a later ui_action can be given coordinates read straight off it.
+        ///
+        /// The geometry is read before the capture, not after: taken afterwards it could
+        /// describe a window the user has since dragged, and every coordinate derived from
+        /// it would be wrong by the width of that drag with nothing to show for it. When
+        /// the platform cannot report geometry (macOS today) the capture still succeeds —
+        /// the image is worth having on its own — and only the anchor is missing.
+        /// </summary>
+        private (byte[]? jpeg, CaptureAnchor? anchor, string? note, string? error) CaptureWindowAnchored(string title)
+        {
+            var capture = PlatformScreenCapture.Current;
+            if (capture == null)
+                return (null, null, null, PlatformScreenCapture.UnsupportedPlatformMessage);
+
+            capture.TryGetWindowGeometry(title, out var geometry, out var geometryError);
+
             var raw = capture.CaptureWindowByTitle(title, out var err);
             if (raw == null)
-                return Task.FromResult(ToolResult.Error(err ?? "Window capture failed."));
+                return (null, null, null, err ?? "Window capture failed.");
 
-            byte[] outBytes;
-            try { outBytes = ImageProcessor.NormalizeToJpeg(raw); }
-            catch (Exception ex) { return Task.FromResult(ToolResult.Error($"Image processing failed: {ex.Message}")); }
+            NormalizedImage image;
+            try { image = ImageProcessor.Normalize(raw); }
+            catch (Exception ex) { return (null, null, null, $"Image processing failed: {ex.Message}"); }
 
-            var base64 = Convert.ToBase64String(outBytes);
-            return Task.FromResult(new ToolResult
+            if (geometry == null)
             {
-                Content = new List<ContentItem> { ContentItem.FromImage(base64, "image/jpeg") }
-            });
+                return (image.Bytes, null, $"Window geometry unavailable ({geometryError}); " +
+                                           "ui_action cannot map coordinates on this capture.", null);
+            }
+
+            var anchor = new CaptureAnchor
+            {
+                TitleQuery = title,
+                WindowTitle = string.IsNullOrEmpty(geometry.Title) ? title : geometry.Title,
+                OriginX = geometry.OriginX,
+                OriginY = geometry.OriginY,
+                // The window's own size, not the captured bitmap's. On Windows the two agree,
+                // since the client rect is captured pixel for pixel. They need not agree
+                // elsewhere — a Retina capture can come back at twice the size of the window
+                // it shows — and it is the window's units the pointer moves in, so those are
+                // the ones an image pixel has to be converted into.
+                SourceWidth = geometry.Width,
+                SourceHeight = geometry.Height,
+                ImageWidth = image.Width,
+                ImageHeight = image.Height,
+            };
+            _lastCapture = anchor;
+            return (image.Bytes, anchor, null, null);
+        }
+
+        private static readonly string[] UiActions =
+        {
+            "screenshot", "mouse_move", "left_click", "right_click", "middle_click",
+            "double_click", "triple_click", "left_click_drag", "scroll", "type", "key", "wait",
+        };
+
+        /// <summary>
+        /// One turn of the observe-act-observe loop against a real user interface: the model
+        /// reads a point off the last screenshot, names an action there, and gets the next
+        /// screenshot back from the same call.
+        ///
+        /// Coordinates are pixels of the image the model was shown, never screen pixels. The
+        /// conversion belongs here because only the server knows both halves of it — the
+        /// scale the image was normalized by and where the window sits on the virtual
+        /// screen — and a model asked to do that arithmetic itself has no way to tell a
+        /// click that missed from a click that did nothing.
+        ///
+        /// Everything runs OS-level: the target is the editor's own interface, which no
+        /// in-process engine simulator can reach.
+        /// </summary>
+        private async Task<ToolResult> HandleUiAction(JsonElement? args, CancellationToken ct)
+        {
+            var action = (ReadString(args, "action") ?? "").Trim().ToLowerInvariant();
+            if (action.Length == 0 || Array.IndexOf(UiActions, action) < 0)
+                return ToolResult.Error(
+                    $"'action' must be one of: {string.Join(", ", UiActions)}." +
+                    (action.Length == 0 ? "" : $" Got '{action}'."));
+
+            var capture = PlatformScreenCapture.Current;
+            if (capture == null)
+                return ToolResult.Error(PlatformScreenCapture.UnsupportedPlatformMessage);
+
+            bool actsOnScreen = action != "screenshot" && action != "wait";
+            var injector = PlatformInput.Current;
+            if (actsOnScreen && injector == null)
+                return ToolResult.Error(PlatformInput.UnsupportedPlatformMessage);
+
+            // Which window this call is about: the one asked for, else the one already
+            // anchored, else the running game's, else the editor's.
+            var title = ReadString(args, "window_title");
+            if (string.IsNullOrWhiteSpace(title)) title = _lastCapture?.TitleQuery;
+            if (string.IsNullOrWhiteSpace(title)) title = _gameWindowTitle;
+            if (string.IsNullOrWhiteSpace(title)) title = await GetEngineWindowTitle(ct);
+            if (string.IsNullOrWhiteSpace(title))
+                return ToolResult.Error(
+                    "No window to act on. Pass 'window_title' (a title substring, as in list_windows).");
+
+            var anchor = _lastCapture;
+            if (anchor == null || !string.Equals(anchor.TitleQuery, title, StringComparison.OrdinalIgnoreCase))
+            {
+                // Nothing has been seen of this window yet, so there is no image whose pixels
+                // the coordinates could refer to. Take one now: it costs a capture, and the
+                // alternative is acting on coordinates that mean nothing.
+                var (_, fresh, note, err) = CaptureWindowAnchored(title!);
+                if (fresh == null)
+                    return ToolResult.Error(err ?? note ?? $"Cannot anchor to window '{title}'.");
+                anchor = fresh;
+                if (actsOnScreen)
+                    return ToolResult.Error(
+                        $"No screenshot of '{anchor.WindowTitle}' had been taken yet, so image " +
+                        "coordinates had no meaning. It is anchored now — call ui_action with " +
+                        "action 'screenshot', read the image, then repeat this action.");
+            }
+
+            var log = new List<string>();
+
+            if (action == "wait")
+            {
+                var waitMs = (int)Math.Clamp(ReadNumber(args, "duration_ms") ?? 500, 0, 10_000);
+                await Task.Delay(waitMs, ct);
+                log.Add($"Waited {waitMs} ms.");
+            }
+            else if (actsOnScreen)
+            {
+                // Synthetic input goes to the foreground window, so the target has to be it.
+                if (!capture.FocusWindowByTitle(title!, out var focusErr))
+                    return ToolResult.Error($"Cannot act on '{title}': {focusErr}");
+                await Task.Delay(FocusSettleMs, ct);
+
+                // The window may have moved or been resized since the capture. A move only
+                // shifts the origin and the image still describes what is on screen; a resize
+                // re-lays out the contents, and every coordinate read off the old image now
+                // points at something else — so that one is refused rather than guessed at.
+                if (capture.TryGetWindowGeometry(title!, out var geometry, out _) && geometry != null)
+                {
+                    if (geometry.Width != anchor.SourceWidth || geometry.Height != anchor.SourceHeight)
+                        return ToolResult.Error(
+                            $"'{anchor.WindowTitle}' was resized since the last screenshot " +
+                            $"({anchor.SourceWidth}x{anchor.SourceHeight} to {geometry.Width}x{geometry.Height}), " +
+                            "so its layout no longer matches the image those coordinates came from. " +
+                            "Call ui_action with action 'screenshot' and read the new one.");
+
+                    if (geometry.OriginX != anchor.OriginX || geometry.OriginY != anchor.OriginY)
+                    {
+                        log.Add($"Window moved to {geometry.OriginX},{geometry.OriginY}; coordinates followed it.");
+                        anchor = anchor.WithOrigin(geometry.OriginX, geometry.OriginY);
+                        _lastCapture = anchor;
+                    }
+                }
+
+                var result = PerformUiAction(action, args, anchor, injector!, log);
+                if (result != null) return result;
+            }
+
+            var settleMs = (int)Math.Clamp(ReadNumber(args, "settle_ms") ?? DefaultSettleMs, 0, 5_000);
+            if (settleMs > 0) await Task.Delay(settleMs, ct);
+
+            if (!ReadBool(args ?? default, "screenshot", true))
+                return ToolResult.Text(string.Join(" ", log));
+
+            var (jpeg, after, afterNote, captureErr) = CaptureWindowAnchored(title!);
+            if (jpeg == null)
+            {
+                log.Add($"(the follow-up screenshot failed: {captureErr})");
+                return ToolResult.Text(string.Join(" ", log));
+            }
+
+            var content = new List<ContentItem>
+            {
+                ContentItem.FromText(string.Join(" ", log) + (log.Count > 0 ? "\n" : "")
+                                     + (after?.Describe() ?? afterNote ?? ""))
+            };
+            content.Add(ContentItem.FromImage(Convert.ToBase64String(jpeg), "image/jpeg"));
+            return new ToolResult { Content = content };
+        }
+
+        /// <summary>
+        /// Runs the pointer/keyboard half of ui_action. Returns null when it worked (the
+        /// caller then takes the follow-up screenshot), or the error to hand back.
+        /// </summary>
+        private ToolResult? PerformUiAction(
+            string action, JsonElement? args, CaptureAnchor anchor, IPlatformInput injector, List<string> log)
+        {
+            // A point is required by everything that aims at something; type and key take one
+            // only to click into a field first.
+            bool needsPoint = action != "type" && action != "key";
+            var px = ReadNumber(args, "x");
+            var py = ReadNumber(args, "y");
+
+            int sx = 0, sy = 0;
+            if (px.HasValue && py.HasValue)
+            {
+                if (!anchor.Contains(px.Value, py.Value))
+                    return ToolResult.Error(
+                        $"({px.Value:0.#}, {py.Value:0.#}) is outside the {anchor.ImageWidth}x{anchor.ImageHeight} " +
+                        "image. Coordinates are pixels of the screenshot, measured from its top-left corner — " +
+                        "not screen coordinates.");
+                (sx, sy) = anchor.ToScreen(px.Value, py.Value);
+            }
+            else if (needsPoint)
+            {
+                return ToolResult.Error($"Action '{action}' needs 'x' and 'y' in image pixels.");
+            }
+
+            string where = px.HasValue ? $"({px!.Value:0.#}, {py!.Value:0.#}) -> screen {sx},{sy}" : "";
+            string? error;
+
+            switch (action)
+            {
+                case "mouse_move":
+                    if (!injector.MoveTo(sx, sy, out error)) return ToolResult.Error(error!);
+                    log.Add($"Moved to {where}.");
+                    return null;
+
+                case "left_click":
+                case "right_click":
+                case "middle_click":
+                case "double_click":
+                case "triple_click":
+                {
+                    var button = action == "right_click" ? "right" : action == "middle_click" ? "middle" : "left";
+                    var count = action == "double_click" ? 2 : action == "triple_click" ? 3 : 1;
+                    if (!injector.Click(sx, sy, button, count, out error)) return ToolResult.Error(error!);
+                    log.Add($"{action} at {where}.");
+                    return null;
+                }
+
+                case "left_click_drag":
+                {
+                    var tx = ReadNumber(args, "to_x");
+                    var ty = ReadNumber(args, "to_y");
+                    if (!tx.HasValue || !ty.HasValue)
+                        return ToolResult.Error("left_click_drag needs 'to_x' and 'to_y' in image pixels.");
+                    if (!anchor.Contains(tx.Value, ty.Value))
+                        return ToolResult.Error(
+                            $"The drag target ({tx.Value:0.#}, {ty.Value:0.#}) is outside the " +
+                            $"{anchor.ImageWidth}x{anchor.ImageHeight} image.");
+                    var (dx, dy) = anchor.ToScreen(tx.Value, ty.Value);
+                    if (!injector.Drag(sx, sy, dx, dy, "left", out error)) return ToolResult.Error(error!);
+                    log.Add($"Dragged {where} to ({tx.Value:0.#}, {ty.Value:0.#}) -> screen {dx},{dy}.");
+                    return null;
+                }
+
+                case "scroll":
+                {
+                    var direction = (ReadString(args, "scroll_direction") ?? "down").ToLowerInvariant();
+                    var amount = (int)Math.Clamp(ReadNumber(args, "scroll_amount") ?? 3, 1, 30);
+                    bool horizontal = direction == "left" || direction == "right";
+                    int clicks = direction switch
+                    {
+                        "up" => amount,
+                        "down" => -amount,
+                        "right" => amount,
+                        "left" => -amount,
+                        _ => 0,
+                    };
+                    if (clicks == 0)
+                        return ToolResult.Error("'scroll_direction' must be up, down, left or right.");
+                    if (!injector.Scroll(sx, sy, clicks, horizontal, out error)) return ToolResult.Error(error!);
+                    log.Add($"Scrolled {direction} {amount} at {where}.");
+                    return null;
+                }
+
+                case "type":
+                {
+                    var text = ReadString(args, "text");
+                    if (string.IsNullOrEmpty(text))
+                        return ToolResult.Error("Action 'type' needs 'text'.");
+                    if (px.HasValue)
+                    {
+                        if (!injector.Click(sx, sy, "left", 1, out error)) return ToolResult.Error(error!);
+                        log.Add($"Clicked {where} first.");
+                    }
+                    if (!injector.TypeText(text!, out error)) return ToolResult.Error(error!);
+                    log.Add($"Typed {text!.Length} character(s).");
+                    return null;
+                }
+
+                case "key":
+                {
+                    var keys = ReadString(args, "keys");
+                    if (string.IsNullOrWhiteSpace(keys))
+                        return ToolResult.Error("Action 'key' needs 'keys', e.g. 'ctrl+s' or 'Escape'.");
+                    if (px.HasValue)
+                    {
+                        if (!injector.Click(sx, sy, "left", 1, out error)) return ToolResult.Error(error!);
+                        log.Add($"Clicked {where} first.");
+                    }
+                    if (!injector.KeyChord(keys!, out error)) return ToolResult.Error(error!);
+                    log.Add($"Sent '{keys}'.");
+                    return null;
+                }
+
+                default:
+                    return ToolResult.Error($"Action '{action}' is not implemented.");
+            }
+        }
+
+        // How long to let the foreground change land before reading geometry and acting, and
+        // how long to let the interface react before the follow-up screenshot. A menu that
+        // opens on click needs the second one, or the image shows the frame before it opened.
+        private const int FocusSettleMs = 120;
+        private const int DefaultSettleMs = 250;
+
+        private static double? ReadNumber(JsonElement? args, string name)
+        {
+            if (args is JsonElement a && a.ValueKind == JsonValueKind.Object
+                && a.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number
+                && v.TryGetDouble(out var d))
+                return d;
+            return null;
         }
 
         private async Task<ToolResult> HandleCreateSprite(JsonElement? args, CancellationToken ct)
@@ -1092,16 +1438,26 @@ namespace AkerMcp.Server
 
         private async Task<ToolResult> HandleSendInput(JsonElement? args, CancellationToken ct)
         {
-            // Strategy 1: engine-internal injection (IInputSimulator). The engine returns
-            // an InputResult JSON; supported:false means "fall back to OS-level".
-            var engineResult = await _engine.ForwardToolCall(IpcConstants.Methods.SendInput, args, ct);
-            if (IsDisconnectError(engineResult))
-                return engineResult;
-            if (!engineResult.IsError)
+            var coords = (ReadString(args, "coords") ?? "screen").Trim().ToLowerInvariant();
+            if (coords != "screen" && coords != "image")
+                return ToolResult.Error("'coords' must be 'screen' (the default) or 'image'.");
+
+            // Image coordinates describe a screenshot of an OS window, so they only mean
+            // something on the OS-level path: an engine injecting in-process puts the pointer
+            // in its own view, where the same numbers land somewhere else entirely.
+            if (coords == "screen")
             {
-                var text = engineResult.Content.Count > 0 ? engineResult.Content[0].Text : "";
-                if (ReadJsonBool(text, "supported", defaultValue: true))
-                    return engineResult; // engine handled it in-process
+                // Strategy 1: engine-internal injection (IInputSimulator). The engine returns
+                // an InputResult JSON; supported:false means "fall back to OS-level".
+                var engineResult = await _engine.ForwardToolCall(IpcConstants.Methods.SendInput, args, ct);
+                if (IsDisconnectError(engineResult))
+                    return engineResult;
+                if (!engineResult.IsError)
+                {
+                    var text = engineResult.Content.Count > 0 ? engineResult.Content[0].Text : "";
+                    if (ReadJsonBool(text, "supported", defaultValue: true))
+                        return engineResult; // engine handled it in-process
+                }
             }
 
             // Strategy 2: OS-level fallback (focus the target window, then SendInput).
@@ -1114,8 +1470,30 @@ namespace AkerMcp.Server
                 return ToolResult.Error("No input events supplied. Provide an 'events' array, e.g. " +
                     "{ \"events\": [ { \"type\": \"key\", \"key\": \"Space\", \"hold_ms\": 60 } ] }.");
 
+            var anchor = _lastCapture;
+            if (coords == "image")
+            {
+                if (anchor == null)
+                    return ToolResult.Error(
+                        "coords:'image' needs a screenshot to refer to. Call capture_window (or " +
+                        "ui_action with action 'screenshot') first, then give coordinates read off it.");
+
+                foreach (var ev in events)
+                {
+                    if (!string.Equals(ev.Type, "mouse_move", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!anchor.Contains(ev.X, ev.Y))
+                        return ToolResult.Error(
+                            $"({ev.X:0.#}, {ev.Y:0.#}) is outside the {anchor.ImageWidth}x{anchor.ImageHeight} " +
+                            "screenshot those coordinates are measured in.");
+                    var (screenX, screenY) = anchor.ToScreen(ev.X, ev.Y);
+                    ev.X = screenX;
+                    ev.Y = screenY;
+                }
+            }
+
             var capture = PlatformScreenCapture.Current;
             string? focusTitle = ReadString(args, "window_title");
+            if (string.IsNullOrWhiteSpace(focusTitle) && coords == "image") focusTitle = anchor!.TitleQuery;
             if (string.IsNullOrWhiteSpace(focusTitle)) focusTitle = _gameWindowTitle; // auto-route to the game window
             if (string.IsNullOrWhiteSpace(focusTitle))
                 focusTitle = await GetEngineWindowTitle(ct);

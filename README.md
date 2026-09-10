@@ -14,7 +14,7 @@ AkerMCP is an MCP server that lets an AI client (Claude Code, Cursor, Copilot, A
 
 ## What it does
 
-Most engine integrations ship one hand-written tool per operation and break with every engine update. AkerMCP ships forty generic tools built on reflection and Roslyn. `inspect` shows what an object is made of, `set_property` changes any property by a dot path with undo, `query` finds objects, `execute` compiles and runs any C# against the live editor (with `using` lines and type declarations hoisted, so a helper class or a MonoBehaviour can be written and attached in one call), `take_screenshot` shows the result. The runtime loop, `enter_play`, `send_input`, `sample_state`, `assert_state` and the one-call `playtest`, runs the game and checks a mechanic against real values instead of pixels. Placeholder art and audio work the same way: the model writes a spec, the server returns a PNG or a WAV. Whatever the editor can do, the model can do, and it can see whether it worked.
+Most engine integrations ship one hand-written tool per operation and break with every engine update. AkerMCP ships forty-one generic tools built on reflection and Roslyn. `inspect` shows what an object is made of, `set_property` changes any property by a dot path with undo, `query` finds objects, `execute` compiles and runs any C# against the live editor (with `using` lines and type declarations hoisted, so a helper class or a MonoBehaviour can be written and attached in one call), `take_screenshot` shows the result. The runtime loop, `enter_play`, `send_input`, `sample_state`, `assert_state` and the one-call `playtest`, runs the game and checks a mechanic against real values instead of pixels. Placeholder art and audio work the same way: the model writes a spec, the server returns a PNG or a WAV. Whatever the editor can do, the model can do, and it can see whether it worked.
 
 ```
 AI: "Set the player's position to (10, 0, 5)"
@@ -34,13 +34,14 @@ AI: "Set the player's position to (10, 0, 5)"
 | Scene-view screenshot **with editor gizmos** | ✅ | ✅ | ✅ |
 | Platform/build tools (list · switch · build_player) | ✅ | ✅ | ✅ |
 | OS window capture (`list_windows` · `capture_window` · `focus_window`) | ✅ | ✅ | ✅ |
+| Driving a window by hand (`ui_action`: click · drag · scroll · type) | ✅ | ✅ | ✅ |
 | **2D sprites from a JSON shape-spec** (`create_sprite`, rasterized server-side) | ✅ | ✅ | ✅ |
 | **Placeholder audio** (`create_sound`, synthesized server-side) | ✅ | ✅ | ❌ |
 | Gameplay primitive scripts (`add_primitive`) | ✅ | ❌ | ❌ |
 | Scene management (`new_scene` · `open_scene` · `save_scene`) | ✅ | ✅ | ✅ |
 | **Runtime loop** (`enter_play`/`exit_play` · `capture_sequence` · `send_input`) | ✅ | ◑ | ◑ |
 
-Every ✅ is implemented and was verified live in that engine's editor. A ❌ answers NOT_SUPPORTED and names what is missing rather than failing quietly: Stride has no sound importer yet, and the primitive catalog carries Unity variants only. The window tools are the exception to the whole table, since they talk to the operating system, Windows or macOS, and work with no engine connected at all: they are how you see and dismiss a modal dialog that has frozen the editor's main thread.
+Every ✅ is implemented and was verified live in that engine's editor. A ❌ answers NOT_SUPPORTED and names what is missing rather than failing quietly: Stride has no sound importer yet, and the primitive catalog carries Unity variants only. The window tools are the exception to the whole table, since they talk to the operating system, Windows or macOS, and work with no engine connected at all: they are how you see and dismiss a modal dialog that has frozen the editor's main thread. `ui_action` extends that OS-level path from looking to acting — clicking and typing in the pixels of the screenshot it returns. It is verified on Windows; the macOS implementation (Quartz `CGEvent`, plus window geometry and by-title capture that macOS had stubs for until now) is written but has not yet been run on a Mac, and says so rather than pretending otherwise. Linux has neither half.
 
 
 ### What it does that the others do not
@@ -320,7 +321,7 @@ If you see this, everything is working.
 
 Every tool definition rides in your client's context on every turn, so the set is layered. `core` (14 tools, about 2,300 tokens of definitions) is inspect, edit, execute, screenshot, logs and compile. `standard` (27 tools, about 4,100 tokens, the default) adds scripts, scenes, play control, the engine pin and the OS window tools that unblock a modal dialog. `full` (40 tools, about 6,800 tokens) adds sprite and sound authoring, the verification tools, `playtest` and the build pipeline. Pick one with `--profile core` in the server's arguments or `AKER_MCP_PROFILE=core` in its environment; `AKER_MCP_TOOLS_INCLUDE=playtest,build_player` adds single tools to a profile and `AKER_MCP_TOOLS_EXCLUDE` removes them. A call to a hidden tool answers with the profile that hid it and how to load it, and the handshake instructions list the hidden ones, so the model asks instead of guessing.
 
-Every tool carries the four MCP hints (read-only, destructive, idempotent, open-world), so a client can auto-approve the reads and ask before `delete`, `execute`, `call_method`, `send_input`, `write_script`, `new_scene`, `open_scene`, `switch_build_target` and `build_player`.
+Every tool carries the four MCP hints (read-only, destructive, idempotent, open-world), so a client can auto-approve the reads and ask before `delete`, `execute`, `call_method`, `send_input`, `ui_action`, `write_script`, `new_scene`, `open_scene`, `switch_build_target` and `build_player`.
 
 ### Scene
 
@@ -394,7 +395,7 @@ So: `add_primitive` for the piece every 2D prototype needs and nobody wants rewr
 | `enter_play` / `exit_play` | standard | Run the project and stop it; Unity's domain reload and reconnect are handled |
 | `get_play_state` | standard | Playing, paused, time, frame counter; read twice to tell a frozen game from a live one |
 | `set_play_pause` | standard | Pause or resume |
-| `send_input` | standard | Inject key, mouse button and mouse move events into the running game (`window_title` for a game in its own window) |
+| `send_input` | standard | Inject key, mouse button and mouse move events into the running game (`window_title` for a game in its own window; `coords: "image"` to give mouse positions in screenshot pixels) |
 | `play_step` | full | Advance frames while paused |
 | `capture_sequence` | full | Several screenshots at an interval, returned as a strip, to see motion |
 
@@ -404,7 +405,7 @@ So: `add_primitive` for the piece every 2D prototype needs and nobody wants rewr
 > - **Stride**: Game Studio has no plugin-controllable Play Mode; `enter_play` reports this and points you to `build_player` + running the produced executable.
 > - **SkelForge**, full: "play" plays the animation timeline in-editor; pause + frame-step supported; the viewport shows the pose.
 >
-> `send_input` prefers an engine's in-process `IInputSimulator`, otherwise focuses the game/engine window and injects via **OS-level `SendInput`** (Windows; macOS/Linux report unsupported). On **Unity** the in-process path drives the **new Input System** (`com.unity.inputsystem`) directly, resolved via reflection, so there is no hard package dependency; projects on the legacy Input Manager (or without the package) fall back to OS-level automatically. On **Godot/Stride** the game is a separate window, so pass `window_title` (the game window's title) or the OS-level path targets the editor. The `action` event type is reserved but not yet injectable; drive the key/mouse controls the action is bound to.
+> `send_input` prefers an engine's in-process `IInputSimulator`, otherwise focuses the game/engine window and injects via **OS-level injection** (Windows `SendInput`, macOS Quartz `CGEvent`; Linux reports unsupported). On **Unity** the in-process path drives the **new Input System** (`com.unity.inputsystem`) directly, resolved via reflection, so there is no hard package dependency; projects on the legacy Input Manager (or without the package) fall back to OS-level automatically. On **Godot/Stride** the game is a separate window, so pass `window_title` (the game window's title) or the OS-level path targets the editor. The `action` event type is reserved but not yet injectable; drive the key/mouse controls the action is bound to.
 
 ### Verify and iterate
 
@@ -430,10 +431,30 @@ So: `add_primitive` for the piece every 2D prototype needs and nobody wants rewr
 | Tool | Profile | What it does |
 |------|---------|--------------|
 | `list_windows` | standard | Visible top-level windows: title, process, pid; works with no engine connected |
-| `capture_window` | standard | Screenshot any window by a title substring, occluded or not, without stealing focus |
+| `capture_window` | standard | Screenshot any window by a title substring, occluded or not, without stealing focus; reports the image's size, scale and screen origin |
 | `focus_window` | standard | Bring a window to the foreground, restoring it if minimised |
+| `ui_action` | full | Click, drag, scroll and type in a window, in the pixels of the screenshot it returns |
 
-These three are how the model recovers from a modal dialog that blocks the editor's main thread, and how it screenshots a Godot game that runs in its own window.
+The first three are how the model recovers from a modal dialog that blocks the editor's main thread, and how it screenshots a Godot game that runs in its own window.
+
+#### `ui_action`: driving an interface the way a person would
+
+One call is one step of look, act, look: name an action (`screenshot`, `mouse_move`, `left_click`, `right_click`, `middle_click`, `double_click`, `triple_click`, `left_click_drag`, `scroll`, `type`, `key`, `wait`) and a point, and the answer carries the screenshot taken after it.
+
+Coordinates are **pixels of the last screenshot**, measured from its top-left — never screen coordinates. The server holds the mapping: where the window's client area sits on the virtual screen and the scale the image was shrunk by on the way out (anything over 1920 px is resized). That mapping is what makes a click land where the model was looking; measured against the OS cursor it is exact to the pixel, on a scaled capture and on a second monitor alike. Two guards come with it: a point outside the image is refused rather than clamped, and if the window has been **resized** since the screenshot the call is refused too, because the layout no longer matches the picture the coordinates came from. A window that was merely **moved** is followed silently.
+
+```jsonc
+{"action": "screenshot", "window_title": "Unity"}      // look, and anchor to that window
+{"action": "left_click", "x": 1420, "y": 305}          // a point read off that image
+{"action": "type", "text": "3.5"}                      // into whatever the click focused
+{"action": "key", "keys": "ctrl+s"}
+```
+
+It is the last resort, not the way to edit a scene: `set_property` changes a value whatever the inspector looks like, while a click depends on the window's size, its layout and which panel has focus. Use it for what no API exposes — a modal dialog, an import wizard, a plugin's own window, a preference the engine only offers in its UI — and remember the two costs: it needs the foreground, so it takes the mouse from whoever is at the machine, and every step puts another screenshot in the context. It ships in the `full` profile; to add it to `standard` alone, set `AKER_MCP_TOOLS_INCLUDE=ui_action`.
+
+Typing goes in one character at a time with a pause between them, because a window's tolerance for synthetic text is a property of that window: measured against Windows 11 Notepad, 12 ms dropped a character and 25 ms and above were exact, so the default is 30 ms. `AKER_MCP_TYPE_GAP_MS` overrides it for a slower target.
+
+**Platforms.** On Windows this is `SendInput` against the virtual desktop, measured exact to the pixel on a scaled capture and on a second monitor. On macOS it is Quartz `CGEvent`, and it needs **Accessibility** permission (System Settings → Privacy & Security → Accessibility) on top of the Screen Recording permission captures already need — without it `CGEventPost` discards events silently, so the tool checks first and says which switch to flip instead of reporting a click that never happened. The macOS path compiles but has not been run on a Mac yet: the parts to check first are the ANSI keycode table used by `key`, the click-state field that makes a double click a double click, and whether activating the owning process through System Events reliably brings the target window forward. Linux reports that OS-level input is not implemented.
 
 #### How `take_screenshot` works
 
@@ -470,7 +491,7 @@ Typical output size: **~150-400 KB**, comfortably under Claude API image limits 
 
 #### macOS: Screen Recording permission
 
-On macOS 10.15+, capturing windows from another process requires **Screen Recording permission** for the binary running the AkerMcp server. This affects only the OS-level path (`capture_window` and the `take_screenshot` fallback); the engine-internal `IScreenCapture` path (implemented by all three engine adapters) works without any permission grant.
+On macOS 10.15+, capturing windows from another process requires **Screen Recording permission** for the binary running the AkerMcp server. This affects only the OS-level path (`list_windows`, `capture_window`, `ui_action` and the `take_screenshot` fallback), and `ui_action` needs Accessibility permission on top of it; the engine-internal `IScreenCapture` path (implemented by all three engine adapters) works without any permission grant.
 
 **First-time setup:**
 

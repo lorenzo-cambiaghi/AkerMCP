@@ -97,9 +97,12 @@ namespace AkerMcp.Loopback
                 && new HashSet<string>(ToolProfiles.Full).SetEquals(registered),
                 $"core {ToolProfiles.Core.Length}, standard {ToolProfiles.Standard.Length}, full {ToolProfiles.Full.Length}, registered {registered.Count}");
             var wire = new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
-            // Measured 2026-09-06: 9,117 / 16,000 / 26,817 (before the diet the full list was 36,303
+            // Measured 2026-09-10: 9,117 / 16,516 / 29,327 (before the diet the full list was 36,303
             // with no annotations and 40,466 with them). Raise a ceiling only with a reason next to it.
-            var budget = new Dictionary<string, int> { ["core"] = 10_000, ["standard"] = 17_500, ["full"] = 29_500 };
+            // The full ceiling moved from 29,500 to 31,000 for ui_action: twelve actions and their
+            // parameters are 2,500 characters that only a session driving the interface by hand pays,
+            // which is why the tool sits in 'full' and not in 'standard'.
+            var budget = new Dictionary<string, int> { ["core"] = 10_000, ["standard"] = 17_500, ["full"] = 31_000 };
             foreach (var profile in new[] { "core", "standard", "full" })
             {
                 var r2 = new ToolRegistry(engine);
@@ -113,6 +116,56 @@ namespace AkerMcp.Loopback
             var badProfile = false;
             try { ToolProfiles.Resolve("turbo"); } catch (System.ArgumentException) { badProfile = true; }
             Check("an unknown profile name is refused", badProfile);
+
+            // ui_action coordinates. The model points at a JPEG that was shrunk to fit 1920 px
+            // and knows nothing about where the window is; the server owns both halves of the
+            // conversion, so this arithmetic is the whole feature. An error here does not throw
+            // — it clicks somewhere else and reports success.
+            var unscaled = new CaptureAnchor
+            {
+                OriginX = 100, OriginY = 40,
+                SourceWidth = 1600, SourceHeight = 900,
+                ImageWidth = 1600, ImageHeight = 900,
+            };
+            Check("an unscaled capture maps a pixel to the window origin plus that pixel",
+                unscaled.ToScreen(0, 0) == (100, 40) && unscaled.ToScreen(800, 450) == (900, 490),
+                $"{unscaled.ToScreen(0, 0)} and {unscaled.ToScreen(800, 450)}");
+
+            // 2560x1440 leaves the server as 1920x1080: two thirds of the way across the image
+            // is two thirds of the way across the window, not 1707 px from its left edge.
+            var shrunk = new CaptureAnchor
+            {
+                OriginX = 0, OriginY = 0,
+                SourceWidth = 2560, SourceHeight = 1440,
+                ImageWidth = 1920, ImageHeight = 1080,
+            };
+            Check("a shrunk capture undoes its own scale",
+                shrunk.ToScreen(960, 540) == (1280, 720) && shrunk.ToScreen(1919, 1079) == (2559, 1439),
+                $"{shrunk.ToScreen(960, 540)} and {shrunk.ToScreen(1919, 1079)}");
+
+            // A monitor left of the primary has negative coordinates; a click there must not be
+            // folded back onto screen one.
+            var secondMonitor = new CaptureAnchor
+            {
+                OriginX = -1920, OriginY = 200,
+                SourceWidth = 800, SourceHeight = 600,
+                ImageWidth = 800, ImageHeight = 600,
+            };
+            Check("a window on a monitor left of the primary keeps its negative coordinates",
+                secondMonitor.ToScreen(10, 10) == (-1910, 210), $"{secondMonitor.ToScreen(10, 10)}");
+
+            Check("points outside the image are rejected, inside accepted",
+                shrunk.Contains(0, 0) && shrunk.Contains(1919, 1079)
+                && !shrunk.Contains(1920, 500) && !shrunk.Contains(-1, 0) && !shrunk.Contains(500, 1080));
+
+            var moved = shrunk.WithOrigin(300, 150);
+            Check("a moved window keeps its image, only the origin follows",
+                moved.ImageWidth == shrunk.ImageWidth && moved.SourceWidth == shrunk.SourceWidth
+                && moved.ToScreen(960, 540) == (1580, 870), $"{moved.ToScreen(960, 540)}");
+
+            Check("the anchor tells the model what the pixels mean",
+                shrunk.Describe().Contains("1920x1080") && shrunk.Describe().Contains("2560x1440"),
+                shrunk.Describe());
 
             // One version, three places: IpcConstants.ProtocolVersion and the <Version> of the two
             // packable csproj. The packages are versioned by the protocol they speak, so a drift

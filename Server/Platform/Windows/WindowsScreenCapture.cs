@@ -26,6 +26,9 @@ namespace AkerMcp.Server.Platform.Windows
         private static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
 
         [DllImport("user32.dll")]
+        private static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
+
+        [DllImport("user32.dll")]
         private static extern bool IsWindow(IntPtr hWnd);
 
         [DllImport("Shcore.dll")]
@@ -60,6 +63,9 @@ namespace AkerMcp.Server.Platform.Windows
 
         [StructLayout(LayoutKind.Sequential)]
         private struct RECT { public int Left, Top, Right, Bottom; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct POINT { public int X, Y; }
 
         public void Initialize()
         {
@@ -191,6 +197,60 @@ namespace AkerMcp.Server.Platform.Windows
             {
                 if (attached) AttachThreadInput(foreThread, thisThread, false);
             }
+        }
+
+        public bool TryGetWindowGeometry(string titleSubstring, out WindowGeometry? geometry, out string? error)
+        {
+            geometry = null;
+            error = null;
+            if (string.IsNullOrWhiteSpace(titleSubstring))
+            {
+                error = "A non-empty 'title' substring is required.";
+                return false;
+            }
+
+            var hWnd = FindWindowByTitle(titleSubstring);
+            if (hWnd == IntPtr.Zero)
+            {
+                error = $"No visible window with a title containing '{titleSubstring}' was found.";
+                return false;
+            }
+
+            if (!GetClientRect(hWnd, out var rect))
+            {
+                error = "GetClientRect failed.";
+                return false;
+            }
+
+            // The client rect is window-relative and always starts at 0,0; ClientToScreen turns
+            // that corner into the screen coordinate the mouse understands. The process is
+            // per-monitor DPI aware (see Initialize), so both are real pixels on the virtual
+            // screen and no scaling factor has to be applied on top.
+            var origin = new POINT { X = 0, Y = 0 };
+            if (!ClientToScreen(hWnd, ref origin))
+            {
+                error = "ClientToScreen failed.";
+                return false;
+            }
+
+            geometry = new WindowGeometry
+            {
+                Title = GetTitle(hWnd),
+                OriginX = origin.X,
+                OriginY = origin.Y,
+                Width = rect.Right - rect.Left,
+                Height = rect.Bottom - rect.Top,
+            };
+            return true;
+        }
+
+        private static string GetTitle(IntPtr hWnd)
+        {
+            int len = GetWindowTextLength(hWnd);
+            if (len <= 0) return "";
+            var sb = new StringBuilder(len + 1);
+            GetWindowText(hWnd, sb, sb.Capacity);
+            return sb.ToString();
         }
 
         private static IntPtr FindWindowByTitle(string titleSubstring)

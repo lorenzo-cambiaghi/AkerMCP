@@ -17,7 +17,7 @@ namespace AkerMcp.Server
     ///
     /// Read-only means the call changes nothing in the editor or on disk. Destructive
     /// means it can lose work or run arbitrary code: delete, execute, call_method,
-    /// send_input (keystrokes into any window), write_script (overwrites a file),
+    /// send_input and ui_action (keystrokes and clicks into any window), write_script (overwrites a file),
     /// new_scene / open_scene (replace the open scene), build_player and
     /// switch_build_target (long, and the author marked them so). Undoable edits
     /// (set_property, create, the authoring tools) are writes but not destructive.
@@ -83,6 +83,7 @@ namespace AkerMcp.Server
             ["list_windows"] = Read(),
             ["capture_window"] = Read(),
             ["focus_window"] = Edit(idempotent: true),
+            ["ui_action"] = Destructive(idempotent: false), // clicks and keystrokes into a real UI
         };
 
         /// <summary>Tool names the table knows. The loopback test keeps this equal to the registered set.</summary>

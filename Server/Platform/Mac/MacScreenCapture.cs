@@ -24,21 +24,194 @@ namespace AkerMcp.Server.Platform.Mac
     {
         public void Initialize() { /* no-op on macOS */ }
 
-        // Generic window listing/by-title capture is not yet implemented on macOS
-        // (the engine-window fallback below covers the main use case). Graceful stubs
-        // so the list_windows/capture_window tools report cleanly rather than crash.
-        public IReadOnlyList<WindowSummary> ListWindows() => new List<WindowSummary>();
+        public IReadOnlyList<WindowSummary> ListWindows()
+        {
+            var result = new List<WindowSummary>();
+            foreach (var w in EnumerateWindows())
+            {
+                if (string.IsNullOrWhiteSpace(w.Title)) continue;
+                result.Add(new WindowSummary { Title = w.Title, Pid = w.Pid, ProcessName = w.OwnerName });
+            }
+            return result;
+        }
 
         public bool FocusWindowByTitle(string titleSubstring, out string? error)
         {
-            error = "Focusing windows is not yet implemented on macOS.";
-            return false;
+            if (!TryFindWindow(titleSubstring, out var window, out error)) return false;
+
+            // There is no CoreGraphics call that raises another application's window: window
+            // ordering belongs to the app that owns it. Asking System Events to make that
+            // process frontmost is the supported way in, and it needs the same Accessibility
+            // permission the input injection already needs.
+            var script = $"tell application \"System Events\" to set frontmost of " +
+                         $"(first process whose unix id is {window.Pid}) to true";
+            try
+            {
+                using var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "/usr/bin/osascript",
+                    ArgumentList = { "-e", script },
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                });
+                if (proc == null)
+                {
+                    error = "Could not run osascript to bring the window forward.";
+                    return false;
+                }
+                var stderr = proc.StandardError.ReadToEnd();
+                proc.WaitForExit(4000);
+                if (proc.ExitCode != 0)
+                {
+                    error = $"osascript refused to activate '{window.Title}' (pid {window.Pid}): " +
+                            $"{stderr.Trim()}. This usually means Accessibility permission is missing " +
+                            "(System Settings -> Privacy & Security -> Accessibility).";
+                    return false;
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = $"Could not activate '{window.Title}': {ex.Message}";
+                return false;
+            }
         }
 
         public byte[]? CaptureWindowByTitle(string titleSubstring, out string? error)
         {
-            error = "capture_window by title is not yet implemented on macOS.";
-            return null;
+            if (!TryFindWindow(titleSubstring, out var window, out error)) return null;
+
+            using var image = new CGImageHandle(CGWindowListCreateImage(
+                CGRect.Null,
+                kCGWindowListOptionIncludingWindow,
+                window.WindowId,
+                kCGWindowImageBoundsIgnoreFraming | kCGWindowImageNominalResolution));
+
+            if (image.IsInvalid)
+            {
+                error = ScreenRecordingDenied;
+                return null;
+            }
+            return EncodePng(image.DangerousGetHandle(), out error);
+        }
+
+        public bool TryGetWindowGeometry(string titleSubstring, out WindowGeometry? geometry, out string? error)
+        {
+            geometry = null;
+            if (!TryFindWindow(titleSubstring, out var window, out error)) return false;
+
+            // kCGWindowBounds is in points from the top-left of the main display, which is the
+            // same space CGEvent mouse positions live in — so no conversion is needed between
+            // what is reported here and where the pointer can be sent. The capture is taken at
+            // nominal resolution, so on a Retina display the image comes back at these same
+            // numbers rather than doubled.
+            geometry = new WindowGeometry
+            {
+                Title = window.Title,
+                OriginX = (int)Math.Round(window.X),
+                OriginY = (int)Math.Round(window.Y),
+                Width = (int)Math.Round(window.Width),
+                Height = (int)Math.Round(window.Height),
+            };
+            return true;
+        }
+
+        private const string ScreenRecordingDenied =
+            "macOS denied the screen capture (CGWindowListCreateImage returned NULL).\n" +
+            "Grant Screen Recording permission to the process running this tool:\n" +
+            "  System Settings -> Privacy & Security -> Screen Recording\n" +
+            "Add (or enable) the binary running the AkerMcp server (typically 'dotnet'),\n" +
+            "then RESTART the server - macOS caches the denial until the process restarts.";
+
+        /// <summary>One on-screen window, as CGWindowList describes it.</summary>
+        private struct MacWindow
+        {
+            public uint WindowId;
+            public int Pid;
+            public string Title;
+            public string OwnerName;
+            public double X, Y, Width, Height;
+        }
+
+        /// <summary>
+        /// The first visible window whose title contains <paramref name="titleSubstring"/>,
+        /// largest first so a substring that also matches a small helper window still finds
+        /// the real one.
+        /// </summary>
+        private static bool TryFindWindow(string titleSubstring, out MacWindow window, out string? error)
+        {
+            window = default;
+            error = null;
+            if (string.IsNullOrWhiteSpace(titleSubstring))
+            {
+                error = "A non-empty 'title' substring is required.";
+                return false;
+            }
+
+            double bestArea = -1;
+            bool found = false;
+            foreach (var w in EnumerateWindows())
+            {
+                if (w.Title.IndexOf(titleSubstring, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                double area = w.Width * w.Height;
+                if (area <= bestArea) continue;
+                bestArea = area;
+                window = w;
+                found = true;
+            }
+
+            if (!found)
+                error = $"No visible window with a title containing '{titleSubstring}' was found.";
+            return found;
+        }
+
+        private static IEnumerable<MacWindow> EnumerateWindows()
+        {
+            using var windowList = new CFArrayHandle(CGWindowListCopyWindowInfo(
+                kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+                kCGNullWindowID));
+            if (windowList.IsInvalid) yield break;
+
+            long count = CFArrayGetCount(windowList.DangerousGetHandle());
+            for (long i = 0; i < count; i++)
+            {
+                IntPtr dict = CFArrayGetValueAtIndex(windowList.DangerousGetHandle(), i);
+                if (dict == IntPtr.Zero) continue;
+                if (!TryGetIntFromDict(dict, "kCGWindowLayer", out var layer) || layer != 0)
+                    continue; // menu bar, dock and status items are not windows a user clicks in
+                if (!TryGetIntFromDict(dict, "kCGWindowNumber", out var windowNumber)) continue;
+
+                var rect = TryGetWindowRect(dict);
+                if (rect.width <= 1 || rect.height <= 1) continue;
+
+                TryGetIntFromDict(dict, "kCGWindowOwnerPID", out var ownerPid);
+                yield return new MacWindow
+                {
+                    WindowId = (uint)windowNumber,
+                    Pid = ownerPid,
+                    Title = TryGetStringFromDict(dict, "kCGWindowName") ?? "",
+                    OwnerName = TryGetStringFromDict(dict, "kCGWindowOwnerName") ?? "",
+                    X = rect.x,
+                    Y = rect.y,
+                    Width = rect.width,
+                    Height = rect.height,
+                };
+            }
+        }
+
+        private static (double x, double y, double width, double height) TryGetWindowRect(IntPtr dict)
+        {
+            IntPtr boundsKey = CreateCFString("kCGWindowBounds");
+            try
+            {
+                IntPtr boundsDict = CFDictionaryGetValue(dict, boundsKey);
+                if (boundsDict == IntPtr.Zero) return (0, 0, 0, 0);
+                return (ReadDoubleFromBoundsDict(boundsDict, "X"),
+                        ReadDoubleFromBoundsDict(boundsDict, "Y"),
+                        ReadDoubleFromBoundsDict(boundsDict, "Width"),
+                        ReadDoubleFromBoundsDict(boundsDict, "Height"));
+            }
+            finally { CFRelease(boundsKey); }
         }
 
         public byte[]? CaptureMainWindow(int pid, string titlePrefix, out string? error)
@@ -73,12 +246,7 @@ namespace AkerMcp.Server.Platform.Mac
 
             if (image.IsInvalid)
             {
-                error =
-                    "macOS denied the screen capture (CGWindowListCreateImage returned NULL).\n" +
-                    "Grant Screen Recording permission to the process running this tool:\n" +
-                    "  System Settings → Privacy & Security → Screen Recording\n" +
-                    "Add (or enable) the binary running the AkerMcp server (typically 'dotnet'),\n" +
-                    "then RESTART the server — macOS caches the denial until the process restarts.";
+                error = ScreenRecordingDenied;
                 return null;
             }
 

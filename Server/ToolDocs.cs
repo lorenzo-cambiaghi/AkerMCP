@@ -167,10 +167,10 @@ namespace AkerMcp.Server
                 "({\"type\":\"key\",\"key\":\"Space\",\"hold_ms\":60}, or pressed true/false for explicit " +
                 "down and up), mouse_button ({\"button\":\"left\",\"hold_ms\":50}) and mouse_move " +
                 "({\"x\":960,\"y\":540}, pixels from the top-left). Keys: Space, Enter, Escape, Tab, " +
-                "Up/Down/Left/Right, A-Z, 0-9, Shift, Ctrl, Alt. Unity receives it in-process in the " +
-                "Game View; Godot and Stride run the game in a separate window, so pass window_title or " +
-                "the editor receives it. OS-level mouse coordinates reach the primary monitor only; " +
-                "prefer keys there.",
+                "Up/Down/Left/Right, A-Z, 0-9, F1-F12, punctuation, Shift, Ctrl, Alt. Unity receives it " +
+                "in-process in the Game View; Godot and Stride run the game in a separate window, so pass " +
+                "window_title or the editor receives it. coords='image' reads mouse_move x/y as pixels of " +
+                "the last capture_window screenshot instead of screen pixels (OS-level path only).",
 
             ["sample_state"] =
                 "Evaluate C# expressions in the running game and return their values, one per probe " +
@@ -227,12 +227,24 @@ namespace AkerMcp.Server
             ["capture_window"] =
                 "JPEG screenshot of any visible window on the server's machine, matched by a " +
                 "case-insensitive substring of its title (first match; occluded windows are captured " +
-                "without stealing focus). For external apps, or a game that runs in its own window.",
+                "without stealing focus). For external apps, or a game that runs in its own window. " +
+                "Comes with the image's size and scale, and anchors ui_action to that window.",
 
             ["focus_window"] =
                 "Bring a window to the foreground, matched by a title substring, restoring it if " +
                 "minimised. Needed before editors whose screenshot requires the foreground (Stride), " +
                 "and to reach a modal dialog.",
+
+            ["ui_action"] =
+                "Drive an interface with mouse and keyboard the way a person would: action " +
+                "screenshot | mouse_move | left_click | right_click | middle_click | double_click | " +
+                "triple_click | left_click_drag | scroll | type | key | wait. x/y are pixels of the " +
+                "last screenshot, from its top-left — the server converts them, so never pass screen " +
+                "coordinates. Every call returns the screenshot taken after the action, so one call " +
+                "is one look-act-look step; window_title chooses the window and sticks. type and key " +
+                "go to the focused control, or click x/y first when given. For what the engine API " +
+                "cannot reach — modal dialogs, import wizards, third-party or plugin windows. Scene " +
+                "edits belong to set_property, which does not depend on where a widget is drawn.",
         };
     }
 }

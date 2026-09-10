@@ -50,6 +50,10 @@ namespace AkerMcp.Server
             if (has.Contains("list_windows") && has.Contains("focus_window") && has.Contains("send_input"))
                 sb.Append("If a call times out while the editor shows a modal dialog, `list_windows` names it and " +
                           "`focus_window` followed by `send_input` ({ESC} or {ENTER}) dismisses it. ");
+            if (has.Contains("ui_action"))
+                sb.Append("`ui_action` clicks and types in the editor's own interface, in the pixels of the " +
+                          "screenshot it returns: for what no API reaches (dialogs, wizards, plugin windows), " +
+                          "never for scene edits `set_property` does deterministically. ");
             var hiddenList = hidden.ToList();
             if (hiddenList.Count > 0)
                 sb.Append($"Tool profile '{profile}' ({has.Count} of {has.Count + hiddenList.Count} tools); not loaded: " +
@@ -160,6 +164,34 @@ title; `focus_window` brings it to the front and `send_input` with `{ESC}` cance
 or `{ENTER}` accepts the default. Keep the open scene clean before opening another,
 entering play or building: save what is part of the work, discard what was a probe.
 
+## Driving the interface by hand
+
+`ui_action` clicks, drags, scrolls and types in a real window, using the pixels of the
+screenshot it hands back. One call is one step of look, act, look: name an action and a
+point, and the answer is what the screen shows afterwards.
+
+```
+ui_action action=screenshot window_title=""Unity""     see the window, anchor to it
+ui_action action=left_click x=1420 y=305               a point read off that image
+ui_action action=type text=""3.5"" keys sent to what the click focused
+```
+
+Coordinates are always image pixels from the top-left of the last screenshot — the
+server knows the scale it was shrunk by and where the window sits, and converts them.
+Never compute screen coordinates yourself. If the window is resized the call is refused,
+because the layout no longer matches the image the coordinates came from: take a new
+screenshot and read it again.
+
+This is the last resort, not the way to edit a scene. `set_property` changes a value
+whatever the inspector looks like; a click depends on the window's size, its layout and
+which panel has focus, and it cannot be verified except by looking again. Reach for
+`ui_action` for what no API exposes — a modal dialog, an import wizard, a plugin's own
+window, a preference the engine only offers in its UI — and verify the result with
+`get_property` or `inspect` whenever the thing you changed is readable that way.
+
+Two costs worth knowing: it needs the foreground, so it takes the mouse away from
+whoever is at the machine, and every step puts another screenshot in the context.
+
 ## Anti-patterns
 
 | Instead of | Do |
@@ -170,6 +202,7 @@ entering play or building: save what is part of the work, discard what was a pro
 | Building complex objects one property at a time | one `execute` script |
 | An `execute` without a return | return a string that says what happened |
 | Trusting values for a visual change | `take_screenshot` |
+| Clicking through the inspector with `ui_action` | `set_property`; click only what no API reaches |
 
 ## When a call fails
 

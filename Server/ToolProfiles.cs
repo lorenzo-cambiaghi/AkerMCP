@@ -6,7 +6,7 @@ namespace AkerMcp.Server
 {
     /// <summary>
     /// Which tools a session gets. Every tool definition rides in the client's
-    /// context on every turn, and forty of them cost about 9,000 tokens before
+    /// context on every turn, and forty-one of them cost about 9,000 tokens before
     /// the first call. Most sessions inspect, edit, run a script and look at the
     /// result; the authoring, playtest and build tools are for the sessions that
     /// need them. So the tools are layered:
@@ -14,7 +14,7 @@ namespace AkerMcp.Server
     ///   core      inspect, edit, execute, screenshot, logs, compile          (14)
     ///   standard  core plus scripts, scenes, play control, engine choice and
     ///             the OS window tools that unblock a modal dialog     (27, default)
-    ///   full      everything: sprite and sound authoring, playtest, builds   (40)
+    ///   full      everything: authoring, playtest, builds, UI driving        (41)
     ///
     /// Chosen with <c>--profile</c>, then the AKER_MCP_PROFILE variable, then the
     /// default. AKER_MCP_TOOLS_INCLUDE and AKER_MCP_TOOLS_EXCLUDE (comma-separated
@@ -45,6 +45,10 @@ namespace AkerMcp.Server
             "play_step", "capture_sequence", "sample_state", "assert_state", "playtest",
             "list_platforms", "get_platform_settings", "set_platform_settings",
             "switch_build_target", "build_player",
+            // Driving the editor's interface by hand is the last resort, not the default way
+            // to change a scene, so it stays out of the everyday profile. A session that needs
+            // it on top of 'standard' asks for it by name: AKER_MCP_TOOLS_INCLUDE=ui_action.
+            "ui_action",
         }).ToArray();
 
         public static readonly IReadOnlyDictionary<string, string[]> Profiles =
