@@ -28,6 +28,13 @@ namespace AkerMcp.Server.Platform.Windows
         [DllImport("user32.dll")]
         private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+        private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
+
+        private const int GWL_STYLE = -16;
+        private const long WS_POPUP = 0x80000000L;
+        private const long WS_CAPTION = 0x00C00000L;
+
         [DllImport("user32.dll")]
         private static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
 
@@ -178,6 +185,21 @@ namespace AkerMcp.Server.Platform.Windows
             }
 
             if (IsIconic(hWnd)) ShowWindow(hWnd, SW_RESTORE);
+
+            // Already in front? Then leave it alone. Raising a window that is already the
+            // foreground is not a no-op from the interface's point of view: it closes any
+            // menu or popup that window has open, which is exactly the thing a caller is
+            // usually in the middle of clicking through. The popup is a window of its own and
+            // holds the focus, so "the foreground belongs to the same process" is the test —
+            // not "the foreground is this exact handle".
+            var current = GetForegroundWindow();
+            if (current == hWnd) return true;
+            if (current != IntPtr.Zero)
+            {
+                GetWindowThreadProcessId(current, out var currentPid);
+                GetWindowThreadProcessId(hWnd, out var targetPid);
+                if (currentPid != 0 && currentPid == targetPid) return true;
+            }
 
             // Work around Windows' foreground lock by briefly attaching our input queue
             // to the current foreground window's thread.
@@ -345,9 +367,129 @@ namespace AkerMcp.Server.Platform.Windows
 
             using var bmp = full.Clone(new Rectangle(offsetX, offsetY, cropW, cropH), full.PixelFormat);
 
+            ComposePopups(hWnd, bmp, origin.X, origin.Y);
+
             using var ms = new MemoryStream();
             bmp.Save(ms, ImageFormat.Png);
             return ms.ToArray();
         }
+
+        /// <summary>
+        /// Draw the window's own menus and popups onto the capture, where they actually are.
+        ///
+        /// A dropdown is not part of the window that owns it: Windows gives it a window of its
+        /// own, floating above. PrintWindow on the parent therefore renders the interface with
+        /// the menu missing — the click that opened it appears to have done nothing, and the
+        /// entry to click next is invisible. Compositing them back is enough to make menus
+        /// usable, and only the image needs it: a click is sent in screen coordinates, so it
+        /// already lands on whatever is topmost at that point.
+        ///
+        /// Only the owning process's frameless popups are taken, so an unrelated window that
+        /// happens to overlap is not pasted into the picture. Failures are swallowed: a menu
+        /// that cannot be captured is worth less than the screenshot it would otherwise cost.
+        /// </summary>
+        private static void ComposePopups(IntPtr owner, Bitmap target, int clientOriginX, int clientOriginY)
+        {
+            try
+            {
+                GetWindowThreadProcessId(owner, out var ownerPid);
+                if (ownerPid == 0) return;
+
+                var popups = new List<IntPtr>();
+                EnumWindows((hWnd, _) =>
+                {
+                    if (hWnd == owner || !IsWindowVisible(hWnd)) return true;
+                    GetWindowThreadProcessId(hWnd, out var pid);
+                    if (pid != ownerPid) return true;
+
+                    // A popup is frameless: no caption, no thick border. A second document
+                    // window of the same app has both, and must not be pasted over this one.
+                    var style = (long)GetWindowLongPtr(hWnd, GWL_STYLE);
+                    if ((style & WS_POPUP) == 0) return true;
+                    if ((style & WS_CAPTION) == WS_CAPTION) return true;
+
+                    popups.Add(hWnd);
+                    return true;
+                }, IntPtr.Zero);
+
+                if (popups.Count == 0) return;
+
+                // Bottom-up: EnumWindows walks front to back, so painting in reverse leaves the
+                // topmost popup on top, as the screen has it.
+                popups.Reverse();
+
+                using var gfx = Graphics.FromImage(target);
+                foreach (var popup in popups)
+                {
+                    if (!GetWindowRect(popup, out var r)) continue;
+                    int w = r.Right - r.Left, h = r.Bottom - r.Top;
+                    if (w <= 0 || h <= 0 || (long)w * h > MaxPopupPixels) continue;
+
+                    int x = r.Left - clientOriginX, y = r.Top - clientOriginY;
+                    if (x + w <= 0 || y + h <= 0 || x >= target.Width || y >= target.Height) continue;
+
+                    using var shot = CapturePopupPixels(popup, r);
+                    if (shot == null) continue;
+                    gfx.DrawImageUnscaled(shot, x, y);
+                }
+            }
+            catch { /* the window beneath is still worth returning */ }
+        }
+
+        /// <summary>A guard against pasting something absurd if a popup reports a silly size.</summary>
+        private const long MaxPopupPixels = 8000L * 8000L;
+
+        /// <summary>
+        /// A popup's pixels, read off the screen rather than asked of the window.
+        ///
+        /// PrintWindow is the right call for the main window — it works on windows that are
+        /// covered or behind others. It is the wrong call here: a modern toolkit's dropdown is
+        /// a layered, composited window, and PrintWindow hands back an empty rectangle for it
+        /// (Avalonia's menus come out blank). A popup is by definition on top and visible, so
+        /// copying the screen where it sits gets the real thing. Returns null rather than a
+        /// blank, so a failure leaves the interface underneath visible instead of a white hole.
+        /// </summary>
+        private static Bitmap? CapturePopupPixels(IntPtr popup, RECT r)
+        {
+            int w = r.Right - r.Left, h = r.Bottom - r.Top;
+            IntPtr screenDc = GetDC(IntPtr.Zero);
+            if (screenDc == IntPtr.Zero) return null;
+
+            Bitmap? shot = null;
+            try
+            {
+                shot = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+                using var g = Graphics.FromImage(shot);
+                IntPtr dst = g.GetHdc();
+                try
+                {
+                    if (!BitBlt(dst, 0, 0, w, h, screenDc, r.Left, r.Top, SRCCOPY))
+                    {
+                        g.ReleaseHdc(dst);
+                        shot.Dispose();
+                        return null;
+                    }
+                }
+                finally
+                {
+                    try { g.ReleaseHdc(dst); } catch { /* released above on the failure path */ }
+                }
+                return shot;
+            }
+            catch
+            {
+                shot?.Dispose();
+                return null;
+            }
+            finally { ReleaseDC(IntPtr.Zero, screenDc); }
+        }
+
+        private const int SRCCOPY = 0x00CC0020;
+
+        [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hWnd);
+        [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+        [DllImport("gdi32.dll")]
+        private static extern bool BitBlt(IntPtr hdcDest, int x, int y, int w, int h,
+                                          IntPtr hdcSrc, int srcX, int srcY, int rop);
     }
 }
