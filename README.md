@@ -56,7 +56,27 @@ Then there is the asset gap. A model writes code, not pixels. `create_sprite` cl
 
 When a prototype outgrows square waves, the same score plays on sampled instruments: `"engine": "soundfont"` renders it through MeltySynth and FluidR3 (MIT), so `lead` becomes a flute and `pad` becomes strings without rewriting a note. The 151 MB font is neither in this repository nor in the release package — it is fetched once on first use, pinned by SHA-256, and cached per user; `AKER_MCP_SOUNDFONT` points at your own instead. See [the licence notice](docs/FluidR3-LICENSE.txt): its terms cover redistributing sound libraries, not the audio you generate.
 
-**▶ [Listen to what it generates](docs/audio-samples.html)** — gunshots, lasers, footsteps and four pieces of music, each with the spec that produced it. (Open the page from a checkout or GitHub Pages; GitHub strips `<audio>` from markdown, which is why the samples are not embedded here.)
+Background music for a level is one call. Four bars of A minor, a token per eighth note, looping under play:
+
+```jsonc
+{
+  "name": "level-theme",
+  "spec": {
+    "bpm": 108, "steps_per_beat": 2, "repeat": 2,
+    "channels": [
+      { "instrument": "lead",  "notes": "E5 . . . D5 . C5 . A4 . C5 . D5 - - . E5 . G5 . E5 . D5 . C5 - - . B4 . . ." },
+      { "instrument": "pad",   "notes": "A4*8 F4*8 C5*8 G4*8", "volume": 0.5 },
+      { "instrument": "bass",  "notes": "A2 . A2 . E3 . A2 . F2 . F2 . C3 . F2 . C3 . C3 . G3 . C3 . G2 . G2 . D3 . G2 ." },
+      { "instrument": "drums", "notes": "k . h . s . h . k . h . s . h . k . h . s . h . k . h . s . h o" }
+    ]
+  },
+  "scene_path": "/Music", "loop": true, "auto_play": true
+}
+```
+
+The melody rests where the bass walks to the next chord, which is what keeps a short loop from nagging after the third pass. Add `"engine": "soundfont"` and swap the instrument names — `ocarina`, `strings`, `acoustic_bass` — and those same notes come back played rather than bleeped. Both versions are on the page below.
+
+**▶ [Listen to what it generates](docs/audio-samples.html)** — that level theme both ways, gunshots, lasers, footsteps and half a dozen other pieces, each next to the spec that produced it. (Open the page from a checkout or GitHub Pages; GitHub strips `<audio>` from markdown, which is why the samples are not embedded here.)
 
 Pair it with [LynxMCP](https://github.com/lorenzo-cambiaghi/LynxMCP) for code search over the project and its library docs: Aker is the hands, Lynx the memory.
 

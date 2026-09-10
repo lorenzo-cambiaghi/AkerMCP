@@ -89,6 +89,27 @@ namespace AkerMcp.AudioSamples
                 "{\"instrument\":\"arp\",\"notes\":\"C4 E4 G4 C5*4\"}," +
                 "{\"instrument\":\"drums\",\"notes\":\"k s k o*4\"}]}", IsMusic: true),
 
+            // The one in the README: a loop meant to run under play for minutes without
+            // wearing out. Four bars of Am–F–C–G, a melody that leaves gaps, and a bass that
+            // walks to the next chord instead of sitting on the root.
+            new("level-loop", "Level theme (the README example)",
+                "Written at two steps per beat, so a token is an eighth note and a bar is eight tokens. The melody rests where the bass moves, which is what keeps a short loop from nagging.",
+                "{\"bpm\":108,\"steps_per_beat\":2,\"repeat\":2,\"channels\":[" +
+                "{\"instrument\":\"lead\",\"notes\":\"E5 . . . D5 . C5 . A4 . C5 . D5 - - . E5 . G5 . E5 . D5 . C5 - - . B4 . . .\"}," +
+                "{\"instrument\":\"pad\",\"notes\":\"A4*8 F4*8 C5*8 G4*8\",\"volume\":0.5}," +
+                "{\"instrument\":\"bass\",\"notes\":\"A2 . A2 . E3 . A2 . F2 . F2 . C3 . F2 . C3 . C3 . G3 . C3 . G2 . G2 . D3 . G2 .\"}," +
+                "{\"instrument\":\"drums\",\"notes\":\"k . h . s . h . k . h . s . h . k . h . s . h . k . h . s . h o\"}]}",
+                IsMusic: true),
+
+            new("level-loop-soundfont", "Level theme — SoundFont",
+                "The same four bars with sampled instruments: the notes below are identical, only the instrument names and one word changed.",
+                "{\"engine\":\"soundfont\",\"bpm\":108,\"steps_per_beat\":2,\"repeat\":2,\"channels\":[" +
+                "{\"instrument\":\"ocarina\",\"notes\":\"E5 . . . D5 . C5 . A4 . C5 . D5 - - . E5 . G5 . E5 . D5 . C5 - - . B4 . . .\"}," +
+                "{\"instrument\":\"strings\",\"notes\":\"A4*8 F4*8 C5*8 G4*8\",\"volume\":0.5}," +
+                "{\"instrument\":\"acoustic_bass\",\"notes\":\"A2 . A2 . E3 . A2 . F2 . F2 . C3 . F2 . C3 . C3 . G3 . C3 . G2 . G2 . D3 . G2 .\"}," +
+                "{\"instrument\":\"drums\",\"notes\":\"k . h . s . h . k . h . s . h . k . h . s . h . k . h . s . h o\"}]}",
+                IsMusic: true),
+
             // The A/B: identical score, one word different. Worth more than either alone.
             new("engine-chiptune", "The same score — chiptune", "Square waves and noise. Nothing to download, nothing to licence.",
                 "{\"bpm\":100,\"repeat\":2,\"channels\":[" +

@@ -166,6 +166,27 @@ no asset packs, no downloads, nothing to licence.</p>
 "notes":"k s k o*4"}]}</code></pre>
 </figure>
 <figure>
+  <figcaption>Level theme (the README example)</figcaption>
+  <audio controls preload="none" src="samples/level-loop.wav"></audio>
+  <p class="note">Written at two steps per beat, so a token is an eighth note and a bar is eight tokens. The melody rests where the bass moves, which is what keeps a short loop from nagging.</p>
+  <pre><code>{"bpm":108, "steps_per_beat":2, "repeat":2, "channels":[{"instrument":"lead",
+"notes":"E5 . . . D5 . C5 . A4 . C5 . D5 - - . E5 . G5 . E5 . D5 . C5 - - . B4 . . ."},
+{"instrument":"pad", "notes":"A4*8 F4*8 C5*8 G4*8",
+"volume":0.5}, {"instrument":"bass", "notes":"A2 . A2 . E3 . A2 . F2 . F2 . C3 . F2 . C3 . C3 . G3 . C3 . G2 . G2 . D3 . G2 ."},
+{"instrument":"drums", "notes":"k . h . s . h . k . h . s . h . k . h . s . h . k . h . s . h o"}]}</code></pre>
+</figure>
+<figure>
+  <figcaption>Level theme — SoundFont</figcaption>
+  <audio controls preload="none" src="samples/level-loop-soundfont.wav"></audio>
+  <p class="note">The same four bars with sampled instruments: the notes below are identical, only the instrument names and one word changed.</p>
+  <pre><code>{"engine":"soundfont", "bpm":108, "steps_per_beat":2,
+"repeat":2, "channels":[{"instrument":"ocarina",
+"notes":"E5 . . . D5 . C5 . A4 . C5 . D5 - - . E5 . G5 . E5 . D5 . C5 - - . B4 . . ."},
+{"instrument":"strings", "notes":"A4*8 F4*8 C5*8 G4*8",
+"volume":0.5}, {"instrument":"acoustic_bass", "notes":"A2 . A2 . E3 . A2 . F2 . F2 . C3 . F2 . C3 . C3 . G3 . C3 . G2 . G2 . D3 . G2 ."},
+{"instrument":"drums", "notes":"k . h . s . h . k . h . s . h . k . h . s . h . k . h . s . h o"}]}</code></pre>
+</figure>
+<figure>
   <figcaption>The same score — chiptune</figcaption>
   <audio controls preload="none" src="samples/engine-chiptune.wav"></audio>
   <p class="note">Square waves and noise. Nothing to download, nothing to licence.</p>
