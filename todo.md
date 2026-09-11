@@ -96,8 +96,10 @@ Listed so nobody spends an afternoon rediscovering them as bugs.
 The file is 151,001,312 bytes with SHA-256
 `545B2833936F15F04DF5F0C5C4096B3BA6CED46EC7031F61991CAE46F8681986`, already pinned in
 `SoundFontLibrary`, so the upload has to be *that* file: any other download is rejected.
-Source: the FluidR3 GM+GS bank published on archive.org by Frank Wen, MIT, with the notice
-in `docs/FluidR3-LICENSE.txt`.
+Source: https://archive.org/download/fluidr3-gm-gs/FluidR3_GM_GS.sf2 — the FluidR3 GM+GS
+bank published on archive.org by Frank Wen, MIT, with the notice in
+`docs/FluidR3-LICENSE.txt`. It downloads in seconds, so there is no need to keep a copy
+around waiting for the upload.
 
 It goes in a release rather than the repository for the same reason the binaries do — and
 GitHub refuses a file over 100 MB in a checkout regardless.
