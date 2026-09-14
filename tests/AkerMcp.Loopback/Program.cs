@@ -571,8 +571,13 @@ namespace AkerMcp.Loopback
             Check("engine_status lists both engines",
                 listed.Contains("Loopback") && listed.Contains("Zebra"), listed);
 
+            // The pin drops the live connection and reconnects once; when that attempt races the background retry loop the
+            // answer is "the connection is still being made. Call engine_status again in a moment" — documented, and the
+            // check used to fail on it about one run in four. It now does what the answer asks: waits, then reads again.
             var pinned = Text(await Call(reg, "engine_status", new { engine = "zebra" }));
-            Check("pinning switches the live target", ConnectedName(pinned) == "Zebra", pinned);
+            await engine.WaitForConnection(10_000, cts.Token);
+            var switched = Text(await Call(reg, "engine_status", new { }));
+            Check("pinning switches the live target", ConnectedName(switched) == "Zebra", pinned + " -> " + switched);
 
             other.Stop();
             await Task.Delay(400);
