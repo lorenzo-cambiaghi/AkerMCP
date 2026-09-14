@@ -41,7 +41,8 @@ namespace AkerMcp.Server
 
             ["get_console_logs"] =
                 "Recent engine console entries. level_filter narrows to error, warning or info; " +
-                "search keeps entries containing a text; count sets how many of the MATCHING entries come back, newest last (default 50).",
+                "search keeps entries containing a text; count sets how many of the MATCHING entries come back, newest last (default 50). " +
+                "The engine keeps only its last few hundred entries: an empty answer says how far back it searched.",
 
             ["get_compile_errors"] =
                 "The last compilation's status, errors and warnings with file, line and column, " +

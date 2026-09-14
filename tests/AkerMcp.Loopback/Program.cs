@@ -267,6 +267,11 @@ namespace AkerMcp.Loopback
             var tail = await Call(reg, "get_console_logs", new { count = 2 });
             Check("get_console_logs without filters still returns only the last count",
                 Text(tail).Contains("loopback info 59") && Text(tail).Contains("loopback info 58") && !Text(tail).Contains("loopback info 57"), Text(tail));
+            // An empty answer names the window it searched: the engines keep a few hundred entries, and a bare "no
+            // matches" read as "it never happened" for a warning that had already scrolled out of the buffer.
+            var none = await Call(reg, "get_console_logs", new { search = "a marker nobody logged", count = 5 });
+            Check("get_console_logs says how far back an empty search went",
+                Text(none).Contains($"in the last {fake.Editor.Logs.Count} console entries, since {fake.Editor.Logs[0].Timestamp:HH:mm:ss}"), Text(none));
 
             var cap = await Call(reg, "capture_sequence", new { count = 2, interval_ms = 10 });
             Check("capture_sequence returns 2 images", CountImages(cap) == 2, $"images={CountImages(cap)}; " + Text(cap));

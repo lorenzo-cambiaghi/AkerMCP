@@ -19,6 +19,8 @@ namespace AkerMcp.GodotAdapter
     public class GodotEditorContext : IEditorContext
     {
         private readonly List<LogEntry> _logBuffer = new();
+        // Godot appends on its main thread, get_console_logs reads on the pipe thread: both go through this lock.
+        private readonly object _logLock = new();
         private const int MaxLogEntries = 200;
 
         public bool IsEditorMode => Engine.IsEditorHint();
@@ -53,7 +55,10 @@ namespace AkerMcp.GodotAdapter
         public string GetProjectPath() => ProjectSettings.GlobalizePath("res://");
 
         public IEnumerable<LogEntry> GetRecentLogs(int count = 50)
-            => _logBuffer.Skip(Math.Max(0, _logBuffer.Count - count));
+        {
+            // A copy, not a lazy view: the pipe thread enumerates it while the editor may still be appending.
+            lock (_logLock) return _logBuffer.Skip(Math.Max(0, _logBuffer.Count - count)).ToList();
+        }
 
         public void Log(string message, LogLevel level = LogLevel.Info)
         {
@@ -68,8 +73,11 @@ namespace AkerMcp.GodotAdapter
 
         public void Append(LogLevel level, string message)
         {
-            _logBuffer.Add(new LogEntry { Timestamp = DateTime.Now, Level = level, Message = message });
-            if (_logBuffer.Count > MaxLogEntries) _logBuffer.RemoveAt(0);
+            lock (_logLock)
+            {
+                _logBuffer.Add(new LogEntry { Timestamp = DateTime.Now, Level = level, Message = message });
+                if (_logBuffer.Count > MaxLogEntries) _logBuffer.RemoveAt(0);
+            }
         }
     }
 }

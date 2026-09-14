@@ -745,7 +745,7 @@ JSON examples:
   No errors or warnings.
 
 → get_console_logs {"level_filter": "error", "count": 10}
-← (No matching log entries)
+← (No matching log entries in the last 200 console entries, since 14:29:40)
 ```
 
 ---

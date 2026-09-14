@@ -791,7 +791,8 @@ namespace AkerMcp.Client
             // Filter the WHOLE buffer, then keep the last `count` matches. Taking the last `count` entries first and
             // filtering afterwards answered "(No matching log entries)" for any warning older than `count` lines, which
             // made a filtered query look like proof that nothing had happened.
-            var logs = _editorContext.GetRecentLogs(int.MaxValue);
+            var buffer = _editorContext.GetRecentLogs(int.MaxValue).ToList();
+            IEnumerable<LogEntry> logs = buffer;
 
             if (levelFilter != null && levelFilter != "all")
             {
@@ -811,8 +812,12 @@ namespace AkerMcp.Client
                 logs = logs.Where(l => l.Message.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0);
 
             var entries = logs.TakeLast(Math.Max(0, count)).ToList();
+            // An empty answer says how far back the search went: the engine keeps only its last few hundred entries,
+            // and a bare "no matches" reads as "it never happened" even for a warning that has already scrolled out.
             if (entries.Count == 0)
-                return "(No matching log entries)";
+                return buffer.Count == 0
+                    ? "(No matching log entries: the console buffer is empty)"
+                    : $"(No matching log entries in the last {buffer.Count} console entries, since {buffer[0].Timestamp:HH:mm:ss})";
 
             var sb = new System.Text.StringBuilder();
             foreach (var entry in entries)

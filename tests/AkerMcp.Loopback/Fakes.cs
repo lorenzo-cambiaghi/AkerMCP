@@ -110,9 +110,9 @@ namespace AkerMcp.Loopback
         public void OpenScene(string path) { }
         public void SaveScene() { }
         public string GetProjectPath() => System.IO.Path.GetTempPath();
-        // The console buffer, newest last, filled by a test. Like the real plugins, GetRecentLogs hands out the tail.
+        // The console buffer, newest last, filled by a test. Like the real plugins, GetRecentLogs hands out a copy of the tail.
         public readonly List<LogEntry> Logs = new List<LogEntry>();
-        public IEnumerable<LogEntry> GetRecentLogs(int count = 50) => Logs.TakeLast(count);
+        public IEnumerable<LogEntry> GetRecentLogs(int count = 50) => Logs.Skip(Math.Max(0, Logs.Count - count)).ToList();
         public void Log(string message, LogLevel level = LogLevel.Info) { }
     }
 

@@ -15,6 +15,8 @@ namespace AkerMcp.Unity
     public class UnityEditorContext : IEditorContext
     {
         private readonly List<LogEntry> _logBuffer = new List<LogEntry>();
+        // Unity appends on its main thread, get_console_logs reads on the pipe thread: both go through this lock.
+        private readonly object _logLock = new object();
         private const int MaxLogEntries = 200;
 
         public bool IsEditorMode => !EditorApplication.isPlaying;
@@ -62,7 +64,10 @@ namespace AkerMcp.Unity
 
         public IEnumerable<LogEntry> GetRecentLogs(int count = 50)
         {
-            return _logBuffer.TakeLast(count);
+            // A copy, not `_logBuffer.TakeLast(count)`: that lazy view was enumerated on the pipe thread while Unity kept
+            // logging, and under a stream of logs it threw "Collection was modified" or returned an entry twice.
+            lock (_logLock)
+                return _logBuffer.Skip(Math.Max(0, _logBuffer.Count - count)).ToList();
         }
 
         public void Log(string message, LogLevel level = LogLevel.Info)
@@ -91,9 +96,12 @@ namespace AkerMcp.Unity
                 }
             };
 
-            _logBuffer.Add(entry);
-            if (_logBuffer.Count > MaxLogEntries)
-                _logBuffer.RemoveAt(0);
+            lock (_logLock)
+            {
+                _logBuffer.Add(entry);
+                if (_logBuffer.Count > MaxLogEntries)
+                    _logBuffer.RemoveAt(0);
+            }
         }
 
         ~UnityEditorContext()
