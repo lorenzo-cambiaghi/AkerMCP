@@ -273,6 +273,21 @@ namespace AkerMcp.Loopback
             Check("get_console_logs says how far back an empty search went",
                 Text(none).Contains($"in the last {fake.Editor.Logs.Count} console entries, since {fake.Editor.Logs[0].Timestamp:HH:mm:ss}"), Text(none));
 
+            // execute waits as long as the caller asked. The server used to give up at its fixed request deadline (30 s)
+            // whatever timeout_ms said: a longer script answered "timed out after 30s" while the engine was still working.
+            // The deadline is shortened here so the bench does not wait thirty real seconds; the ratio is the same.
+            engine.DefaultRequestTimeoutMs = 1_000;
+            fake.Executor.DelayMs = 1_500;
+            var patient = await Call(reg, "execute", new { code = "return 1;", timeout_ms = 3_000 });
+            Check("execute honours a timeout_ms longer than the default request deadline",
+                !patient.IsError && Text(patient).Contains("\"success\":true"), Text(patient));
+            var impatient = await Call(reg, "execute", new { code = "return 1;" });
+            Check("without timeout_ms the default request deadline still applies",
+                impatient.IsError && Text(impatient).Contains("timed out"), Text(impatient));
+            fake.Executor.DelayMs = 0;
+            await Task.Delay(700);   // let the abandoned script finish before the next call
+            engine.DefaultRequestTimeoutMs = 30_000;
+
             var cap = await Call(reg, "capture_sequence", new { count = 2, interval_ms = 10 });
             Check("capture_sequence returns 2 images", CountImages(cap) == 2, $"images={CountImages(cap)}; " + Text(cap));
 

@@ -253,7 +253,8 @@ namespace AkerMcp.Server
                     },
                     ""required"": [""code""]
                 }"),
-                (args, ct) => _engine.ForwardToolCall("execute", args, ct),
+                // The deadline follows the script's own timeout_ms: with the fixed default a longer script was cut at 30 s.
+                (args, ct) => _engine.ForwardToolCall("execute", args, ct, _engine.RequestTimeoutFor(args)),
                 new ToolAnnotations { DestructiveHint = true });
 
             Register("take_screenshot", ToolDocs.Describe("take_screenshot"),

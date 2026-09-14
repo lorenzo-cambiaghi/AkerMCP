@@ -20,6 +20,7 @@ namespace AkerMcp.Loopback
         public readonly FakeInputSimulator Input = new FakeInputSimulator();
         public readonly FakeAgentConsent Consent = new FakeAgentConsent();
         public readonly FakeEditorContext Editor = new FakeEditorContext();
+        public readonly FakeCodeExecutor Executor = new FakeCodeExecutor();
 
         private readonly string _engineName;
 
@@ -33,7 +34,7 @@ namespace AkerMcp.Loopback
         protected override IEngineCapabilities CreateCapabilities() => new FakeCapabilities(_engineName);
         protected override IMainThreadDispatcher CreateDispatcher() => new FakeDispatcher();
         protected override IEditorContext? CreateEditorContext() => Editor;
-        protected override ICodeExecutor? CreateCodeExecutor() => new FakeCodeExecutor();
+        protected override ICodeExecutor? CreateCodeExecutor() => Executor;
         protected override IScreenCapture? CreateScreenCapture() => new FakeScreenCapture();
         protected override IPlayModeController? CreatePlayModeController() => Play;
         protected override IInputSimulator? CreateInputSimulator() => Input;
@@ -116,11 +117,17 @@ namespace AkerMcp.Loopback
         public void Log(string message, LogLevel level = LogLevel.Info) { }
     }
 
-    // execute always "returns" the numeric string "1" — enough to drive sample_state/assert_state.
+    // execute always "returns" the numeric string "1" — enough to drive sample_state/assert_state. DelayMs stands for a
+    // script that takes a while, so a test can check who gives up waiting first.
     public sealed class FakeCodeExecutor : ICodeExecutor
     {
-        public Task<CodeExecutionResult> Execute(string code, int timeoutMs = 5000, CancellationToken ct = default)
-            => Task.FromResult(new CodeExecutionResult { Success = true, ReturnValue = "1", ElapsedMs = 0.1 });
+        public int DelayMs;
+
+        public async Task<CodeExecutionResult> Execute(string code, int timeoutMs = 5000, CancellationToken ct = default)
+        {
+            if (DelayMs > 0) await Task.Delay(DelayMs, ct);
+            return new CodeExecutionResult { Success = true, ReturnValue = "1", ElapsedMs = DelayMs };
+        }
     }
 
     public sealed class FakePlayModeController : IPlayModeController

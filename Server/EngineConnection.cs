@@ -32,7 +32,30 @@ namespace AkerMcp.Server
         // recompilation) and the background retry loop reconnects within ~2-10s.
         // Tool calls arriving in that window wait instead of failing immediately.
         private const int ReconnectGraceMs = 20_000;
-        private const int DefaultRequestTimeoutMs = 30_000;
+
+        /// <summary>
+        /// How long a forwarded call waits for the engine's answer when the tool brings no timeout of its own. A
+        /// property rather than a constant so the loopback bench can shorten it: proving that a longer request survives
+        /// must not cost thirty real seconds.
+        /// </summary>
+        public int DefaultRequestTimeoutMs { get; set; } = 30_000;
+
+        // What a tool with its own timeout_ms gets on top of it, to marshal the answer back through the pipe.
+        private const int ReplyMarginMs = 5_000;
+
+        /// <summary>
+        /// The deadline for a call whose arguments carry <c>timeout_ms</c> (execute): that timeout plus a margin for
+        /// the reply, never below the default. With the default alone, an execute asked to wait two minutes was cut at
+        /// thirty seconds — "timed out after 30s (engine still connected)" while the engine kept working, and its
+        /// answer was lost.
+        /// </summary>
+        public int RequestTimeoutFor(JsonElement? arguments) =>
+            arguments is { ValueKind: JsonValueKind.Object } args
+            && args.TryGetProperty("timeout_ms", out var requested)
+            && requested.ValueKind == JsonValueKind.Number
+            && requested.TryGetInt32(out int ms) && ms > 0
+                ? Math.Max(DefaultRequestTimeoutMs, ms + ReplyMarginMs)
+                : DefaultRequestTimeoutMs;
 
         // Marker prefix so callers (e.g. the refresh_scripts orchestration) can
         // distinguish "connection dropped mid-call" from ordinary tool errors.
@@ -336,8 +359,9 @@ namespace AkerMcp.Server
         }
 
         public async Task<ToolResult> ForwardToolCall(string method, JsonElement? arguments, CancellationToken ct,
-            int timeoutMs = DefaultRequestTimeoutMs)
+            int? timeoutMs = null)
         {
+            int deadlineMs = timeoutMs ?? DefaultRequestTimeoutMs;
             var channel = _channel;
             if (channel == null)
             {
@@ -373,7 +397,7 @@ namespace AkerMcp.Server
                 await channel.SendRequest(request, ct).ConfigureAwait(false);
 
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                cts.CancelAfter(timeoutMs);
+                cts.CancelAfter(deadlineMs);
                 using var reg = cts.Token.Register(() => tcs.TrySetCanceled());
 
                 var response = await tcs.Task.ConfigureAwait(false);
@@ -399,7 +423,7 @@ namespace AkerMcp.Server
                     return ToolResult.Error(
                         $"{EngineDisconnectedPrefix} Engine disconnected while '{method}' was in flight " +
                         "(usually a Unity domain reload after script recompilation). It reconnects automatically — retry shortly.");
-                return ToolResult.Error($"Tool '{method}' timed out after {timeoutMs / 1000}s (engine still connected).");
+                return ToolResult.Error($"Tool '{method}' timed out after {deadlineMs / 1000}s (engine still connected).");
             }
             catch (IOException ex)
             {
@@ -418,8 +442,9 @@ namespace AkerMcp.Server
         /// </summary>
         public async Task<ToolResult> ForwardSpriteImport(
             string metadataJson, byte[] binary, CancellationToken ct,
-            int timeoutMs = DefaultRequestTimeoutMs)
+            int? timeoutMs = null)
         {
+            int deadlineMs = timeoutMs ?? DefaultRequestTimeoutMs;
             var channel = _channel;
             if (channel == null)
             {
@@ -447,7 +472,7 @@ namespace AkerMcp.Server
                 await channel.SendRequest(request, ct).ConfigureAwait(false);
 
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                cts.CancelAfter(timeoutMs);
+                cts.CancelAfter(deadlineMs);
                 using var reg = cts.Token.Register(() => tcs.TrySetCanceled());
 
                 var response = await tcs.Task.ConfigureAwait(false);
@@ -469,7 +494,7 @@ namespace AkerMcp.Server
                 if (!IsConnected)
                     return ToolResult.Error(
                         $"{EngineDisconnectedPrefix} Engine disconnected while importing sprite. Retry shortly.");
-                return ToolResult.Error($"import_sprite timed out after {timeoutMs / 1000}s (engine still connected).");
+                return ToolResult.Error($"import_sprite timed out after {deadlineMs / 1000}s (engine still connected).");
             }
             catch (IOException ex)
             {
@@ -487,8 +512,9 @@ namespace AkerMcp.Server
         /// </summary>
         public async Task<ToolResult> ForwardSoundImport(
             string metadataJson, byte[] binary, CancellationToken ct,
-            int timeoutMs = DefaultRequestTimeoutMs)
+            int? timeoutMs = null)
         {
+            int deadlineMs = timeoutMs ?? DefaultRequestTimeoutMs;
             var channel = _channel;
             if (channel == null)
             {
@@ -516,7 +542,7 @@ namespace AkerMcp.Server
                 await channel.SendRequest(request, ct).ConfigureAwait(false);
 
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                cts.CancelAfter(timeoutMs);
+                cts.CancelAfter(deadlineMs);
                 using var reg = cts.Token.Register(() => tcs.TrySetCanceled());
 
                 var response = await tcs.Task.ConfigureAwait(false);
@@ -538,7 +564,7 @@ namespace AkerMcp.Server
                 if (!IsConnected)
                     return ToolResult.Error(
                         $"{EngineDisconnectedPrefix} Engine disconnected while importing sound. Retry shortly.");
-                return ToolResult.Error($"import_sound timed out after {timeoutMs / 1000}s (engine still connected).");
+                return ToolResult.Error($"import_sound timed out after {deadlineMs / 1000}s (engine still connected).");
             }
             catch (IOException ex)
             {
