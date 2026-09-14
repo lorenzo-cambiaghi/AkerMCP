@@ -788,7 +788,10 @@ namespace AkerMcp.Client
             var levelFilter = args.TryGetProperty("level_filter", out var lf) ? lf.GetString() : "all";
             var search = args.TryGetProperty("search", out var s) ? s.GetString() : null;
 
-            var logs = _editorContext.GetRecentLogs(count);
+            // Filter the WHOLE buffer, then keep the last `count` matches. Taking the last `count` entries first and
+            // filtering afterwards answered "(No matching log entries)" for any warning older than `count` lines, which
+            // made a filtered query look like proof that nothing had happened.
+            var logs = _editorContext.GetRecentLogs(int.MaxValue);
 
             if (levelFilter != null && levelFilter != "all")
             {
@@ -807,7 +810,7 @@ namespace AkerMcp.Client
             if (!string.IsNullOrEmpty(search))
                 logs = logs.Where(l => l.Message.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0);
 
-            var entries = logs.ToList();
+            var entries = logs.TakeLast(Math.Max(0, count)).ToList();
             if (entries.Count == 0)
                 return "(No matching log entries)";
 

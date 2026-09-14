@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using AkerMcp.Server;
+using AkerMcp.Shared.Abstraction;
 using AkerMcp.Shared.Protocol;
 
 namespace AkerMcp.Loopback
@@ -252,6 +253,20 @@ namespace AkerMcp.Loopback
             var si = await Call(reg, "send_input", new { events = new[] { new { type = "key", key = "Space", hold_ms = 40 } } });
             Check("send_input ok (engine-internal)", !si.IsError, Text(si));
             Check("send_input reached the fake simulator", fake.Input.Received.Count >= 1);
+
+            // get_console_logs: count is how many MATCHING entries come back. The handler used to cut the buffer to
+            // the last `count` entries and filter afterwards, so a warning older than `count` lines was reported as
+            // "(No matching log entries)" while it was still in the buffer.
+            fake.Editor.Logs.Add(new LogEntry { Timestamp = DateTime.Now, Level = LogLevel.Warning, Message = "loopback warning marker" });
+            for (int i = 0; i < 60; i++)
+                fake.Editor.Logs.Add(new LogEntry { Timestamp = DateTime.Now, Level = LogLevel.Info, Message = $"loopback info {i}" });
+            var warn = await Call(reg, "get_console_logs", new { level_filter = "warning", count = 5 });
+            Check("get_console_logs filters the whole buffer before counting (level)", Text(warn).Contains("loopback warning marker"), Text(warn));
+            var found = await Call(reg, "get_console_logs", new { search = "warning marker", count = 3 });
+            Check("get_console_logs filters the whole buffer before counting (search)", Text(found).Contains("loopback warning marker"), Text(found));
+            var tail = await Call(reg, "get_console_logs", new { count = 2 });
+            Check("get_console_logs without filters still returns only the last count",
+                Text(tail).Contains("loopback info 59") && Text(tail).Contains("loopback info 58") && !Text(tail).Contains("loopback info 57"), Text(tail));
 
             var cap = await Call(reg, "capture_sequence", new { count = 2, interval_ms = 10 });
             Check("capture_sequence returns 2 images", CountImages(cap) == 2, $"images={CountImages(cap)}; " + Text(cap));

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using AkerMcp.Client;
@@ -18,6 +19,7 @@ namespace AkerMcp.Loopback
         public readonly FakePlayModeController Play = new FakePlayModeController();
         public readonly FakeInputSimulator Input = new FakeInputSimulator();
         public readonly FakeAgentConsent Consent = new FakeAgentConsent();
+        public readonly FakeEditorContext Editor = new FakeEditorContext();
 
         private readonly string _engineName;
 
@@ -30,7 +32,7 @@ namespace AkerMcp.Loopback
         protected override ISceneGraph CreateSceneGraph() => new FakeSceneGraph();
         protected override IEngineCapabilities CreateCapabilities() => new FakeCapabilities(_engineName);
         protected override IMainThreadDispatcher CreateDispatcher() => new FakeDispatcher();
-        protected override IEditorContext? CreateEditorContext() => new FakeEditorContext();
+        protected override IEditorContext? CreateEditorContext() => Editor;
         protected override ICodeExecutor? CreateCodeExecutor() => new FakeCodeExecutor();
         protected override IScreenCapture? CreateScreenCapture() => new FakeScreenCapture();
         protected override IPlayModeController? CreatePlayModeController() => Play;
@@ -108,7 +110,9 @@ namespace AkerMcp.Loopback
         public void OpenScene(string path) { }
         public void SaveScene() { }
         public string GetProjectPath() => System.IO.Path.GetTempPath();
-        public IEnumerable<LogEntry> GetRecentLogs(int count = 50) => Array.Empty<LogEntry>();
+        // The console buffer, newest last, filled by a test. Like the real plugins, GetRecentLogs hands out the tail.
+        public readonly List<LogEntry> Logs = new List<LogEntry>();
+        public IEnumerable<LogEntry> GetRecentLogs(int count = 50) => Logs.TakeLast(count);
         public void Log(string message, LogLevel level = LogLevel.Info) { }
     }
 
