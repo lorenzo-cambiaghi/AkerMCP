@@ -569,13 +569,74 @@ namespace AkerMcp.Client
 
             filter.MaxResults = Math.Min(filter.MaxResults, _config.MaxQueryResults);
 
+            // property_filter was in the schema and the description while nothing read it — no engine implements
+            // QueryFilter.PropertyFilter — so a query for a value an object lacked answered with that object. It is
+            // applied here, for every engine, through get_property: the engine query runs uncapped and the cap is
+            // applied to what survives, or the first max_results by name would be all the filter ever saw.
+            var propertyFilter = args.TryGetProperty("property_filter", out var pf) && pf.ValueKind == JsonValueKind.Object
+                ? pf.EnumerateObject().Select(p => (path: p.Name, expected: p.Value.Clone())).ToList()
+                : null;
+            int maxResults = filter.MaxResults;
+            if (propertyFilter != null && propertyFilter.Count > 0) filter.MaxResults = int.MaxValue;
+
             return await _dispatcher.RunOnMainThread(() =>
             {
                 var results = _sceneGraph.Query(filter)
+                    .Where(n => propertyFilter == null || propertyFilter.All(f => PropertyMatches(n, f.path, f.expected)))
+                    .Take(maxResults)
                     .Select(n => new { path = n.Path, type = n.TypeName, name = n.Name })
                     .ToList();
                 return JsonSerializer.Serialize(results, _jsonOptions);
             }, ct);
+        }
+
+        private const double QueryNumberTolerance = 1e-4;
+
+        /// <summary>A node's property equals the filter's value: missing or unreadable is no match.</summary>
+        private bool PropertyMatches(ISceneNode node, string path, JsonElement expected)
+        {
+            try { return JsonMatches(_serializer.ObjectToJsonElement(node.GetProperty(path)), expected); }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// Numbers within <see cref="QueryNumberTolerance"/> (a float written to JSON is not the decimal that was typed),
+        /// strings and enum names without case, and an object on the members the filter gives ({"y":0} matches any
+        /// position on the ground).
+        /// </summary>
+        private static bool JsonMatches(JsonElement actual, JsonElement expected)
+        {
+            switch (expected.ValueKind)
+            {
+                case JsonValueKind.Number:
+                    return actual.ValueKind == JsonValueKind.Number && Math.Abs(actual.GetDouble() - expected.GetDouble()) <= QueryNumberTolerance;
+                case JsonValueKind.String:
+                    return actual.ValueKind == JsonValueKind.String
+                        && string.Equals(actual.GetString(), expected.GetString(), StringComparison.OrdinalIgnoreCase);
+                case JsonValueKind.True:
+                case JsonValueKind.False:
+                case JsonValueKind.Null:
+                    return actual.ValueKind == expected.ValueKind;
+                case JsonValueKind.Object:
+                    if (actual.ValueKind != JsonValueKind.Object) return false;
+                    foreach (var member in expected.EnumerateObject())
+                    {
+                        bool matched = false;
+                        foreach (var candidate in actual.EnumerateObject())
+                        {
+                            if (!string.Equals(candidate.Name, member.Name, StringComparison.OrdinalIgnoreCase)) continue;
+                            matched = JsonMatches(candidate.Value, member.Value);
+                            break;
+                        }
+                        if (!matched) return false;
+                    }
+                    return true;
+                case JsonValueKind.Array:
+                    if (actual.ValueKind != JsonValueKind.Array || actual.GetArrayLength() != expected.GetArrayLength()) return false;
+                    return actual.EnumerateArray().Zip(expected.EnumerateArray(), JsonMatches).All(match => match);
+                default:
+                    return false;
+            }
         }
 
         private async Task<string> HandleCreate(IpcRequest request, CancellationToken ct)

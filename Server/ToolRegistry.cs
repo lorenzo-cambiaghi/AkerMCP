@@ -162,7 +162,7 @@ namespace AkerMcp.Server
                     ""properties"": {
                         ""type_filter"": { ""type"": ""string"", ""description"": ""Type name to filter by"" },
                         ""name_pattern"": { ""type"": ""string"", ""description"": ""Glob or regex on object name"" },
-                        ""property_filter"": { ""type"": ""object"", ""description"": ""Key-value pairs to match"" },
+                        ""property_filter"": { ""type"": ""object"", ""description"": ""Property path to value, as get_property reads it; an object matches on the members given"" },
                         ""tag"": { ""type"": ""string"" },
                         ""max_results"": { ""type"": ""integer"", ""description"": ""Max results (default 50)"" }
                     }

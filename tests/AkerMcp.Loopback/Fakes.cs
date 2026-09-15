@@ -96,7 +96,8 @@ namespace AkerMcp.Loopback
     {
         public ISceneNode? GetNode(string path) => path == FakeProbeNode.ProbePath ? new FakeProbeNode() : null;
         public IEnumerable<ISceneNode> GetRootNodes() => Array.Empty<ISceneNode>();
-        public IEnumerable<ISceneNode> Query(QueryFilter filter) => Array.Empty<ISceneNode>();
+        // Like an engine that ignores PropertyFilter (none implements it): the probe matches every other filter.
+        public IEnumerable<ISceneNode> Query(QueryFilter filter) => filter.MaxResults > 0 ? new ISceneNode[] { new FakeProbeNode() } : Array.Empty<ISceneNode>();
         public ISceneNode CreateNode(string type, string? name, string? parentPath)
             => throw new NotSupportedException("loopback scene graph is read-only");
         public bool DeleteNode(string path, bool recursive = true) => false;

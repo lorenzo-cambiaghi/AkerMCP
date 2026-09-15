@@ -293,6 +293,24 @@ namespace AkerMcp.Loopback
             Check("two structs that return each other are cut at the depth limit, not followed forever",
                 loopValue.Contains("\"id\":7") || loopValue.Contains("\"Id\":7"), loopValue.Length > 300 ? loopValue.Substring(0, 300) : loopValue);
 
+            // query's property_filter was in the schema and in the description, and nothing read it: the handler never
+            // copied it into the filter and no engine implemented it. A query for a value the object does not have
+            // answered with the object, as if it matched.
+            string QueryFor(object propertyFilter) => Text(Call(reg, "query", new { property_filter = propertyFilter }).GetAwaiter().GetResult());
+            var matching = QueryFor(new { mode = "SolidColor" });
+            var notMatching = QueryFor(new { mode = "Off" });
+            Check("query property_filter keeps an object whose value matches", matching.Contains(FakeProbeNode.ProbePath), matching);
+            Check("query property_filter drops an object whose value does not match", !notMatching.Contains(FakeProbeNode.ProbePath), notMatching);
+            var partialVector = QueryFor(new { position = new { y = 2 } });
+            var wrongVector = QueryFor(new { position = new { y = 3 } });
+            Check("query property_filter matches a struct on the members given",
+                partialVector.Contains(FakeProbeNode.ProbePath) && !wrongVector.Contains(FakeProbeNode.ProbePath), partialVector + " / " + wrongVector);
+            var noSuchMember = QueryFor(new { position = new { w = 1 } });
+            Check("query property_filter drops an object whose struct lacks a member the filter names",
+                !noSuchMember.Contains(FakeProbeNode.ProbePath), noSuchMember);
+            var missing = QueryFor(new { noSuchProperty = 1 });
+            Check("query property_filter drops an object without the property", !missing.Contains(FakeProbeNode.ProbePath), missing);
+
             // set_property looks the member's type up on the node's object; on Unity that is the GameObject, which has
             // neither "position" nor "BoxCollider.size", so the value went on as its JSON text and only Convert.ChangeType
             // read it: a vector, a colour or an enum by name could not be set at all, and a number was parsed with the
