@@ -390,14 +390,39 @@ namespace AkerMcp.Client
                 // not DISCOVER. Depth > 1 stays reflective on purpose: nested expansion is a
                 // power ask the declared surface does not model.
                 if (depth == 1 && DeclaredSurface(node, includeMethods, filter) is { } declared)
-                    return CapOutput(JsonSerializer.Serialize(declared, _jsonOptions));
+                    return CapOutput(JsonSerializer.Serialize(WithWireValues(declared), _jsonOptions));
 
                 var result = _inspector.Inspect(node.UnderlyingObject, depth, includeMethods, filter);
                 result.Path = node.Path;
                 result.Components = node.GetComponents().ToList();
                 result.ChildNames = node.Children.Select(c => c.Name).ToList();
-                return CapOutput(JsonSerializer.Serialize(result, _jsonOptions));
+                return CapOutput(JsonSerializer.Serialize(WithWireValues(result), _jsonOptions));
             }, ct);
+        }
+
+        /// <summary>
+        /// The property values of an inspection written by the engine's serializer — the form get_property returns.
+        /// Engines hand the values out as they are (the Unity node gives a Vector3 as a Vector3), and System.Text.Json on
+        /// its own followed Vector3.normalized, itself a Vector3, until it gave up at 64 levels: inspect failed on EVERY
+        /// Unity GameObject, because every Transform has a position. A value the serializer cannot write becomes its
+        /// text, so one odd property never costs the whole inspection.
+        /// </summary>
+        private InspectionResult WithWireValues(InspectionResult result)
+        {
+            ToWireValues(result.Properties);
+            return result;
+        }
+
+        /// <summary>See <see cref="WithWireValues"/>: every reply that carries a node's property values goes through here.</summary>
+        private List<PropertyDescriptor> ToWireValues(List<PropertyDescriptor> properties)
+        {
+            foreach (var property in properties)
+            {
+                if (property.Value == null || property.Value is string) continue;
+                try { property.Value = _serializer.ObjectToJsonElement(property.Value); }
+                catch { property.Value = property.Value.ToString(); }
+            }
+            return properties;
         }
 
         /// <summary>The inspection as the node's OWN declaration answers it, or null when the node
@@ -882,7 +907,7 @@ namespace AkerMcp.Client
                 const int MaxSelectionProperties = 20; // context economy: a fat node would flood the reply
                 var components = node.GetComponents().ToList();
                 var all = node.GetProperties().ToList();
-                var properties = all.Take(MaxSelectionProperties).ToList();
+                var properties = ToWireValues(all.Take(MaxSelectionProperties).ToList());
 
                 return JsonSerializer.Serialize(new
                 {

@@ -258,6 +258,10 @@ namespace AkerMcp.Shared.Serialization
 
             var type = value.GetType();
 
+            // An enum is a value type too, and the struct branch below wrote its one public field: {"value__":1}.
+            if (type.IsEnum)
+                return JsonSerializer.SerializeToElement(value.ToString(), _jsonOptions);
+
             // Custom serializer?
             if (_typeRegistry.HasCustomSerializer(type))
             {
@@ -316,34 +320,35 @@ namespace AkerMcp.Shared.Serialization
         }
 
         private JsonElement SerializeStruct(object value, Type type)
+            => JsonSerializer.SerializeToElement(StructMembers(value, type, 0), _jsonOptions);
+
+        /// <summary>
+        /// How deep nested values are followed before one is written as its ToString(). Only a cycle the property
+        /// guard in <see cref="StructMembers"/> cannot see gets anywhere near it (A.b returns a B whose .a returns an A).
+        /// </summary>
+        private const int MaxValueDepth = 16;
+
+        /// <summary>
+        /// A struct as its public fields, or — when it has none — its readable properties. A property of the struct's
+        /// OWN type is skipped: it is a derived view (DateTime.Date, Vector3.normalized), and following it never ends —
+        /// the fallback used to recurse until the stack overflowed, which takes the editor down with it.
+        /// </summary>
+        private Dictionary<string, object?> StructMembers(object value, Type type, int depth)
         {
             var dict = new Dictionary<string, object?>();
-
             foreach (var field in type.GetFields(BindingFlags.Public | BindingFlags.Instance))
-            {
-                var fieldValue = field.GetValue(value);
-                dict[field.Name] = SerializeValue(fieldValue);
-            }
+                dict[field.Name] = SerializeValue(field.GetValue(value), depth + 1);
+            if (dict.Count > 0) return dict;
 
-            // If no public fields (property-based struct), use properties
-            if (dict.Count == 0)
+            foreach (var prop in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
             {
-                foreach (var prop in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
-                {
-                    if (!prop.CanRead || prop.GetIndexParameters().Length > 0) continue;
-                    try
-                    {
-                        var propValue = prop.GetValue(value);
-                        dict[prop.Name] = SerializeValue(propValue);
-                    }
-                    catch { }
-                }
+                if (!prop.CanRead || prop.GetIndexParameters().Length > 0 || prop.PropertyType == type) continue;
+                try { dict[prop.Name] = SerializeValue(prop.GetValue(value), depth + 1); } catch { }
             }
-
-            return JsonSerializer.SerializeToElement(dict, _jsonOptions);
+            return dict;
         }
 
-        private object? SerializeValue(object? value)
+        private object? SerializeValue(object? value, int depth = 0)
         {
             if (value == null) return null;
             var type = value.GetType();
@@ -354,31 +359,21 @@ namespace AkerMcp.Shared.Serialization
             if (type.IsEnum)
                 return value.ToString();
 
+            if (depth > MaxValueDepth)
+                return value.ToString();
+
             if (_typeRegistry.HasCustomSerializer(type))
                 return _typeRegistry.TrySerialize(value);
 
-            if (type.IsValueType && !type.IsPrimitive)
-            {
-                var dict = new Dictionary<string, object?>();
-                foreach (var field in type.GetFields(BindingFlags.Public | BindingFlags.Instance))
-                    dict[field.Name] = SerializeValue(field.GetValue(value));
-                if (dict.Count == 0)
-                {
-                    foreach (var prop in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
-                    {
-                        if (!prop.CanRead || prop.GetIndexParameters().Length > 0) continue;
-                        try { dict[prop.Name] = SerializeValue(prop.GetValue(value)); } catch { }
-                    }
-                }
-                return dict;
-            }
+            if (type.IsValueType)
+                return StructMembers(value, type, depth);
 
             if (type.IsArray)
             {
                 var arr = (Array)value;
                 var list = new List<object?>();
                 for (int i = 0; i < arr.Length; i++)
-                    list.Add(SerializeValue(arr.GetValue(i)));
+                    list.Add(SerializeValue(arr.GetValue(i), depth + 1));
                 return list;
             }
 
@@ -386,7 +381,7 @@ namespace AkerMcp.Shared.Serialization
             {
                 var list = new List<object?>();
                 foreach (var item in listVal)
-                    list.Add(SerializeValue(item));
+                    list.Add(SerializeValue(item, depth + 1));
                 return list;
             }
 

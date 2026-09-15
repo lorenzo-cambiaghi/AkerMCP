@@ -1,7 +1,10 @@
 using System;
 using System.Collections;
+using System.Globalization;
 using System.Reflection;
+using System.Text.Json;
 using System.Text.RegularExpressions;
+using AkerMcp.Shared.Serialization;
 
 namespace AkerMcp.Shared.Reflection
 {
@@ -288,14 +291,49 @@ namespace AkerMcp.Shared.Reflection
             if (targetType.IsAssignableFrom(valueType))
                 return value;
 
+            // set_property passes the value's JSON text on when it cannot tell the member's type from the node's object —
+            // on Unity that object is the GameObject, which has neither "position" nor "BoxCollider.size". Here the real
+            // type is known, so here the text becomes the value. Convert.ChangeType alone read primitives only (a vector,
+            // a colour or an enum by name could not be set at all) and parsed numbers with the process culture: under
+            // it-IT "0.5" was 5. Value types only: for a reference the serializer falls back to Activator.CreateInstance,
+            // and a string must not become a freshly built object (a Unity asset built that way is broken) — it fails.
+            if (value is string text && (Nullable.GetUnderlyingType(targetType) ?? targetType).IsValueType)
+            {
+                try
+                {
+                    return Serializer.JsonElementToObject(ParseLenient(text), targetType);
+                }
+                catch (Exception ex)
+                {
+                    throw new PropertyPathException($"Cannot convert '{text}' to {targetType.Name}", ex);
+                }
+            }
+
             try
             {
-                return Convert.ChangeType(value, targetType);
+                return Convert.ChangeType(value, targetType, CultureInfo.InvariantCulture);
             }
             catch (Exception ex)
             {
                 throw new PropertyPathException(
                     $"Cannot convert value of type {valueType.Name} to {targetType.Name}", ex);
+            }
+        }
+
+        private static readonly GenericSerializer Serializer = new GenericSerializer();
+
+        /// <summary>The text as JSON, or — when it is not JSON, as an enum name is not — the same text as a JSON string.</summary>
+        private static JsonElement ParseLenient(string text)
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(text);
+                return document.RootElement.Clone();
+            }
+            catch (JsonException)
+            {
+                using var document = JsonDocument.Parse(JsonSerializer.Serialize(text));
+                return document.RootElement.Clone();
             }
         }
 

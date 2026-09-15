@@ -273,6 +273,48 @@ namespace AkerMcp.Loopback
             Check("get_console_logs says how far back an empty search went",
                 Text(none).Contains($"in the last {fake.Editor.Logs.Count} console entries, since {fake.Editor.Logs[0].Timestamp:HH:mm:ss}"), Text(none));
 
+            // Values an engine hands out as they are. UnityEngine.Vector3 has a property of its own type (normalized), and
+            // System.Text.Json followed it 64 levels down: inspect failed on EVERY Unity GameObject, because every Transform
+            // has a position. An enum came back as {"value__":1}.
+            var probe = Text(await Call(reg, "inspect", new { target = FakeProbeNode.ProbePath }));
+            Check("inspect writes a vector whose property returns its own type", probe.Contains("\"x\":1") && probe.Contains("\"z\":3"), probe);
+            Check("inspect writes an enum by name", probe.Contains("\"SolidColor\""), probe);
+            fake.Editor.SelectedPath = FakeProbeNode.ProbePath;
+            var selection = Text(await Call(reg, "get_selection", new { }));
+            fake.Editor.SelectedPath = null;
+            Check("get_selection writes the same values inspect does", selection.Contains("\"x\":1") && selection.Contains("\"SolidColor\""), selection);
+            var modeValue = Text(await Call(reg, "get_property", new { object_path = FakeProbeNode.ProbePath, property_path = "mode" }));
+            Check("get_property writes an enum by name, not {value__}", modeValue.Contains("\"SolidColor\"") && !modeValue.Contains("value__"), modeValue);
+            // Last on purpose: before the guard this one does not fail, it overflows the stack and takes the process down.
+            var stampValue = Text(await Call(reg, "get_property", new { object_path = FakeProbeNode.ProbePath, property_path = "stamp" }));
+            Check("a property-only struct with a property of its own type is written once, not recursed into",
+                stampValue.Contains("\"Ticks\":42"), stampValue);
+            var loopValue = Text(await Call(reg, "get_property", new { object_path = FakeProbeNode.ProbePath, property_path = "loop" }));
+            Check("two structs that return each other are cut at the depth limit, not followed forever",
+                loopValue.Contains("\"id\":7") || loopValue.Contains("\"Id\":7"), loopValue.Length > 300 ? loopValue.Substring(0, 300) : loopValue);
+
+            // set_property looks the member's type up on the node's object; on Unity that is the GameObject, which has
+            // neither "position" nor "BoxCollider.size", so the value went on as its JSON text and only Convert.ChangeType
+            // read it: a vector, a colour or an enum by name could not be set at all, and a number was parsed with the
+            // process culture.
+            await Call(reg, "set_property", new { object_path = FakeProbeNode.ProbePath, property_path = "Position", value = new { x = 4, y = 5, z = 6 } });
+            var state = FakeProbeNode.State;
+            Check("set_property writes a struct from a JSON object the node's object cannot type",
+                state.Position.x == 4 && state.Position.y == 5 && state.Position.z == 6, $"{state.Position.x} {state.Position.y} {state.Position.z}");
+            await Call(reg, "set_property", new { object_path = FakeProbeNode.ProbePath, property_path = "Mode", value = "SolidColor" });
+            Check("set_property writes an enum by name", state.Mode == FakeMode.SolidColor, state.Mode.ToString());
+            var culture = System.Globalization.CultureInfo.DefaultThreadCurrentCulture;
+            System.Globalization.CultureInfo.DefaultThreadCurrentCulture = new System.Globalization.CultureInfo("it-IT");
+            try { await Call(reg, "set_property", new { object_path = FakeProbeNode.ProbePath, property_path = "Scale", value = 0.5 }); }
+            finally { System.Globalization.CultureInfo.DefaultThreadCurrentCulture = culture; }
+            Check("set_property reads a decimal point whatever the process culture (it-IT)",
+                Math.Abs(state.Scale - 0.5f) < 1e-6f, state.Scale.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            // The reading of JSON text stops at value types: for a reference the serializer would construct a new object,
+            // and a Unity asset built with Activator is a broken one. A string for a reference member is refused.
+            var asset = await Call(reg, "set_property", new { object_path = FakeProbeNode.ProbePath, property_path = "Asset", value = "someAsset" });
+            Check("set_property refuses text for a reference member instead of constructing one",
+                state.Asset == null && Text(asset).Contains("Cannot convert"), Text(asset));
+
             // execute waits as long as the caller asked. The server used to give up at its fixed request deadline (30 s)
             // whatever timeout_ms said: a longer script answered "timed out after 30s" while the engine was still working.
             // The deadline is shortened here so the bench does not wait thirty real seconds; the ratio is the same.

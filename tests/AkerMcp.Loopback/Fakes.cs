@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AkerMcp.Client;
 using AkerMcp.Shared.Abstraction;
+using AkerMcp.Shared.Reflection;
 
 namespace AkerMcp.Loopback
 {
@@ -93,7 +94,7 @@ namespace AkerMcp.Loopback
 
     public sealed class FakeSceneGraph : ISceneGraph
     {
-        public ISceneNode? GetNode(string path) => null;
+        public ISceneNode? GetNode(string path) => path == FakeProbeNode.ProbePath ? new FakeProbeNode() : null;
         public IEnumerable<ISceneNode> GetRootNodes() => Array.Empty<ISceneNode>();
         public IEnumerable<ISceneNode> Query(QueryFilter filter) => Array.Empty<ISceneNode>();
         public ISceneNode CreateNode(string type, string? name, string? parentPath)
@@ -102,10 +103,101 @@ namespace AkerMcp.Loopback
         public int GetTotalNodeCount() => 0;
     }
 
+    /// <summary>Shaped like UnityEngine.Vector3: public fields, plus a property of its own type (<c>normalized</c>).</summary>
+    public struct FakeVector
+    {
+        public float x, y, z;
+        public FakeVector(float x, float y, float z) { this.x = x; this.y = y; this.z = z; }
+        public FakeVector normalized => this;
+    }
+
+    /// <summary>Shaped like System.DateTime: no public fields, only properties, one of its own type (<c>Date</c>).</summary>
+    public struct FakeStamp
+    {
+        public long Ticks => 42;
+        public FakeStamp Date => this;
+    }
+
+    /// <summary>Two property-only structs that return each other: a cycle no "own type" check sees.</summary>
+    public struct FakeLoopA
+    {
+        public int Id => 7;
+        public FakeLoopB Other => new FakeLoopB();
+    }
+
+    public struct FakeLoopB
+    {
+        public FakeLoopA Other => new FakeLoopA();
+    }
+
+    public enum FakeMode { Off, SolidColor }
+
+    /// <summary>
+    /// One node carrying the three value shapes an engine hands out as they are and that broke the wire: a vector whose
+    /// property returns its own type, a property-only struct that does the same, and an enum.
+    /// </summary>
+    /// <summary>What set_property writes on the probe: plain fields, reached by the resolver the Unity node uses.</summary>
+    public sealed class FakeProbeState
+    {
+        public FakeVector Position;
+        public FakeMode Mode;
+        public float Scale;
+        public FakeAsset? Asset;
+    }
+
+    /// <summary>A reference type with a parameterless constructor, as many engine objects have.</summary>
+    public sealed class FakeAsset
+    {
+        public string Name = "";
+    }
+
+    public sealed class FakeProbeNode : ISceneNode
+    {
+        public const string ProbePath = "/Probe";
+
+        /// <summary>
+        /// Static: the scene graph hands out a new node per lookup. The node's UnderlyingObject is the node itself, which
+        /// has none of these members — as a Unity GameObject has no "position" — so the client cannot tell the member's
+        /// type and passes the value's JSON text on.
+        /// </summary>
+        public static readonly FakeProbeState State = new FakeProbeState();
+
+        public string Name => "Probe";
+        public string Path => ProbePath;
+        public string TypeName => "Probe";
+        public ISceneNode? Parent => null;
+        public IEnumerable<ISceneNode> Children => Array.Empty<ISceneNode>();
+        public object UnderlyingObject => this;
+
+        public object? GetProperty(string propertyPath) => propertyPath switch
+        {
+            "position" => new FakeVector(1, 2, 3),
+            "mode" => FakeMode.SolidColor,
+            "stamp" => new FakeStamp(),
+            "loop" => new FakeLoopA(),
+            _ => throw new KeyNotFoundException(propertyPath),
+        };
+
+        public void SetProperty(string propertyPath, object? value) => new PropertyPathResolver().Set(State, propertyPath, value);
+        public object? CallMethod(string methodName, object?[]? args) => throw new NotSupportedException();
+        public IEnumerable<ComponentInfo> GetComponents() => Array.Empty<ComponentInfo>();
+
+        public IEnumerable<PropertyDescriptor> GetProperties()
+        {
+            yield return new PropertyDescriptor { Name = "name", TypeName = "string", CanRead = true, Value = Name };
+            yield return new PropertyDescriptor { Name = "position", TypeName = "FakeVector", CanRead = true, Value = GetProperty("position") };
+            yield return new PropertyDescriptor { Name = "mode", TypeName = "FakeMode", CanRead = true, Value = GetProperty("mode") };
+            yield return new PropertyDescriptor { Name = "stamp", TypeName = "FakeStamp", CanRead = true, Value = GetProperty("stamp") };
+        }
+
+        public IEnumerable<MethodDescriptor> GetMethods() => Array.Empty<MethodDescriptor>();
+    }
+
     public sealed class FakeEditorContext : IEditorContext
     {
         public bool IsEditorMode => true;
-        public string? GetSelectedObjectPath() => null;
+        public string? SelectedPath;
+        public string? GetSelectedObjectPath() => SelectedPath;
         public void SetSelection(string objectPath) { }
         public string? GetCurrentScenePath() => "loopback://scene";
         public void OpenScene(string path) { }

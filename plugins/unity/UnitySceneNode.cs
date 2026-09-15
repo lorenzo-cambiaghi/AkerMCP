@@ -82,6 +82,10 @@ namespace AkerMcp.Unity
             if (TryGetGameObjectProperty(firstSegment, remainder, out var goResult))
                 return goResult;
 
+            // A component named by its type: the form the guide documents and inspect lists
+            if (TrySplitComponentPrefix(propertyPath, out var named, out var member) && TryResolveOnComponent(named, member))
+                return _resolver.Resolve(named, member);
+
             // Try Transform first (most common)
             if (TryResolveOnComponent(_go.transform, propertyPath))
                 return _resolver.Resolve(_go.transform, propertyPath);
@@ -106,6 +110,13 @@ namespace AkerMcp.Unity
             // Direct GameObject properties
             if (TrySetGameObjectProperty(propertyPath, value))
                 return;
+
+            // A component named by its type: the form the guide documents and inspect lists
+            if (TrySplitComponentPrefix(propertyPath, out var named, out var member) && TryResolveOnComponent(named, member))
+            {
+                _resolver.Set(named, member, value);
+                return;
+            }
 
             // Try Transform first
             if (TryResolveOnComponent(_go.transform, propertyPath))
@@ -197,11 +208,13 @@ namespace AkerMcp.Unity
                 foreach (var prop in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
                 {
                     if (prop.GetIndexParameters().Length > 0) continue;
+                    if (!(component is Transform) && IsInheritedByEveryComponent(prop.DeclaringType)) continue;
                     var displayName = prefix + prop.Name;
                     if (!seen.Add(displayName)) continue;
 
                     object? value = null;
-                    try { if (prop.CanRead) value = prop.GetValue(component); } catch { }
+                    bool copies = GetterMakesACopy(prop);
+                    try { if (prop.CanRead && !copies) value = prop.GetValue(component); } catch { }
 
                     yield return new PropertyDescriptor
                     {
@@ -209,11 +222,63 @@ namespace AkerMcp.Unity
                         TypeName = prop.PropertyType.Name,
                         CanRead = prop.CanRead,
                         CanWrite = prop.CanWrite,
-                        Value = IsSimple(prop.PropertyType) ? value : (value?.ToString())
+                        Value = copies ? NotReadCopies : WireValue(prop.PropertyType, value)
+                    };
+                }
+
+                // Public fields are what a MonoBehaviour shows in its inspector, and get_property/set_property already
+                // resolve them; inspect used to list only properties, so the values that matter most could be read
+                // but not discovered.
+                foreach (var field in type.GetFields(BindingFlags.Public | BindingFlags.Instance))
+                {
+                    var displayName = prefix + field.Name;
+                    if (!seen.Add(displayName)) continue;
+
+                    object? value = null;
+                    try { value = field.GetValue(component); } catch { }
+
+                    yield return new PropertyDescriptor
+                    {
+                        Name = displayName,
+                        TypeName = field.FieldType.Name,
+                        CanRead = true,
+                        CanWrite = !field.IsInitOnly,
+                        Value = WireValue(field.FieldType, value)
                     };
                 }
             }
         }
+
+        private const string NotReadCopies = "(not read: this getter makes a copy in the scene; read the shared member)";
+
+        /// <summary>
+        /// Members every component inherits from UnityEngine.Object, Component and MonoBehaviour — name, tag,
+        /// gameObject, transform, hideFlags, runInEditMode, destroyCancellationToken: the same value on every component,
+        /// repeated once per component, and enough of them to push a GameObject past the inspect output cap.
+        /// Behaviour's own members (enabled) stay: they differ per component.
+        /// </summary>
+        private static bool IsInheritedByEveryComponent(Type? declaringType) =>
+            declaringType == typeof(UnityEngine.Object) || declaringType == typeof(Component) || declaringType == typeof(MonoBehaviour);
+
+        /// <summary>
+        /// Getters that instantiate what they return: in edit mode Renderer.material and MeshFilter.mesh leak a copy into
+        /// the scene (and Unity logs an error), so an inspection — a read — would change the scene it describes.
+        /// </summary>
+        private static bool GetterMakesACopy(PropertyInfo prop)
+        {
+            var owner = prop.DeclaringType;
+            if (owner == typeof(Renderer)) return prop.Name == "material" || prop.Name == "materials";
+            if (owner == typeof(MeshFilter)) return prop.Name == "mesh";
+            if (owner == typeof(Collider)) return prop.Name == "material";
+            return false;
+        }
+
+        /// <summary>
+        /// Strings and value types as they are — the client writes structs as JSON through its serializer, which guards
+        /// against the properties that return their own type — and anything else (references to objects) as text.
+        /// </summary>
+        private static object? WireValue(Type declaredType, object? value) =>
+            declaredType.IsValueType || declaredType == typeof(string) ? value : value?.ToString();
 
         public IEnumerable<MethodDescriptor> GetMethods()
         {
@@ -274,6 +339,31 @@ namespace AkerMcp.Unity
             }
         }
 
+        /// <summary>
+        /// The component a path names by its type ("Camera.fieldOfView", "MeshRenderer.material.color") and the rest of
+        /// the path. The server's guide documents this form and <see cref="GetProperties"/> lists names in it, but the
+        /// node used to look for a member CALLED "Camera" on every component: nothing inspect listed could be read back,
+        /// only the bare "fieldOfView". The first component of that type wins, as on Stride.
+        /// </summary>
+        private bool TrySplitComponentPrefix(string propertyPath, out Component component, out string memberPath)
+        {
+            component = null!;
+            memberPath = "";
+            int dot = propertyPath.IndexOf('.');
+            if (dot <= 0 || dot == propertyPath.Length - 1) return false;
+
+            var prefix = propertyPath.Substring(0, dot);
+            foreach (var candidate in _go.GetComponents<Component>())
+            {
+                if (candidate == null || !string.Equals(candidate.GetType().Name, prefix, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                component = candidate;
+                memberPath = propertyPath.Substring(dot + 1);
+                return true;
+            }
+            return false;
+        }
+
         private bool TryResolveOnComponent(Component component, string propertyPath)
         {
             var firstSegment = propertyPath.Split('.')[0];
@@ -284,14 +374,6 @@ namespace AkerMcp.Unity
             var field = type.GetField(firstSegment,
                 BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
             return field != null;
-        }
-
-        private static bool IsSimple(Type type)
-        {
-            return type.IsPrimitive || type == typeof(string) || type == typeof(decimal)
-                || type.IsEnum || type == typeof(Vector2) || type == typeof(Vector3)
-                || type == typeof(Vector4) || type == typeof(Quaternion) || type == typeof(Color)
-                || type == typeof(Rect) || type == typeof(Bounds);
         }
     }
 }
