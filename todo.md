@@ -38,28 +38,6 @@ Then, in order of how likely they are to be wrong:
 Both **Accessibility** and **Screen Recording** permission are required. The tools name the
 right settings pane when they are missing.
 
-## Plugins still ship the 1.6.0 contract
-
-- [ ] Regenerate the bundled DLLs (`copy-dlls`) so Unity, Godot and Stride carry
-      `AkerMcp.Shared`/`AkerMcp.Client` 1.7.0.
-
-Not urgent and not broken: a 1.6.0 plugin talks to a 1.7.0 server, verified in the field —
-the handshake says *"compatible. Anything added after the plugin's version answers
-NOT_SUPPORTED."* Until they are regenerated those engines simply cannot declare a consent
-policy, which is a capability staying off rather than a failure.
-
-Must be done with the editors closed: `copy-dlls` runs `dotnet clean -c Release`, and a
-running Unity holds those files. The bundles are gitignored, so this is a local step, not a
-commit.
-
-## Release
-
-- [ ] Product version is still 1.5.0 while the IPC protocol is 1.7.0.
-
-The two numbers are independent on purpose (`ServerVersion.cs` explains it), and in this
-repo the product version is stamped when a release is cut, not when work lands. So this is
-only a to-do if the next thing is a release.
-
 ## Known limits, decided rather than pending
 
 Listed so nobody spends an afternoon rediscovering them as bugs.

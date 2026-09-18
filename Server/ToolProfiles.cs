@@ -14,7 +14,7 @@ namespace AkerMcp.Server
     ///   core      inspect, edit, execute, screenshot, logs, compile          (14)
     ///   standard  core plus scripts, scenes, play control, engine choice and
     ///             the OS window tools that unblock a modal dialog     (27, default)
-    ///   full      everything: authoring, playtest, builds, UI driving        (41)
+    ///   full      everything: authoring, playtest, builds, UI driving        (42)
     ///
     /// Chosen with <c>--profile</c>, then the AKER_MCP_PROFILE variable, then the
     /// default. AKER_MCP_TOOLS_INCLUDE and AKER_MCP_TOOLS_EXCLUDE (comma-separated
