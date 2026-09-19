@@ -20,8 +20,93 @@ namespace AkerMcp.Unity
 
         private byte[]? CaptureGameView()
         {
+            // Preferred path: read back the texture the Game view already displays. It holds exactly what the player
+            // sees — UI Toolkit and uGUI overlays included — and it costs no extra render. The camera render below is
+            // the fallback, and it had two faults the readback does not:
+            //  - it draws the camera alone, so screen-space overlays never showed up in a screenshot;
+            //  - it renders the camera OUTSIDE the player loop, into a target of another size. With the GPU Resident
+            //    Drawer and GPU occlusion culling on, that render tests visibility against the depth of the last game
+            //    frame: measured on a URP scene, a screenshot showed trees and houses missing while their shadows
+            //    stayed on the ground, and 40 consecutive frames of the real view captured at the same moment
+            //    (ScreenCapture) showed nothing missing.
+            return CaptureGameViewTarget() ?? CaptureGameViewViaCamera();
+        }
+
+        // Reflects into PlayModeView.m_TargetTexture: the render target the game draws into, and the Game view shows.
+        // Returns null when the field is not found (a future Unity version) or the view has not rendered yet.
+        private static byte[]? CaptureGameViewTarget()
+        {
+            var gameViewType = System.Type.GetType("UnityEditor.GameView,UnityEditor");
+            if (gameViewType == null) return null;
+            var views = Resources.FindObjectsOfTypeAll(gameViewType);
+            if (views.Length == 0) return null;
+            var view = views[0];
+
+            FieldInfo? field = null;
+            for (var t = gameViewType; t != null && field == null; t = t.BaseType)
+                field = t.GetField("m_TargetTexture", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+            if (field == null) return null;
+
+            // Only a Game view that is ON SCREEN keeps its target current. Docked behind another tab (the usual layout
+            // outside Play Mode: Scene in front, Game behind) the target is not there at all — measured null — and
+            // repainting the host would repaint the tab in front. Then the camera render is the only way.
+            var parentField = typeof(EditorWindow).GetField("m_Parent", BindingFlags.NonPublic | BindingFlags.Instance);
+            var guiView = parentField?.GetValue(view);
+            if (guiView == null || !IsFrontTab(guiView, view)) return null;
+
+            // Outside Play Mode the Game view renders on repaint only: make it draw the current scene first, as the
+            // SceneView path does. In Play Mode the player loop has already rendered the frame.
+            if (!Application.isPlaying && !TryRepaintImmediately(guiView))
+                ((EditorWindow)view).Repaint();
+
+            if (!(field.GetValue(view) is RenderTexture target) || !target.IsCreated()) return null;
+
+            Texture2D? tex = null;
+            var prevActive = RenderTexture.active;
+            try
+            {
+                RenderTexture.active = target;
+                tex = new Texture2D(target.width, target.height, TextureFormat.RGB24, false);
+                tex.ReadPixels(new Rect(0, 0, target.width, target.height), 0, 0);
+                // Same convention as GrabPixels below, measured again here: on D3D12 the readback of the target came out
+                // upside down (a panel's bottom bar at the top of the image, its title at the bottom).
+                if (SystemInfo.graphicsUVStartsAtTop)
+                    FlipVertical(tex);
+                tex.Apply();
+                return tex.EncodeToPNG();
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning($"[AkerMcp] GameView target capture failed, falling back to camera render: {ex.Message}");
+                return null;
+            }
+            finally
+            {
+                RenderTexture.active = prevActive;
+                if (tex != null) Object.DestroyImmediate(tex);
+            }
+        }
+
+        // True when the window is the tab its host is showing. The host (a DockArea, or a single-view HostView) exposes the
+        // shown window as its internal actualView; walk the base types, since reflection does not surface inherited
+        // non-public members. When the property is missing, assume shown and let the target checks decide.
+        private static bool IsFrontTab(object host, Object window)
+        {
+            for (var t = host.GetType(); t != null; t = t.BaseType)
+            {
+                var actual = t.GetProperty("actualView",
+                    BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+                if (actual != null) return ReferenceEquals(actual.GetValue(host), window);
+            }
+            return true;
+        }
+
+        // Fallback: render the main camera directly. Misses screen-space UI, and see CaptureGameView for why it can
+        // disagree with the Game view when GPU occlusion culling is on.
+        private static byte[]? CaptureGameViewViaCamera()
+        {
             var cam = Camera.main;
-            if (cam == null) cam = Object.FindFirstObjectByType<Camera>();
+            if (cam == null) cam = Object.FindAnyObjectByType<Camera>();
             if (cam == null) return null;
 
             int w = cam.pixelWidth > 0 ? cam.pixelWidth : 1024;
