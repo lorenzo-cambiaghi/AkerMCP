@@ -29,6 +29,11 @@ namespace AkerMcp.Unity
             //    frame: measured on a URP scene, a screenshot showed trees and houses missing while their shadows
             //    stayed on the ground, and 40 consecutive frames of the real view captured at the same moment
             //    (ScreenCapture) showed nothing missing.
+            // ⚠️ Known limit, measured on Unity 6000.6 / D3D12: with a URP asset that renders straight to the final target
+            // (HDR off, no effect asking for an intermediate texture) the Game view target read here, outside the frame, holds
+            // no image — nearly black, with the Stats overlay on top — while the Game view on screen is right; ScreenCapture in
+            // Play Mode fails the same way (flat cyan). A faithful read would have to happen inside the frame, and this capture
+            // is synchronous. For such a pipeline the visual check is an OS screen capture of the Game view.
             return CaptureGameViewTarget() ?? CaptureGameViewViaCamera();
         }
 
