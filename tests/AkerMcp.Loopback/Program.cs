@@ -386,6 +386,21 @@ namespace AkerMcp.Loopback
             Check("send_input's OS-level path is refused too",
                 siDenied.IsError && Text(siDenied).Contains("revoked"), Text(siDenied));
 
+            // A named window takes the OS-level path, never the engine's: the in-process path can
+            // reach no window but the game view, and Unity used to take a click meant for one of the
+            // editor's floating windows, put it in the Game View and answer success. Checked with
+            // the session revoked, so that the routing shows (refused, and the fake simulator got
+            // nothing) without any real input reaching this machine.
+            int inputsBefore = fake.Input.Received.Count;
+            var siNamed = await Call(reg, "send_input", new
+            {
+                events = new[] { new { type = "key", key = "Space" } },
+                window_title = "anything",
+            });
+            Check("send_input with window_title goes OS-level, not in-process",
+                siNamed.IsError && Text(siNamed).Contains("revoked") && fake.Input.Received.Count == inputsBefore,
+                $"{Text(siNamed)} (engine got {fake.Input.Received.Count - inputsBefore})");
+
             fake.Consent.Granted = true;
             await Task.Delay(5200);
             var lwAgain = await Call(reg, "list_windows", new { });

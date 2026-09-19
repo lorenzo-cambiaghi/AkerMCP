@@ -184,9 +184,9 @@ namespace AkerMcp.Server
                 "down and up), mouse_button ({\"button\":\"left\",\"hold_ms\":50}) and mouse_move " +
                 "({\"x\":960,\"y\":540}, pixels from the top-left). Keys: Space, Enter, Escape, Tab, " +
                 "Up/Down/Left/Right, A-Z, 0-9, F1-F12, punctuation, Shift, Ctrl, Alt. Unity receives it " +
-                "in-process in the Game View; Godot and Stride run the game in a separate window, so pass " +
-                "window_title or the editor receives it. coords='image' reads mouse_move x/y as pixels of " +
-                "the last capture_window screenshot instead of screen pixels (OS-level path only).",
+                "in-process in the Game View; window_title sends it OS-level to that window instead (a " +
+                "dialog, an editor window, the game window of Godot and Stride). coords='image' reads " +
+                "mouse_move x/y as pixels of the last capture_window screenshot (OS-level path only).",
 
             ["sample_state"] =
                 "Evaluate C# expressions in the running game and return their values, one per probe " +

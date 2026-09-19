@@ -422,7 +422,7 @@ So: `add_primitive` for the piece every 2D prototype needs and nobody wants rewr
 | `enter_play` / `exit_play` | standard | Run the project and stop it; Unity's domain reload and reconnect are handled |
 | `get_play_state` | standard | Playing, paused, time, frame counter; read twice to tell a frozen game from a live one |
 | `set_play_pause` | standard | Pause or resume |
-| `send_input` | standard | Inject key, mouse button and mouse move events into the running game (`window_title` for a game in its own window; `coords: "image"` to give mouse positions in screenshot pixels) |
+| `send_input` | standard | Inject key, mouse button and mouse move events into the running game (`window_title` to send them OS-level to a named window: a game in its own window, an editor window, a dialog; `coords: "image"` to give mouse positions in screenshot pixels) |
 | `play_step` | full | Advance frames while paused |
 | `capture_sequence` | full | Several screenshots at an interval, returned as a strip, to see motion |
 
@@ -432,7 +432,7 @@ So: `add_primitive` for the piece every 2D prototype needs and nobody wants rewr
 > - **Stride**: Game Studio has no plugin-controllable Play Mode; `enter_play` reports this and points you to `build_player` + running the produced executable.
 > - **SkelForge**, full: "play" plays the animation timeline in-editor; pause + frame-step supported; the viewport shows the pose.
 >
-> `send_input` prefers an engine's in-process `IInputSimulator`, otherwise focuses the game/engine window and injects via **OS-level injection** (Windows `SendInput`, macOS Quartz `CGEvent`; Linux reports unsupported). On **Unity** the in-process path drives the **new Input System** (`com.unity.inputsystem`) directly, resolved via reflection, so there is no hard package dependency; projects on the legacy Input Manager (or without the package) fall back to OS-level automatically. On **Godot/Stride** the game is a separate window, so pass `window_title` (the game window's title) or the OS-level path targets the editor. The `action` event type is reserved but not yet injectable; drive the key/mouse controls the action is bound to.
+> `send_input` prefers an engine's in-process `IInputSimulator`, otherwise focuses the game/engine window and injects via **OS-level injection** (Windows `SendInput`, macOS Quartz `CGEvent`; Linux reports unsupported). On **Unity** the in-process path drives the **new Input System** (`com.unity.inputsystem`) directly, resolved via reflection, so there is no hard package dependency; projects on the legacy Input Manager (or without the package) fall back to OS-level automatically. On **Godot/Stride** the game is a separate window, so pass `window_title` (the game window's title) or the OS-level path targets the editor. An explicit `window_title` always takes the OS-level path: the in-process path can reach no window but the engine's own game view, and on Unity it used to swallow a click meant for an editor window and report success. The `action` event type is reserved but not yet injectable; drive the key/mouse controls the action is bound to.
 
 ### Verify and iterate
 

@@ -609,7 +609,7 @@ namespace AkerMcp.Server
                                 }
                             }
                         },
-                        ""window_title"": { ""type"": ""string"", ""description"": ""OS-level path only: title substring of the window to focus before injecting"" },
+                        ""window_title"": { ""type"": ""string"", ""description"": ""Title substring of the OS window to focus and send the input to, OS-level"" },
                         ""coords"": {
                             ""type"": ""string"",
                             ""enum"": [""screen"", ""image""],
@@ -1686,7 +1686,13 @@ namespace AkerMcp.Server
             // Image coordinates describe a screenshot of an OS window, so they only mean
             // something on the OS-level path: an engine injecting in-process puts the pointer
             // in its own view, where the same numbers land somewhere else entirely.
-            if (coords == "screen")
+            //
+            // An explicit window_title names the OS window the input is for, and the in-process
+            // path can reach no window but the engine's own game view. It used to be tried
+            // anyway: Unity took a click meant for one of the editor's floating windows, put it
+            // in the Game View and answered success, and nothing happened where it was aimed.
+            bool toNamedWindow = !string.IsNullOrWhiteSpace(ReadString(args, "window_title"));
+            if (coords == "screen" && !toNamedWindow)
             {
                 // Strategy 1: engine-internal injection (IInputSimulator). The engine returns
                 // an InputResult JSON; supported:false means "fall back to OS-level".
