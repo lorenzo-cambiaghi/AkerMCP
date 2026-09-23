@@ -33,43 +33,38 @@ namespace AkerMcp.Unity
             // (HDR off, no effect asking for an intermediate texture) the Game view target read here, outside the frame, holds
             // no image — nearly black, with the Stats overlay on top — while the Game view on screen is right; ScreenCapture in
             // Play Mode fails the same way (flat cyan). A faithful read would have to happen inside the frame, and this capture
-            // is synchronous. For such a pipeline the visual check is an OS screen capture of the Game view.
-            return CaptureGameViewTarget() ?? CaptureGameViewViaCamera();
+            // is synchronous. The readback came back as a success all the same, a black picture where v1.5.0's camera render
+            // showed the scene; so a readback that is nearly one colour is checked against the camera render below.
+            var target = CaptureGameViewTarget(out float targetFlatness);
+            if (target == null) return CaptureGameViewViaCamera(out _);
+            if (targetFlatness < SuspectFlatness) return target;
+
+            // Nearly one colour: either the frame is flat (a solid clear colour, a menu on a plain background) or the target
+            // held no image. The camera render tells the two apart. When it sees clearly more than the target did, the target
+            // was empty; when it is as flat, the readback — which carries the UI — is the better picture of the two.
+            var camera = CaptureGameViewViaCamera(out float cameraFlatness);
+            return camera != null && cameraFlatness < targetFlatness - FlatnessMargin ? camera : target;
         }
 
-        // Reflects into PlayModeView.m_TargetTexture: the render target the game draws into, and the Game view shows.
-        // Returns null when the field is not found (a future Unity version) or the view has not rendered yet.
-        private static byte[]? CaptureGameViewTarget()
+        // A readback with at least this share of samples on one colour is checked against the camera render.
+        private const float SuspectFlatness = 0.9f;
+        // How much less flat the camera render must be to replace the readback.
+        private const float FlatnessMargin = 0.15f;
+
+        // Reads back PlayModeView.m_TargetTexture: the render target the game draws into, and the Game view shows. Returns
+        // null — and the camera render takes over — when no Game view is in front, when the internals are not where this
+        // looks (another Unity version: every reflective step is inside the try, so a changed API degrades instead of
+        // failing the screenshot), or when the view has not rendered yet.
+        private static byte[]? CaptureGameViewTarget(out float flatness)
         {
-            var gameViewType = System.Type.GetType("UnityEditor.GameView,UnityEditor");
-            if (gameViewType == null) return null;
-            var views = Resources.FindObjectsOfTypeAll(gameViewType);
-            if (views.Length == 0) return null;
-            var view = views[0];
-
-            FieldInfo? field = null;
-            for (var t = gameViewType; t != null && field == null; t = t.BaseType)
-                field = t.GetField("m_TargetTexture", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly);
-            if (field == null) return null;
-
-            // Only a Game view that is ON SCREEN keeps its target current. Docked behind another tab (the usual layout
-            // outside Play Mode: Scene in front, Game behind) the target is not there at all — measured null — and
-            // repainting the host would repaint the tab in front. Then the camera render is the only way.
-            var parentField = typeof(EditorWindow).GetField("m_Parent", BindingFlags.NonPublic | BindingFlags.Instance);
-            var guiView = parentField?.GetValue(view);
-            if (guiView == null || !IsFrontTab(guiView, view)) return null;
-
-            // Outside Play Mode the Game view renders on repaint only: make it draw the current scene first, as the
-            // SceneView path does. In Play Mode the player loop has already rendered the frame.
-            if (!Application.isPlaying && !TryRepaintImmediately(guiView))
-                ((EditorWindow)view).Repaint();
-
-            if (!(field.GetValue(view) is RenderTexture target) || !target.IsCreated()) return null;
-
+            flatness = 0f;
             Texture2D? tex = null;
             var prevActive = RenderTexture.active;
             try
             {
+                var target = FindGameViewTarget();
+                if (target == null) return null;
+
                 RenderTexture.active = target;
                 tex = new Texture2D(target.width, target.height, TextureFormat.RGB24, false);
                 tex.ReadPixels(new Rect(0, 0, target.width, target.height), 0, 0);
@@ -78,6 +73,7 @@ namespace AkerMcp.Unity
                 if (SystemInfo.graphicsUVStartsAtTop)
                     FlipVertical(tex);
                 tex.Apply();
+                flatness = Flatness(tex);
                 return tex.EncodeToPNG();
             }
             catch (System.Exception ex)
@@ -90,6 +86,68 @@ namespace AkerMcp.Unity
                 RenderTexture.active = prevActive;
                 if (tex != null) Object.DestroyImmediate(tex);
             }
+        }
+
+        // The render target of the Game view on screen. Of the Game views whose tab is in front, the one showing Display 1,
+        // else the first: FindObjectsOfTypeAll lists them in no particular order, and taking the first one found captured a
+        // Game view docked behind another tab (then fell back to the camera, losing the UI) or the one showing Display 2.
+        // Only a Game view that is ON SCREEN keeps its target current: docked behind another tab (the usual layout outside
+        // Play Mode: Scene in front, Game behind) the target is not there at all — measured null.
+        private static RenderTexture? FindGameViewTarget()
+        {
+            var gameViewType = System.Type.GetType("UnityEditor.GameView,UnityEditor");
+            if (gameViewType == null) return null;
+            var targetField = FindField(gameViewType, "m_TargetTexture");
+            var parentField = typeof(EditorWindow).GetField("m_Parent", BindingFlags.NonPublic | BindingFlags.Instance);
+            if (targetField == null || parentField == null) return null;
+
+            Object? chosen = null;
+            object? chosenHost = null;
+            foreach (var view in Resources.FindObjectsOfTypeAll(gameViewType))
+            {
+                var host = parentField.GetValue(view);
+                if (host == null || !IsFrontTab(host, view)) continue;
+                if (chosen == null || (TargetDisplay(view) == 0 && TargetDisplay(chosen) != 0))
+                {
+                    chosen = view;
+                    chosenHost = host;
+                }
+            }
+            if (chosen == null || chosenHost == null) return null;
+
+            // Outside Play Mode the Game view renders on repaint only: make it draw the current scene first, as the
+            // SceneView path does. In Play Mode the player loop has already rendered the frame.
+            if (!Application.isPlaying && !TryRepaintImmediately(chosenHost))
+                ((EditorWindow)chosen).Repaint();
+
+            return targetField.GetValue(chosen) is RenderTexture target && target.IsCreated() ? target : null;
+        }
+
+        // The display a Game view shows (0 = Display 1), read from PlayModeView's internal targetDisplay; 0 when not found.
+        private static int TargetDisplay(Object view)
+        {
+            for (var t = view.GetType(); t != null; t = t.BaseType)
+            {
+                const BindingFlags flags = BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly;
+                var property = t.GetProperty("targetDisplay", flags);
+                if (property != null && property.PropertyType == typeof(int) && property.GetIndexParameters().Length == 0)
+                    return (int)property.GetValue(view)!;
+                var field = t.GetField("m_TargetDisplay", flags);
+                if (field != null && field.FieldType == typeof(int))
+                    return (int)field.GetValue(view)!;
+            }
+            return 0;
+        }
+
+        // A non-public instance field declared anywhere up the type's base chain.
+        private static FieldInfo? FindField(System.Type type, string name)
+        {
+            for (var t = type; t != null; t = t.BaseType)
+            {
+                var field = t.GetField(name, BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+                if (field != null) return field;
+            }
+            return null;
         }
 
         // True when the window is the tab its host is showing. The host (a DockArea, or a single-view HostView) exposes the
@@ -106,10 +164,43 @@ namespace AkerMcp.Unity
             return true;
         }
 
+        // How much of the picture is one colour: the share of a 16×16 grid of samples within a few levels of the median
+        // colour. 1 for a flat fill, well under that for any scene with something in it. 256 GetPixel calls on the CPU copy
+        // ReadPixels already made — no second pass over the whole image.
+        private static float Flatness(Texture2D tex)
+        {
+            const int grid = 16, tolerance = 12;
+            const int n = grid * grid;
+            var r = new int[n];
+            var g = new int[n];
+            var b = new int[n];
+            for (int i = 0; i < n; i++)
+            {
+                int x = ((i % grid) * 2 + 1) * tex.width / (grid * 2);
+                int y = ((i / grid) * 2 + 1) * tex.height / (grid * 2);
+                Color32 c = tex.GetPixel(x, y);
+                r[i] = c.r; g[i] = c.g; b[i] = c.b;
+            }
+            int mr = Median(r), mg = Median(g), mb = Median(b);
+            int near = 0;
+            for (int i = 0; i < n; i++)
+                if (Mathf.Abs(r[i] - mr) <= tolerance && Mathf.Abs(g[i] - mg) <= tolerance && Mathf.Abs(b[i] - mb) <= tolerance)
+                    near++;
+            return near / (float)n;
+        }
+
+        private static int Median(int[] values)
+        {
+            var sorted = (int[])values.Clone();
+            System.Array.Sort(sorted);
+            return sorted[sorted.Length / 2];
+        }
+
         // Fallback: render the main camera directly. Misses screen-space UI, and see CaptureGameView for why it can
         // disagree with the Game view when GPU occlusion culling is on.
-        private static byte[]? CaptureGameViewViaCamera()
+        private static byte[]? CaptureGameViewViaCamera(out float flatness)
         {
+            flatness = 0f;
             var cam = Camera.main;
             if (cam == null) cam = Object.FindAnyObjectByType<Camera>();
             if (cam == null) return null;
@@ -131,6 +222,7 @@ namespace AkerMcp.Unity
                 tex = new Texture2D(w, h, TextureFormat.RGB24, false);
                 tex.ReadPixels(new Rect(0, 0, w, h), 0, 0);
                 tex.Apply();
+                flatness = Flatness(tex);
 
                 return tex.EncodeToPNG();
             }
@@ -191,15 +283,16 @@ namespace AkerMcp.Unity
             // scene rather than a stale frame. sv.Repaint() only queues a repaint, so right
             // after a domain reload GrabPixels could capture geometry that renders during the
             // SceneView's render pass (e.g. GPU-instanced terrain) before it has drawn.
-            // RepaintImmediately is internal, so reflect for it; fall back to the queued path.
-            if (!TryRepaintImmediately(guiView))
-                sv.Repaint();
-
+            // RepaintImmediately is internal, so reflect for it; fall back to the queued path. Inside the try: an internal
+            // call that throws degrades to the camera render instead of failing the screenshot.
             RenderTexture? rt = null;
             Texture2D? tex = null;
             var prevActive = RenderTexture.active;
             try
             {
+                if (!TryRepaintImmediately(guiView))
+                    sv.Repaint();
+
                 rt = new RenderTexture(w, h, 24);
                 // Rect is in the view's local coordinates (origin at the panel's top-left).
                 grab.Invoke(guiView, new object[] { rt, new Rect(0, 0, w, h) });
