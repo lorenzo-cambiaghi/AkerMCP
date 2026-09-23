@@ -46,8 +46,8 @@ namespace AkerMcp.Server
             _engine = engine;
             _consent = new ConsentGate(engine);
             // A new plugin is a new policy, and a new window: neither the previous engine's
-            // consent nor its screenshot describes this one.
-            engine.OnConnected += () => { _consent.Reset(); _lastCapture = null; };
+            // consent nor its screenshot nor its game window describes this one.
+            engine.OnConnected += () => { _consent.Reset(); _lastCapture = null; _gameWindowTitle = null; };
             _jsonOptions = new JsonSerializerOptions
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,

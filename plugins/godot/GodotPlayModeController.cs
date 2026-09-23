@@ -44,13 +44,16 @@ namespace AkerMcp.GodotAdapter
             };
         }
 
-        // The running game's default window title is the project name.
+        // The running game's window title: the project name, and " (DEBUG)" after it, which
+        // Godot 4 appends to every run from a debug build — the editor's own included. The bare
+        // name is not enough: the editor's title ("main.tscn - Name - Godot Engine") contains it
+        // too, and a title search that meets the editor first sends the game's input there.
         private static string? GameWindowTitle()
         {
             try
             {
                 var name = ProjectSettings.GetSetting("application/config/name").AsString();
-                return string.IsNullOrWhiteSpace(name) ? null : name;
+                return string.IsNullOrWhiteSpace(name) ? null : $"{name} (DEBUG)";
             }
             catch { return null; }
         }
