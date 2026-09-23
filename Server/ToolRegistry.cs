@@ -1002,6 +1002,10 @@ namespace AkerMcp.Server
             var (jpeg, after, afterNote, captureErr) = CaptureWindowAnchored(title!);
             if (jpeg == null)
             {
+                // When nothing was done on screen the picture was the whole request, and
+                // "done" without it is a success that delivered nothing.
+                if (!anyActsOnScreen)
+                    return ToolResult.Error($"Screenshot of '{title}' failed: {captureErr}");
                 log.Add($"(the follow-up screenshot failed: {captureErr})");
                 return ToolResult.Text(string.Join(" ", log));
             }
@@ -1089,6 +1093,9 @@ namespace AkerMcp.Server
         /// to tell anyone where it went wrong.
         /// </summary>
         private const int MaxUiSteps = 12;
+
+        /// <summary>Characters one 'type' action may send: a field's worth, about 15 s of typing.</summary>
+        private const int MaxTypedChars = 500;
 
         /// <summary>
         /// Runs the pointer/keyboard half of ui_action. Returns null when it worked (the
@@ -1182,6 +1189,12 @@ namespace AkerMcp.Server
                     var text = ReadString(args, "text");
                     if (string.IsNullOrEmpty(text))
                         return ToolResult.Error("Action 'type' needs 'text'.");
+                    // Typed a character at a time and not stoppable once started: a long text
+                    // keeps going into whatever window is in front after the call is abandoned.
+                    if (text!.Length > MaxTypedChars)
+                        return ToolResult.Error(
+                            $"'text' is {text.Length} characters; {MaxTypedChars} is the limit for one 'type'. " +
+                            "Longer content belongs in a file or a set_property, not in keystrokes.");
                     if (px.HasValue)
                     {
                         if (!injector.Click(sx, sy, "left", 1, out error)) return ToolResult.Error(error!);
