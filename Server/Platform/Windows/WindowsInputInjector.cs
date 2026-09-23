@@ -261,7 +261,12 @@ namespace AkerMcp.Server.Platform.Windows
                 return false;
             }
 
-            var parts = chord.Split('+');
+            // "+" separates the keys, so the plus key itself goes by its name: "ctrl++" split on
+            // "+" was three parts, and the empty middle one was refused as "not a modifier".
+            var spec = chord.Trim();
+            if (spec == "+") spec = "plus";
+            else if (spec.EndsWith("++", StringComparison.Ordinal)) spec = spec.Substring(0, spec.Length - 1) + "plus";
+            var parts = spec.Split('+');
             var modifiers = new List<ushort>();
             ushort mainVk = 0;
 
@@ -528,6 +533,9 @@ namespace AkerMcp.Server.Platform.Windows
         private static bool TryMapKey(string key, out ushort vk)
         {
             var k = key.Trim();
+            // "{ESC}", "{ENTER}": the SendKeys spelling, which is how a dialog key is often
+            // written down. Accepted rather than "Nothing dispatched" for the braces alone.
+            if (k.Length > 2 && k[0] == '{' && k[k.Length - 1] == '}') k = k.Substring(1, k.Length - 2).Trim();
             if (k.Length == 0) k = key; // a lone space is the space bar, not an empty name
             if (k.Length == 0) { vk = 0; return false; }
 

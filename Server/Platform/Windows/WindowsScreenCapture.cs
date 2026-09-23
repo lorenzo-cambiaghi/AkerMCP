@@ -35,6 +35,14 @@ namespace AkerMcp.Server.Platform.Windows
         private const long WS_POPUP = 0x80000000L;
         private const long WS_CAPTION = 0x00C00000L;
 
+        // A menu, dropdown or tooltip: WS_POPUP and no caption. A second document window of the
+        // same app has a caption, and is a window of its own rather than part of this one.
+        private static bool IsFramelessPopup(IntPtr hWnd)
+        {
+            var style = (long)GetWindowLongPtr(hWnd, GWL_STYLE);
+            return (style & WS_POPUP) != 0 && (style & WS_CAPTION) != WS_CAPTION;
+        }
+
         [DllImport("user32.dll")]
         private static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
 
@@ -190,11 +198,15 @@ namespace AkerMcp.Server.Platform.Windows
             // foreground is not a no-op from the interface's point of view: it closes any
             // menu or popup that window has open, which is exactly the thing a caller is
             // usually in the middle of clicking through. The popup is a window of its own and
-            // holds the focus, so "the foreground belongs to the same process" is the test —
+            // holds the focus, so the test is "the foreground is a popup of the same process" —
             // not "the foreground is this exact handle".
+            //
+            // A popup, and not any window of the process: the editor's main window and one of
+            // its floating windows (Project Settings, a dialog) share a process too, and taking
+            // the main one for the floating one sent a Delete meant for a dialog to the Hierarchy.
             var current = GetForegroundWindow();
             if (current == hWnd) return true;
-            if (current != IntPtr.Zero)
+            if (current != IntPtr.Zero && IsFramelessPopup(current))
             {
                 GetWindowThreadProcessId(current, out var currentPid);
                 GetWindowThreadProcessId(hWnd, out var targetPid);
@@ -413,11 +425,7 @@ namespace AkerMcp.Server.Platform.Windows
                     GetWindowThreadProcessId(hWnd, out var pid);
                     if (pid != ownerPid) return true;
 
-                    // A popup is frameless: no caption, no thick border. A second document
-                    // window of the same app has both, and must not be pasted over this one.
-                    var style = (long)GetWindowLongPtr(hWnd, GWL_STYLE);
-                    if ((style & WS_POPUP) == 0) return true;
-                    if ((style & WS_CAPTION) == WS_CAPTION) return true;
+                    if (!IsFramelessPopup(hWnd)) return true;
 
                     popups.Add(hWnd);
                     return true;

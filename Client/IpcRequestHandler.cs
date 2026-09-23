@@ -1159,17 +1159,23 @@ namespace AkerMcp.Client
             foreach (var e in evs.EnumerateArray())
             {
                 if (e.ValueKind != JsonValueKind.Object) continue;
+                bool hasPressed = e.TryGetProperty("pressed", out var pr)
+                                  && (pr.ValueKind == JsonValueKind.True || pr.ValueKind == JsonValueKind.False);
                 var ev = new InputEvent
                 {
-                    Type = e.TryGetProperty("type", out var t) ? (t.GetString() ?? "key") : "key",
-                    Key = e.TryGetProperty("key", out var k) ? k.GetString() : null,
-                    Button = e.TryGetProperty("button", out var b) ? b.GetString() : null,
-                    Action = e.TryGetProperty("action", out var a) ? a.GetString() : null,
-                    Pressed = !e.TryGetProperty("pressed", out var pr) || pr.GetBoolean(),
+                    Type = e.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.String ? (t.GetString() ?? "key") : "key",
+                    Key = e.TryGetProperty("key", out var k) && k.ValueKind == JsonValueKind.String ? k.GetString() : null,
+                    Button = e.TryGetProperty("button", out var b) && b.ValueKind == JsonValueKind.String ? b.GetString() : null,
+                    Action = e.TryGetProperty("action", out var a) && a.ValueKind == JsonValueKind.String ? a.GetString() : null,
+                    Pressed = !hasPressed || pr.GetBoolean(),
                     X = e.TryGetProperty("x", out var x) && x.ValueKind == JsonValueKind.Number ? x.GetDouble() : 0,
                     Y = e.TryGetProperty("y", out var y) && y.ValueKind == JsonValueKind.Number ? y.GetDouble() : 0,
                     HoldMs = e.TryGetProperty("hold_ms", out var h) && h.ValueKind == JsonValueKind.Number ? h.GetDouble() : 0,
                 };
+                // Neither 'pressed' nor 'hold_ms': a tap, as on the server's OS-level path. A bare
+                // event used to be a press with no release, and the key stayed down in the game.
+                bool pressable = ev.Type != "mouse_move" && ev.Type != "action";
+                if (pressable && !hasPressed && ev.HoldMs <= 0) ev.HoldMs = 40;
                 list.Add(ev);
             }
             return list;

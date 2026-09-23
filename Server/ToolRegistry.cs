@@ -1721,19 +1721,57 @@ namespace AkerMcp.Server
             if (events.Count == 0)
                 return ToolResult.Error("No input events supplied. Provide an 'events' array, e.g. " +
                     "{ \"events\": [ { \"type\": \"key\", \"key\": \"Space\", \"hold_ms\": 60 } ] }.");
+            if (events.Count > MaxInputEvents)
+                return ToolResult.Error($"'events' has {events.Count} entries; {MaxInputEvents} is the limit per call. " +
+                    "Input already sent cannot be called back, so a long script goes in several calls.");
 
             var anchor = _lastCapture;
+            var namedTitle = ReadString(args, "window_title");
             if (coords == "image")
             {
                 if (anchor == null)
                     return ToolResult.Error(
                         "coords:'image' needs a screenshot to refer to. Call capture_window (or " +
                         "ui_action with action 'screenshot') first, then give coordinates read off it.");
+                // The anchor describes ONE window. Converting with it while focusing another puts
+                // the pointer at the right offset inside the wrong rectangle, and says success.
+                if (!string.IsNullOrWhiteSpace(namedTitle)
+                    && !string.Equals(anchor.TitleQuery, namedTitle, StringComparison.OrdinalIgnoreCase))
+                    return ToolResult.Error(
+                        $"coords:'image' refers to the last screenshot, which is of '{anchor.WindowTitle}', not " +
+                        $"'{namedTitle}'. Capture '{namedTitle}' first, then read the coordinates off that image.");
+            }
+
+            var capture = PlatformScreenCapture.Current;
+            string? focusTitle = namedTitle;
+            if (string.IsNullOrWhiteSpace(focusTitle) && coords == "image") focusTitle = anchor!.TitleQuery;
+            if (string.IsNullOrWhiteSpace(focusTitle)) focusTitle = _gameWindowTitle; // auto-route to the game window
+            if (string.IsNullOrWhiteSpace(focusTitle))
+                focusTitle = await GetEngineWindowTitle(ct);
+
+            // Synthetic input goes to whatever window is in front. Unless the target is in front,
+            // it lands in the terminal, the IDE or the browser — a Delete meant for a dialog is a
+            // Delete there. So no target, or a target that would not come forward, is a refusal.
+            if (capture == null || string.IsNullOrWhiteSpace(focusTitle))
+                return ToolResult.Error(
+                    "No window to send the input to: the engine did not report one. Pass 'window_title' " +
+                    "(a title substring, as list_windows shows it).");
+            if (!capture.FocusWindowByTitle(focusTitle!, out var focusErr))
+                return ToolResult.Error($"Input not sent: could not focus '{focusTitle}': {focusErr}");
+            var focusNote = $" (focused '{focusTitle}')";
+
+            if (coords == "image")
+            {
+                // The same check ui_action makes: a moved window is followed, a resized one is
+                // refused, since its layout no longer matches the image the numbers came from.
+                var moved = FollowWindow(capture, focusTitle!, ref anchor, out var geometryError);
+                if (geometryError != null) return ToolResult.Error(geometryError);
+                if (moved != null) focusNote += $" {moved}";
 
                 foreach (var ev in events)
                 {
                     if (!string.Equals(ev.Type, "mouse_move", StringComparison.OrdinalIgnoreCase)) continue;
-                    if (!anchor.Contains(ev.X, ev.Y))
+                    if (!anchor!.Contains(ev.X, ev.Y))
                         return ToolResult.Error(
                             $"({ev.X:0.#}, {ev.Y:0.#}) is outside the {anchor.ImageWidth}x{anchor.ImageHeight} " +
                             "screenshot those coordinates are measured in.");
@@ -1743,21 +1781,6 @@ namespace AkerMcp.Server
                 }
             }
 
-            var capture = PlatformScreenCapture.Current;
-            string? focusTitle = ReadString(args, "window_title");
-            if (string.IsNullOrWhiteSpace(focusTitle) && coords == "image") focusTitle = anchor!.TitleQuery;
-            if (string.IsNullOrWhiteSpace(focusTitle)) focusTitle = _gameWindowTitle; // auto-route to the game window
-            if (string.IsNullOrWhiteSpace(focusTitle))
-                focusTitle = await GetEngineWindowTitle(ct);
-            string focusNote = "";
-            if (capture != null && !string.IsNullOrWhiteSpace(focusTitle))
-            {
-                if (capture.FocusWindowByTitle(focusTitle!, out var focusErr))
-                    focusNote = $" (focused '{focusTitle}')";
-                else
-                    focusNote = $" (could not focus '{focusTitle}': {focusErr})";
-            }
-
             if (!injector.Inject(events, out var dispatched, out var err))
                 return ToolResult.Error($"OS-level input injection failed: {err}");
 
@@ -1765,6 +1788,19 @@ namespace AkerMcp.Server
             return ToolResult.Text(
                 $"Injected {dispatched}/{events.Count} input event(s) via OS-level SendInput{focusNote}.{suffix}");
         }
+
+        /// <summary>
+        /// Events per send_input call. Each can hold for seconds and none can be called back once
+        /// sent, so a runaway list keeps typing into whatever is in front long after anyone wanted it.
+        /// </summary>
+        private const int MaxInputEvents = 64;
+
+        /// <summary>
+        /// How long a key or button with neither 'pressed' nor 'hold_ms' is held: a tap. A bare
+        /// event used to be a press with no release, and at OS level that key stays down for the
+        /// whole desktop until exit_play — a stuck Ctrl turns the user's next keystrokes into shortcuts.
+        /// </summary>
+        private const double TapHoldMs = 40;
 
         // Reads the engine's main-window title (from get_window_info) to focus before OS-level input.
         private async Task<string?> GetEngineWindowTitle(CancellationToken ct)
@@ -1837,17 +1873,25 @@ namespace AkerMcp.Server
             foreach (var e in evs.EnumerateArray())
             {
                 if (e.ValueKind != JsonValueKind.Object) continue;
-                list.Add(new Shared.Abstraction.InputEvent
+                bool hasPressed = e.TryGetProperty("pressed", out var pr)
+                                  && (pr.ValueKind == JsonValueKind.True || pr.ValueKind == JsonValueKind.False);
+                var holdMs = e.TryGetProperty("hold_ms", out var h) && h.ValueKind == JsonValueKind.Number ? h.GetDouble() : 0;
+                var ev = new Shared.Abstraction.InputEvent
                 {
-                    Type = e.TryGetProperty("type", out var t) ? (t.GetString() ?? "key") : "key",
-                    Key = e.TryGetProperty("key", out var k) ? k.GetString() : null,
-                    Button = e.TryGetProperty("button", out var b) ? b.GetString() : null,
-                    Action = e.TryGetProperty("action", out var ac) ? ac.GetString() : null,
-                    Pressed = !e.TryGetProperty("pressed", out var pr) || pr.GetBoolean(),
+                    Type = e.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.String ? (t.GetString() ?? "key") : "key",
+                    Key = e.TryGetProperty("key", out var k) && k.ValueKind == JsonValueKind.String ? k.GetString() : null,
+                    Button = e.TryGetProperty("button", out var b) && b.ValueKind == JsonValueKind.String ? b.GetString() : null,
+                    Action = e.TryGetProperty("action", out var ac) && ac.ValueKind == JsonValueKind.String ? ac.GetString() : null,
+                    Pressed = !hasPressed || pr.GetBoolean(),
                     X = e.TryGetProperty("x", out var x) && x.ValueKind == JsonValueKind.Number ? x.GetDouble() : 0,
                     Y = e.TryGetProperty("y", out var y) && y.ValueKind == JsonValueKind.Number ? y.GetDouble() : 0,
-                    HoldMs = e.TryGetProperty("hold_ms", out var h) && h.ValueKind == JsonValueKind.Number ? h.GetDouble() : 0,
-                });
+                    HoldMs = Math.Clamp(holdMs, 0, 5_000),
+                };
+                // Neither half asked for explicitly: a tap, never a press left hanging.
+                bool pressable = !string.Equals(ev.Type, "mouse_move", StringComparison.OrdinalIgnoreCase)
+                                 && !string.Equals(ev.Type, "action", StringComparison.OrdinalIgnoreCase);
+                if (pressable && !hasPressed && ev.HoldMs <= 0) ev.HoldMs = TapHoldMs;
+                list.Add(ev);
             }
             return list;
         }

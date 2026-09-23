@@ -49,7 +49,7 @@ namespace AkerMcp.Server
                 sb.Append("To check that a mechanic works, not only how it looks: `enter_play`, drive it, observe, `exit_play`. ");
             if (has.Contains("list_windows") && has.Contains("focus_window") && has.Contains("send_input"))
                 sb.Append("If a call times out while the editor shows a modal dialog, `list_windows` names it and " +
-                          "`send_input` with that `window_title` ({ESC} or {ENTER}) dismisses it. ");
+                          "`send_input` with that `window_title` and key Escape (or Enter) dismisses it. ");
             if (has.Contains("ui_action"))
                 sb.Append("`ui_action` clicks and types in the editor's own interface, in the pixels of the " +
                           "screenshot it returns: for what no API reaches (dialogs, wizards, plugin windows), " +
@@ -160,9 +160,10 @@ whole tree.
 
 A modal dialog in the editor (""Scene(s) Have Been Modified"" and friends) blocks its
 main thread, and every call then times out. `list_windows` shows the dialog by its
-title; `send_input` with that `window_title` focuses it and `{ESC}` cancels it or
-`{ENTER}` accepts the default (a named window goes straight to the OS, never through the
-editor that the dialog is blocking). Keep the open scene clean before opening another,
+title; `send_input` with that `window_title` focuses it, and
+`{""events"":[{""type"":""key"",""key"":""Escape""}]}` cancels it or `""Enter""` accepts the
+default (a named window goes straight to the OS, never through the editor that the dialog
+is blocking). Keep the open scene clean before opening another,
 entering play or building: save what is part of the work, discard what was a probe.
 
 ## Driving the interface by hand

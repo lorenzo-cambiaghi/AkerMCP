@@ -254,6 +254,18 @@ namespace AkerMcp.Loopback
             Check("send_input ok (engine-internal)", !si.IsError, Text(si));
             Check("send_input reached the fake simulator", fake.Input.Received.Count >= 1);
 
+            // A key with neither 'pressed' nor 'hold_ms' is a tap. It used to be a press with no
+            // release: the key stayed down in the game, and on the OS path on the whole desktop.
+            int tapFrom = fake.Input.Received.Count;
+            await Call(reg, "send_input", new
+            {
+                events = new object[] { new { type = "key", key = "Space" }, new { type = "key", key = "Space", pressed = true } },
+            });
+            var taps = fake.Input.Received.Skip(tapFrom).ToList();
+            Check("a bare key is a tap, an explicit press stays a press",
+                taps.Count == 2 && taps[0].HoldMs > 0 && taps[1].HoldMs == 0 && taps[1].Pressed,
+                string.Join(", ", taps.Select(t => $"pressed={t.Pressed} hold={t.HoldMs}")));
+
             // get_console_logs: count is how many MATCHING entries come back. The handler used to cut the buffer to
             // the last `count` entries and filter afterwards, so a warning older than `count` lines was reported as
             // "(No matching log entries)" while it was still in the buffer.
@@ -406,6 +418,17 @@ namespace AkerMcp.Loopback
             var lwAgain = await Call(reg, "list_windows", new { });
             Check("granting it again lets the tools through",
                 !Text(lwAgain).Contains("refused"), Text(lwAgain));
+
+            // Synthetic input goes to whatever is in front. A target that could not be focused was
+            // noted in the answer and typed at anyway — into the terminal, the IDE, the browser.
+            // (A Shift tap, so a regression costs this machine no more than a modifier blip.)
+            var siLost = await Call(reg, "send_input", new
+            {
+                events = new[] { new { type = "key", key = "Shift", hold_ms = 10 } },
+                window_title = "aker-loopback-no-such-window-" + Guid.NewGuid().ToString("N"),
+            });
+            Check("send_input refuses when its window cannot be focused, and sends nothing",
+                siLost.IsError && Text(siLost).Contains("Input not sent"), Text(siLost));
 
             // "No policy here" arrives in three different sentences and only one of them was
             // being read. A plugin older than the method answers "Unknown method: get_consent",
