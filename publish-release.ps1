@@ -1,5 +1,8 @@
 # Publishes an AkerMCP release: builds the packages, tags the commit,
-# creates the GitHub Release and uploads the four artifacts.
+# creates the GitHub Release and uploads the six artifacts.
+#
+# Release notes: -Notes wins; otherwise release-notes.md (gitignored, local) is used when
+# it names the version being published; otherwise the commit list since the last tag.
 #
 # Usage:
 #   .\publish-release.ps1 -Version v1.1.0
@@ -36,10 +39,49 @@ if ($existingTag) { throw "Tag $Version already exists locally. Pick a new versi
 $dirty = git status --porcelain
 if ($dirty) { throw "Working tree is not clean - commit or stash first:`n$dirty" }
 
+# The csproj version is what the MCP handshake reports: a tag that disagrees with it ships
+# binaries that call themselves the previous release.
+$bare = $Version.Substring(1)
+$csproj = [xml](Get-Content "$repoRoot\Server\AkerMcp.Server.csproj" -Raw)
+$stamped = ($csproj.Project.PropertyGroup | ForEach-Object { $_.Version } | Where-Object { $_ }) | Select-Object -First 1
+if ($stamped -ne $bare) {
+    throw "Server/AkerMcp.Server.csproj is at '$stamped', not $bare. Stamp the version and commit first."
+}
+$godotCfg = Get-Content "$repoRoot\plugins\godot\plugin.cfg" -Raw
+if ($godotCfg -notmatch "(?m)^version=`"$([regex]::Escape($bare))`"") {
+    throw "plugins/godot/plugin.cfg does not declare version=`"$bare`" (Godot shows it in the plugin list)."
+}
+
+$branch = git rev-parse --abbrev-ref HEAD
+if ($branch -ne "main") {
+    Write-Warning "Tagging '$branch', not main: remember to merge and push main so the public README matches."
+}
+
 if (-not $SkipBuild) {
     if (Test-Path "$repoRoot\samples\unity\Temp\UnityLockfile") {
         throw "Unity has the test project open. Close Unity first (batchmode export will fail)."
     }
+    # build-package runs 'dotnet clean -c Release', which fails with MSB3027 halfway through
+    # while an MCP session keeps the Release server running. Say so before starting.
+    $releaseExe = [IO.Path]::GetFullPath("$repoRoot\Server\bin\Release")
+    $locking = Get-Process AkerMcp.Server -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -and $_.Path.StartsWith($releaseExe, [StringComparison]::OrdinalIgnoreCase) }
+    if ($locking) {
+        throw "AkerMcp.Server (Release) is running as PID $($locking.Id -join ', ') - an MCP session holds the exe. " +
+              "Close those sessions (or stop the processes) before building."
+    }
+}
+
+# Resolve the notes now, so a stale release-notes.md stops the run before a long build.
+$notesFile = Join-Path $repoRoot "release-notes.md"
+if (-not $Notes -and (Test-Path $notesFile)) {
+    $fileNotes = Get-Content $notesFile -Raw -Encoding UTF8
+    if ($fileNotes -notmatch [regex]::Escape($Version)) {
+        throw "release-notes.md does not mention $Version (left over from another release?). " +
+              "Update it, pass -Notes, or delete it to publish the commit list."
+    }
+    $Notes = $fileNotes
+    Write-Host "Release notes: release-notes.md"
 }
 
 # --- Token -------------------------------------------------------------------
