@@ -646,6 +646,30 @@ namespace AkerMcp.Loopback
             var ep = await Call(reg, "exit_play", new { });
             Check("exit_play ok", !ep.IsError, Text(ep));
 
+            // A probe that is not a string is that probe's error, not an exception that ends the
+            // playtest with the game still running.
+            var ptBad = await Call(reg, "playtest", new { steps = new object[] { new { sample = new { y = 5 } } } });
+            Check("a playtest sample that is not an expression fails that probe, not the run",
+                Text(ptBad).Contains("playtest") && Text(ptBad).Contains("given as a string"), Text(ptBad));
+
+            // Abandoned halfway, a playtest still leaves play: the next call must not find the game
+            // running (and, at OS level, a key held) because the caller stopped waiting.
+            using (var abandon = new CancellationTokenSource(TimeSpan.FromMilliseconds(400)))
+            {
+                try
+                {
+                    await reg.CallTool(JsonSerializer.SerializeToElement(new
+                    {
+                        name = "playtest",
+                        arguments = new { steps = new object[] { new { wait_ms = 5000 } } },
+                    }), abandon.Token);
+                }
+                catch (OperationCanceledException) { }
+            }
+            var afterAbandon = await Call(reg, "get_play_state", new { });
+            Check("a cancelled playtest still exits play",
+                Text(afterAbandon).Contains("\"isPlaying\":false"), Text(afterAbandon));
+
             // Reconnect: simulate a plugin restart (Unity domain reload) — the retry loop reconnects.
             fake.Stop();
             await Task.Delay(500);

@@ -1422,6 +1422,15 @@ namespace AkerMcp.Server
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var result = await _engine.ForwardToolCall(method, null, ct, timeoutMs: 120_000);
 
+            // On exit, clear any OS-level keys/buttons left held (an unbalanced pressed:true)
+            // so a forgotten key-down can't stay physically stuck at the OS level. Before the
+            // engine's answer is looked at: an exit that errors or never reconnects is exactly
+            // when nobody else will release them.
+            if (method == IpcConstants.Methods.ExitPlay)
+            {
+                try { PlatformInput.Current?.ReleaseAll(); } catch { /* best-effort */ }
+            }
+
             bool reloaded = false;
             if (IsDisconnectError(result))
             {
@@ -1435,13 +1444,6 @@ namespace AkerMcp.Server
             else if (result.IsError)
             {
                 return result; // a genuine engine error (e.g. protocol mismatch), not a reload
-            }
-
-            // On exit, clear any OS-level keys/buttons left held (an unbalanced pressed:true)
-            // so a forgotten key-down can't stay physically stuck at the OS level.
-            if (method == IpcConstants.Methods.ExitPlay)
-            {
-                try { PlatformInput.Current?.ReleaseAll(); } catch { /* best-effort */ }
             }
 
             // Settle: the engine's own enter/exit response can be OPTIMISTIC — Unity's
@@ -1920,6 +1922,12 @@ namespace AkerMcp.Server
             var samples = new List<object>();
             foreach (var p in probes.EnumerateObject())
             {
+                if (p.Value.ValueKind != JsonValueKind.String)
+                {
+                    samples.Add(new { name = p.Name, value = (object?)null,
+                                      error = (string?)"a probe is a C# expression, given as a string" });
+                    continue;
+                }
                 var (val, err) = await SampleOne(p.Value.GetString() ?? "", ct);
                 samples.Add(new { name = p.Name, value = val, error = err });
             }
@@ -2099,6 +2107,56 @@ namespace AkerMcp.Server
                 log.AppendLine($"[{sw.Elapsed.TotalSeconds:0.0}s] enter_play ok");
             }
 
+            bool exited = false;
+            try
+            {
+                await RunPlaytestTimeline(a, hasArgs, content, log, assertionReports, samplesLog, sw,
+                                          pass => overallPass &= pass, ct);
+                if (doExit)
+                {
+                    var r = await HandlePlayTransition(IpcConstants.Methods.ExitPlay, "exit play mode", ct);
+                    exited = true;
+                    log.AppendLine($"[{sw.Elapsed.TotalSeconds:0.0}s] exit_play {(r.IsError ? "ERROR" : "ok")}");
+                }
+            }
+            finally
+            {
+                // A step that threw, or a cancelled call, must not leave the game running with a
+                // key held down at OS level: the next tool call would find both, and so would the
+                // user's own keyboard. Its own deadline, since the call's token may be the one
+                // that fired.
+                if (doExit && !exited)
+                {
+                    try
+                    {
+                        using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                        await HandlePlayTransition(IpcConstants.Methods.ExitPlay, "exit play mode", cleanup.Token);
+                    }
+                    catch { /* best effort: the original failure is the one worth reporting */ }
+                }
+                try { PlatformInput.Current?.ReleaseAll(); } catch { /* best effort */ }
+            }
+
+            var verdict = new
+            {
+                verdict = overallPass ? "PASS" : "FAIL",
+                elapsedS = Math.Round(sw.Elapsed.TotalSeconds, 1),
+                assertions = assertionReports,
+                samples = samplesLog,
+            };
+            var summary = $"playtest {(overallPass ? "PASSED" : "FAILED")} ({sw.Elapsed.TotalSeconds:0.#}s)\n\n" +
+                          "TIMELINE:\n" + log + "\nRESULT:\n" +
+                          JsonSerializer.Serialize(verdict, _jsonOptions);
+            content.Insert(0, ContentItem.FromText(summary));
+            return new ToolResult { Content = content };
+        }
+
+        // The steps and the final criteria of a playtest, between its enter_play and exit_play.
+        private async Task RunPlaytestTimeline(
+            JsonElement a, bool hasArgs, List<ContentItem> content, System.Text.StringBuilder log,
+            List<object> assertionReports, List<object> samplesLog, System.Diagnostics.Stopwatch sw,
+            Action<bool> record, CancellationToken ct)
+        {
             if (hasArgs && a.TryGetProperty("steps", out var steps) && steps.ValueKind == JsonValueKind.Array)
             {
                 int idx = 0;
@@ -2123,7 +2181,18 @@ namespace AkerMcp.Server
                     else if (step.TryGetProperty("capture", out var cap))
                     {
                         JsonElement? capArgs = cap.ValueKind == JsonValueKind.Object ? cap : (JsonElement?)null;
-                        var (jpeg, err) = await CaptureFrameJpeg(capArgs, ct);
+                        // Routed like capture_sequence: a separate-window game (Godot, Stride) is
+                        // photographed in its own window, or the frames show the editor while the
+                        // input went to the game.
+                        var capTitle = ReadString(capArgs, "window_title");
+                        if (string.IsNullOrWhiteSpace(capTitle)) capTitle = _gameWindowTitle;
+                        byte[]? jpeg; string? err;
+                        if (string.IsNullOrWhiteSpace(capTitle))
+                            (jpeg, err) = await CaptureFrameJpeg(capArgs, ct);
+                        else if (await _consent.Refuse("Capturing the game window", ct) is { } capRefusal)
+                            (jpeg, err) = (null, capRefusal);
+                        else
+                            (jpeg, err) = CaptureWindowJpeg(capTitle!);
                         if (jpeg != null)
                         {
                             content.Add(ContentItem.FromText($"frame @ {sw.Elapsed.TotalSeconds:0.0}s (step {idx})"));
@@ -2135,7 +2204,7 @@ namespace AkerMcp.Server
                     else if (step.TryGetProperty("assert", out var asserts) && asserts.ValueKind == JsonValueKind.Array)
                     {
                         var (pass, rep) = await RunAssertions(asserts, ReadDim(step, "timeout_ms", 0), ReadDim(step, "poll_ms", 200), ct);
-                        overallPass &= pass;
+                        record(pass);
                         assertionReports.Add(new { step = idx, at = Math.Round(sw.Elapsed.TotalSeconds, 1), passed = pass, assertions = rep });
                         log.AppendLine($"[{sw.Elapsed.TotalSeconds:0.0}s] assert -> {(pass ? "PASS" : "FAIL")}");
                     }
@@ -2144,6 +2213,12 @@ namespace AkerMcp.Server
                         var vals = new List<object>();
                         foreach (var p in sam.EnumerateObject())
                         {
+                            if (p.Value.ValueKind != JsonValueKind.String)
+                            {
+                                vals.Add(new { name = p.Name, value = (object?)null,
+                                               error = (string?)"a probe is a C# expression, given as a string" });
+                                continue;
+                            }
                             var (val, err) = await SampleOne(p.Value.GetString() ?? "", ct);
                             vals.Add(new { name = p.Name, value = val, error = err });
                         }
@@ -2156,29 +2231,10 @@ namespace AkerMcp.Server
             if (hasArgs && a.TryGetProperty("criteria", out var crit) && crit.ValueKind == JsonValueKind.Array)
             {
                 var (pass, rep) = await RunAssertions(crit, ReadDim(a, "criteria_timeout_ms", 0), 200, ct);
-                overallPass &= pass;
+                record(pass);
                 assertionReports.Add(new { step = "criteria", passed = pass, assertions = rep });
                 log.AppendLine($"[{sw.Elapsed.TotalSeconds:0.0}s] criteria -> {(pass ? "PASS" : "FAIL")}");
             }
-
-            if (doExit)
-            {
-                var r = await HandlePlayTransition(IpcConstants.Methods.ExitPlay, "exit play mode", ct);
-                log.AppendLine($"[{sw.Elapsed.TotalSeconds:0.0}s] exit_play {(r.IsError ? "ERROR" : "ok")}");
-            }
-
-            var verdict = new
-            {
-                verdict = overallPass ? "PASS" : "FAIL",
-                elapsedS = Math.Round(sw.Elapsed.TotalSeconds, 1),
-                assertions = assertionReports,
-                samples = samplesLog,
-            };
-            var summary = $"playtest {(overallPass ? "PASSED" : "FAILED")} ({sw.Elapsed.TotalSeconds:0.#}s)\n\n" +
-                          "TIMELINE:\n" + log + "\nRESULT:\n" +
-                          JsonSerializer.Serialize(verdict, _jsonOptions);
-            content.Insert(0, ContentItem.FromText(summary));
-            return new ToolResult { Content = content };
         }
 
         private static string Truncate(string? s, int n)
