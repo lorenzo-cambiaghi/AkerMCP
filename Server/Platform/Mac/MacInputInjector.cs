@@ -75,6 +75,10 @@ namespace AkerMcp.Server.Platform.Mac
                             skipped.Add($"button '{ev.Button}'");
                             continue;
                         }
+                        // Where the pointer really is: a button with no mouse_move before it
+                        // otherwise fired at (0,0), the Apple menu, or wherever this process
+                        // last put it rather than where the user has since moved it.
+                        _cursor = CurrentPointer() ?? _cursor;
                         if (ev.HoldMs > 0)
                         {
                             PostMouse(down, _cursor, button, 1);
@@ -90,10 +94,24 @@ namespace AkerMcp.Server.Platform.Mac
                         break;
 
                     case "mouse_move":
+                    {
                         _cursor = new CGPoint { x = ev.X, y = ev.Y };
-                        PostMouse(kCGEventMouseMoved, _cursor, kCGMouseButtonLeft, 0);
+                        // With a button held the motion is a drag: a plain move with the button
+                        // down is ignored by most drag handling, so press/move/release built
+                        // out of send_input events would never drag anything.
+                        uint motion = kCGEventMouseMoved, motionButton = kCGMouseButtonLeft;
+                        lock (_lock)
+                        {
+                            if (_heldMouseUp.Contains(kCGEventLeftMouseUp)) motion = kCGEventLeftMouseDragged;
+                            else if (_heldMouseUp.Contains(kCGEventRightMouseUp))
+                            { motion = kCGEventRightMouseDragged; motionButton = kCGMouseButtonRight; }
+                            else if (_heldMouseUp.Contains(kCGEventOtherMouseUp))
+                            { motion = kCGEventOtherMouseDragged; motionButton = kCGMouseButtonCenter; }
+                        }
+                        PostMouse(motion, _cursor, motionButton, 0);
                         dispatched++;
                         break;
+                    }
 
                     case "action":
                         skipped.Add($"action '{ev.Action}'");
@@ -128,7 +146,15 @@ namespace AkerMcp.Server.Platform.Mac
                 mouseUps = new uint[_heldMouseUp.Count]; _heldMouseUp.CopyTo(mouseUps); _heldMouseUp.Clear();
             }
             foreach (var k in keys) PostKey(k, down: false);
-            foreach (var up in mouseUps) PostMouse(up, _cursor, kCGMouseButtonLeft, 1);
+            foreach (var up in mouseUps)
+            {
+                // Each release names its own button: an OtherMouseUp for button 0 does not
+                // release the middle button that is actually down.
+                uint button = up == kCGEventRightMouseUp ? kCGMouseButtonRight
+                            : up == kCGEventOtherMouseUp ? kCGMouseButtonCenter
+                            : kCGMouseButtonLeft;
+                PostMouse(up, _cursor, button, 1);
+            }
         }
 
         // ---- UI actions ----------------------------------------------------
@@ -226,10 +252,12 @@ namespace AkerMcp.Server.Platform.Mac
             for (int i = 0; i < Math.Abs(clicks); i++)
             {
                 // wheelCount 2 so the second axis can carry horizontal scrolling; the unit is
-                // lines, which is what a notch of a real wheel reports.
+                // lines, which is what a notch of a real wheel reports. The "2" variant, not the
+                // original: that one is variadic, and on Apple Silicon variadic arguments travel
+                // on the stack where a P/Invoke never puts them — wheel2 would be read as garbage.
                 IntPtr ev = horizontal
-                    ? CGEventCreateScrollWheelEvent(IntPtr.Zero, kCGScrollEventUnitLine, 2, 0, perStep)
-                    : CGEventCreateScrollWheelEvent(IntPtr.Zero, kCGScrollEventUnitLine, 2, perStep, 0);
+                    ? CGEventCreateScrollWheelEvent2(IntPtr.Zero, kCGScrollEventUnitLine, 2, 0, perStep, 0)
+                    : CGEventCreateScrollWheelEvent2(IntPtr.Zero, kCGScrollEventUnitLine, 2, perStep, 0, 0);
                 Post(ev);
                 Thread.Sleep(ScrollStepMs);
             }
@@ -273,7 +301,11 @@ namespace AkerMcp.Server.Platform.Mac
                 return false;
             }
 
-            var parts = chord.Split('+');
+            // "+" separates the keys, so the plus key itself goes by its name (see Windows).
+            var spec = chord.Trim();
+            if (spec == "+") spec = "plus";
+            else if (spec.EndsWith("++", StringComparison.Ordinal)) spec = spec.Substring(0, spec.Length - 1) + "plus";
+            var parts = spec.Split('+');
             ulong flags = 0;
             ushort mainKey = 0;
 
@@ -416,6 +448,7 @@ namespace AkerMcp.Server.Platform.Mac
         private const uint kCGEventRightMouseDragged = 7;
         private const uint kCGEventOtherMouseDown = 25;
         private const uint kCGEventOtherMouseUp = 26;
+        private const uint kCGEventOtherMouseDragged = 27;
 
         private const uint kCGMouseButtonLeft = 0;
         private const uint kCGMouseButtonRight = 1;
@@ -432,12 +465,33 @@ namespace AkerMcp.Server.Platform.Mac
         [DllImport(CoreGraphics)]
         private static extern IntPtr CGEventCreateMouseEvent(IntPtr source, uint type, CGPoint pos, uint button);
 
+        // C99 bool and Boolean are one byte; the default bool marshalling is a four-byte BOOL.
         [DllImport(CoreGraphics)]
-        private static extern IntPtr CGEventCreateKeyboardEvent(IntPtr source, ushort keycode, bool keyDown);
+        private static extern IntPtr CGEventCreateKeyboardEvent(
+            IntPtr source, ushort keycode, [MarshalAs(UnmanagedType.I1)] bool keyDown);
 
         [DllImport(CoreGraphics)]
-        private static extern IntPtr CGEventCreateScrollWheelEvent(
-            IntPtr source, uint units, uint wheelCount, int wheel1, int wheel2);
+        private static extern IntPtr CGEventCreateScrollWheelEvent2(
+            IntPtr source, uint units, uint wheelCount, int wheel1, int wheel2, int wheel3);
+
+        [DllImport(CoreGraphics)]
+        private static extern IntPtr CGEventCreate(IntPtr source);
+
+        [DllImport(CoreGraphics)]
+        private static extern CGPoint CGEventGetLocation(IntPtr theEvent);
+
+        // The pointer's current position, from an empty event (which carries it), or null.
+        private static CGPoint? CurrentPointer()
+        {
+            try
+            {
+                IntPtr ev = CGEventCreate(IntPtr.Zero);
+                if (ev == IntPtr.Zero) return null;
+                try { return CGEventGetLocation(ev); }
+                finally { CFRelease(ev); }
+            }
+            catch { return null; }
+        }
 
         [DllImport(CoreGraphics)]
         private static extern void CGEventPost(uint tap, IntPtr theEvent);
@@ -456,6 +510,7 @@ namespace AkerMcp.Server.Platform.Mac
         private static extern void CFRelease(IntPtr cf);
 
         [DllImport(ApplicationServices)]
+        [return: MarshalAs(UnmanagedType.I1)]
         private static extern bool AXIsProcessTrusted();
 
         private static bool TryMapMouseButton(string? button, out uint down, out uint up, out uint which)
@@ -529,7 +584,7 @@ namespace AkerMcp.Server.Platform.Mac
                 ["ctrl"] = 59, ["control"] = 59, ["lctrl"] = 59,
                 ["alt"] = 58, ["option"] = 58, ["lalt"] = 58,
                 ["cmd"] = 55, ["command"] = 55, ["win"] = 55, ["meta"] = 55, ["super"] = 55,
-                ["comma"] = 43, ["period"] = 47, ["minus"] = 27, ["plus"] = 24, ["equals"] = 24,
+                ["comma"] = 43, ["period"] = 47, ["minus"] = 27, ["plus"] = 24, ["+"] = 24, ["equals"] = 24,
                 ["slash"] = 44, ["backslash"] = 42, ["semicolon"] = 41, ["quote"] = 39,
                 ["leftbracket"] = 33, ["rightbracket"] = 30, ["backquote"] = 50, ["tilde"] = 50,
             };
@@ -544,6 +599,8 @@ namespace AkerMcp.Server.Platform.Mac
         private static bool TryMapKey(string key, out ushort code)
         {
             var k = key.Trim();
+            // "{ESC}", "{ENTER}": the SendKeys spelling, accepted as on Windows.
+            if (k.Length > 2 && k[0] == '{' && k[k.Length - 1] == '}') k = k.Substring(1, k.Length - 2).Trim();
             if (k.Length == 0) k = key;
             if (k.Length == 0) { code = 0; return false; }
 

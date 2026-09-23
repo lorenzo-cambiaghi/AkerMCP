@@ -31,6 +31,13 @@ Then, in order of how likely they are to be wrong:
       open menus in one image, bounded by the window's own rect. `shot` with a menu open
       answers this at a glance: if the menu is missing, the picture lies exactly the way the
       Windows one did before it was fixed.
+- [ ] **The fixes made from reading alone (2026-09-23).** Scrolling moved to the
+      non-variadic `CGEventCreateScrollWheelEvent2` (the variadic one reads its second wheel
+      off the stack on Apple Silicon); `AXIsProcessTrusted` and the key-down flag are marshalled
+      as one byte; a `send_input` button press happens where the pointer really is
+      (`CGEventGetLocation`), and a move with a button held posts a drag; `osascript` gets a
+      real 4-second timeout and names the Automation permission. A scroll in both directions
+      and a `send_input` press/move/release drag check the first two at a glance.
 - [ ] **Whether the client/window offset exists at all.** It should not: the capture is at
       nominal resolution and the bounds are in points. That is an assumption, and `coords`
       is what turns it into a measurement.

@@ -59,13 +59,25 @@ namespace AkerMcp.Server.Platform.Mac
                     error = "Could not run osascript to bring the window forward.";
                     return false;
                 }
-                var stderr = proc.StandardError.ReadToEnd();
-                proc.WaitForExit(4000);
+                // Read asynchronously: a blocking ReadToEnd returns only when osascript exits, so
+                // the timeout below never applied — and osascript waiting on the Automation
+                // prompt waits for the Apple Events timeout, about two minutes.
+                var stderrTask = proc.StandardError.ReadToEndAsync();
+                if (!proc.WaitForExit(4000))
+                {
+                    try { proc.Kill(); } catch { /* already gone */ }
+                    error = $"osascript did not bring '{window.Title}' forward within 4 s. macOS is probably " +
+                            "asking whether this process may control System Events: allow it under " +
+                            "System Settings -> Privacy & Security -> Automation, then retry.";
+                    return false;
+                }
+                var stderr = stderrTask.GetAwaiter().GetResult();
                 if (proc.ExitCode != 0)
                 {
                     error = $"osascript refused to activate '{window.Title}' (pid {window.Pid}): " +
-                            $"{stderr.Trim()}. This usually means Accessibility permission is missing " +
-                            "(System Settings -> Privacy & Security -> Accessibility).";
+                            $"{stderr.Trim()}. This process needs Accessibility permission and permission " +
+                            "to control System Events (System Settings -> Privacy & Security -> " +
+                            "Accessibility, and -> Automation).";
                     return false;
                 }
                 return true;
