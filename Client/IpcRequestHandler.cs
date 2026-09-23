@@ -874,25 +874,29 @@ namespace AkerMcp.Client
             var levelFilter = args.TryGetProperty("level_filter", out var lf) ? lf.GetString() : "all";
             var search = args.TryGetProperty("search", out var s) ? s.GetString() : null;
 
+            // An unknown level used to switch the level filter off without a word: "errors" answered every entry as a
+            // match. A plural reads as its level; anything else is refused, naming the levels there are.
+            var level = (levelFilter ?? "").Trim().ToLowerInvariant();
+            if (level.EndsWith("s")) level = level.Substring(0, level.Length - 1);
+            LogLevel? filterLevel = level switch
+            {
+                "" => null,
+                "all" => null,
+                "error" => LogLevel.Error,
+                "warning" => LogLevel.Warning,
+                "info" => LogLevel.Info,
+                "debug" => LogLevel.Debug,
+                _ => throw new ArgumentException($"Unknown level_filter '{levelFilter}': use error, warning, info, debug or all")
+            };
+
             // Filter the WHOLE buffer, then keep the last `count` matches. Taking the last `count` entries first and
             // filtering afterwards answered "(No matching log entries)" for any warning older than `count` lines, which
             // made a filtered query look like proof that nothing had happened.
             var buffer = _editorContext.GetRecentLogs(int.MaxValue).ToList();
             IEnumerable<LogEntry> logs = buffer;
 
-            if (levelFilter != null && levelFilter != "all")
-            {
-                LogLevel? filterLevel = levelFilter.ToLowerInvariant() switch
-                {
-                    "error" => LogLevel.Error,
-                    "warning" => LogLevel.Warning,
-                    "info" => LogLevel.Info,
-                    "debug" => LogLevel.Debug,
-                    _ => null
-                };
-                if (filterLevel.HasValue)
-                    logs = logs.Where(l => l.Level == filterLevel.Value);
-            }
+            if (filterLevel.HasValue)
+                logs = logs.Where(l => l.Level == filterLevel.Value);
 
             if (!string.IsNullOrEmpty(search))
                 logs = logs.Where(l => l.Message.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0);

@@ -219,7 +219,7 @@ namespace AkerMcp.Server
                     ""type"": ""object"",
                     ""properties"": {
                         ""count"": { ""type"": ""integer"", ""description"": ""Number of recent entries to return (default: 50)"" },
-                        ""level_filter"": { ""type"": ""string"", ""description"": ""Filter by level: 'error', 'warning', 'info', or 'all' (default: 'all')"" },
+                        ""level_filter"": { ""type"": ""string"", ""enum"": [""error"", ""warning"", ""info"", ""debug"", ""all""] },
                         ""search"": { ""type"": ""string"", ""description"": ""Filter messages containing this text"" }
                     }
                 }"),

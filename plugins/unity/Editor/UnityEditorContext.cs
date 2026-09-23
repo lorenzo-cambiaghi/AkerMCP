@@ -91,6 +91,8 @@ namespace AkerMcp.Unity
                 {
                     LogType.Error => LogLevel.Error,
                     LogType.Exception => LogLevel.Error,
+                    // A failed Debug.Assert: an error, not the Info a level_filter "error" would never show.
+                    LogType.Assert => LogLevel.Error,
                     LogType.Warning => LogLevel.Warning,
                     _ => LogLevel.Info
                 }
