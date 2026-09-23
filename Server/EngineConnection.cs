@@ -54,7 +54,8 @@ namespace AkerMcp.Server
             && args.TryGetProperty("timeout_ms", out var requested)
             && requested.ValueKind == JsonValueKind.Number
             && requested.TryGetInt32(out int ms) && ms > 0
-                ? Math.Max(DefaultRequestTimeoutMs, ms + ReplyMarginMs)
+                // In long: near int.MaxValue the margin wrapped the sum negative, and the deadline fell back to the default.
+                ? (int)Math.Max(DefaultRequestTimeoutMs, Math.Min((long)ms + ReplyMarginMs, int.MaxValue))
                 : DefaultRequestTimeoutMs;
 
         // Marker prefix so callers (e.g. the refresh_scripts orchestration) can
@@ -280,7 +281,10 @@ namespace AkerMcp.Server
                               $"v{clientVersion}: different major versions do not interoperate. " +
                               "Update the plugin's bundled AkerMcp.Client/AkerMcp.Shared.");
 
-            var older = string.CompareOrdinal(clientVersion, serverVersion) < 0 ? "plugin" : "server";
+            // By number, not by text: compared as strings "1.10.0" sorted before "1.7.0".
+            var older = Version.TryParse(clientVersion, out var cv) && Version.TryParse(serverVersion, out var sv)
+                ? (cv < sv ? "plugin" : "server")
+                : (string.CompareOrdinal(clientVersion, serverVersion) < 0 ? "plugin" : "server");
             return (false, $"Protocol v{clientVersion} (plugin) vs v{serverVersion} (server): compatible. " +
                            $"Anything added after the {older}'s version answers NOT_SUPPORTED.");
         }

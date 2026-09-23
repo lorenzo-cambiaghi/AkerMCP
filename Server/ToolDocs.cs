@@ -91,8 +91,8 @@ namespace AkerMcp.Server
                 "and the engine namespaces; other `using` lines go at the top and are hoisted, as are " +
                 "class, struct, interface, enum, record and delegate declarations (a MonoBehaviour " +
                 "declared here can be added with AddComponent). Nothing persists between calls, so " +
-                "re-acquire what you need and end with a return. timeout_ms (default 5000) only stops " +
-                "the wait: a running script cannot be aborted.",
+                "re-acquire what you need and end with a return. timeout_ms (default 5000) bounds " +
+                "the wait, never under 30 s; a running script is never aborted.",
 
             ["write_script"] =
                 "Write a source file into the project by a path relative to the project root " +
