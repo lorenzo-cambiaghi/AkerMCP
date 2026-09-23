@@ -110,11 +110,20 @@ namespace AkerMcp.Server
         ///
         /// Anything else — a timeout, a disconnect, an adapter that threw — is deliberately
         /// NOT final. A transient failure must not switch the policy off for the session.
+        ///
+        /// Hence anchored matches, not "the text mentions it": an adapter's GetConsent that
+        /// throws comes back as "NullReferenceException: … (at …IAgentConsent.GetConsent())",
+        /// and a substring test read that stack frame as "no policy here" — one exception at
+        /// startup, and every later revocation was ignored for the life of the connection.
         /// </summary>
         public static bool IsNoPolicyAnswer(string errorText)
-            => errorText.Contains(IpcConstants.ErrorCodes.NotSupported, StringComparison.OrdinalIgnoreCase)
-            || errorText.Contains("IAgentConsent", StringComparison.OrdinalIgnoreCase)
-            || errorText.Contains("Unknown method", StringComparison.OrdinalIgnoreCase);
+        {
+            var text = errorText.TrimStart();
+            return text.StartsWith(IpcConstants.ErrorCodes.NotSupported, StringComparison.OrdinalIgnoreCase)
+                || text.StartsWith("Engine does not implement IAgentConsent", StringComparison.OrdinalIgnoreCase)
+                || text.StartsWith($"InvalidOperationException: Unknown method: {IpcConstants.Methods.GetConsent}",
+                                   StringComparison.Ordinal);
+        }
 
         private async Task<(bool granted, string? reason)> Evaluate(CancellationToken ct)
         {

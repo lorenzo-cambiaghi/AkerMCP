@@ -622,6 +622,15 @@ namespace AkerMcp.Loopback
                 !ConsentGate.IsNoPolicyAnswer("[ENGINE_DISCONNECTED] the pipe dropped")
                 && !ConsentGate.IsNoPolicyAnswer("TimeoutException: the engine did not answer")
                 && !ConsentGate.IsNoPolicyAnswer("NullReferenceException in the adapter"));
+            // An adapter's GetConsent that throws names itself in the stack frame the plugin
+            // appends; that frame must not read as "no policy", or one exception switches the
+            // engine's revocations off for the whole connection.
+            Check("an adapter whose GetConsent threw still has a policy",
+                !ConsentGate.IsNoPolicyAnswer(
+                    "NullReferenceException: Object reference not set to an instance of an object. " +
+                    "(at MyEditor.Bridge.AkerMcp.Shared.Abstraction.IAgentConsent.GetConsent () [0x00012])")
+                && !ConsentGate.IsNoPolicyAnswer(
+                    "InvalidOperationException: not ready (at MyEditor.UiAgentConsent.GetConsent ())"));
 
             var sam = await Call(reg, "sample_state", new { probes = new { x = "1+1" } });
             Check("sample_state ok", !sam.IsError, Text(sam));
