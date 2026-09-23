@@ -1,5 +1,6 @@
 #nullable enable
 using System.Collections.Generic;
+using System.Globalization;
 using Godot;
 using AkerMcp.Shared.Serialization;
 
@@ -96,11 +97,12 @@ namespace AkerMcp.GodotAdapter
             );
         }
 
+        // Invariant culture: a number given as text ({"x":"0.5"}) read with the editor's culture was 5 under it-IT.
         private static float F(Dictionary<string, object?> d, string key, float def = 0f)
-            => d.TryGetValue(key, out var v) && v != null ? System.Convert.ToSingle(v) : def;
+            => d.TryGetValue(key, out var v) && v != null ? System.Convert.ToSingle(v, CultureInfo.InvariantCulture) : def;
 
         private static int I(Dictionary<string, object?> d, string key, int def = 0)
-            => d.TryGetValue(key, out var v) && v != null ? System.Convert.ToInt32(v) : def;
+            => d.TryGetValue(key, out var v) && v != null ? System.Convert.ToInt32(v, CultureInfo.InvariantCulture) : def;
 
         private static Vector3 Vec3(Dictionary<string, object?> d, string key)
             => d.TryGetValue(key, out var v) && v is Dictionary<string, object?> sub

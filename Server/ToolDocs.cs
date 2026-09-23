@@ -56,7 +56,7 @@ namespace AkerMcp.Server
 
             // ---- scene: edit ---------------------------------------------------
             ["set_property"] =
-                "Set one property by dot path (same syntax as get_property), with undo. Values: " +
+                "Set one property by dot path (same syntax as get_property). Values: " +
                 "primitives, or JSON objects for structs: vector {\"x\":1,\"y\":2,\"z\":3}, colour " +
                 "{\"r\":1,\"g\":0,\"b\":0,\"a\":1}, quaternion {\"x\":0,\"y\":0,\"z\":0,\"w\":1}. For many " +
                 "objects use one execute script instead.",

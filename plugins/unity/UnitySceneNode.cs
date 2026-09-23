@@ -84,26 +84,38 @@ namespace AkerMcp.Unity
 
             // A component named by its type: the form the guide documents and inspect lists
             if (TrySplitComponentPrefix(propertyPath, out var named, out var member) && TryResolveOnComponent(named, member))
-                return _resolver.Resolve(named, member);
+                return Read(named, member);
 
             // Try Transform first (most common)
             if (TryResolveOnComponent(_go.transform, propertyPath))
-                return _resolver.Resolve(_go.transform, propertyPath);
+                return Read(_go.transform, propertyPath);
 
-            // Try each component
+            // Try each component. A component that has the first member but not the rest of the path is remembered: when
+            // no other component resolves it, its reason says more than "not found".
+            PropertyPathException? firstFailure = null;
             foreach (var component in _go.GetComponents<Component>())
             {
                 if (component == null || component is Transform) continue;
                 if (TryResolveOnComponent(component, propertyPath))
                 {
-                    try { return _resolver.Resolve(component, propertyPath); }
-                    catch (PropertyPathException) { continue; }
+                    try { return Read(component, propertyPath); }
+                    catch (PropertyPathException ex) { firstFailure ??= ex; }
                 }
             }
 
-            throw new PropertyPathException(
+            throw firstFailure ?? new PropertyPathException(
                 $"Property '{propertyPath}' not found on '{Name}' or any of its components");
         }
+
+        /// <summary>
+        /// A read through the resolver. In the editor a member whose getter makes a copy (material, materials, mesh,
+        /// fontMaterial) is read through its shared twin: <c>renderer.material</c> instantiates a material and assigns it
+        /// to the renderer, so reading "MeshRenderer.material.color" — the path the guide shows — or filtering a query on
+        /// it left a leaked "(Instance)" on every renderer it touched. In Play Mode the copy is the runtime behaviour a
+        /// game script would get, and the scene reverts on exit, so the path is read as written.
+        /// </summary>
+        private object? Read(Component component, string memberPath) =>
+            _resolver.Resolve(component, Application.isPlaying ? memberPath : SharedMembers.ToSharedPath(component.GetType(), memberPath));
 
         public void SetProperty(string propertyPath, object? value)
         {
@@ -125,7 +137,10 @@ namespace AkerMcp.Unity
                 return;
             }
 
-            // Try each component
+            // Try each component. A value that does not fit the member (PropertyValueException: "missing z", "not a
+            // CameraClearFlags") is the answer and goes out as it is; it used to be caught here like a missing member and
+            // reported as "not found on any component". A component whose path fails further down is remembered.
+            PropertyPathException? firstFailure = null;
             foreach (var component in _go.GetComponents<Component>())
             {
                 if (component == null || component is Transform) continue;
@@ -136,11 +151,12 @@ namespace AkerMcp.Unity
                         _resolver.Set(component, propertyPath, value);
                         return;
                     }
-                    catch (PropertyPathException) { continue; }
+                    catch (PropertyValueException) { throw; }
+                    catch (PropertyPathException ex) { firstFailure ??= ex; }
                 }
             }
 
-            throw new PropertyPathException(
+            throw firstFailure ?? new PropertyPathException(
                 $"Cannot set property '{propertyPath}' on '{Name}' — not found on any component");
         }
 
@@ -213,8 +229,8 @@ namespace AkerMcp.Unity
                     if (!seen.Add(displayName)) continue;
 
                     object? value = null;
-                    bool copies = GetterMakesACopy(prop);
-                    try { if (prop.CanRead && !copies) value = prop.GetValue(component); } catch { }
+                    var sharedTwin = SharedMembers.SharedTwin(type, prop.Name);
+                    try { if (prop.CanRead && sharedTwin == null) value = prop.GetValue(component); } catch { }
 
                     yield return new PropertyDescriptor
                     {
@@ -222,7 +238,9 @@ namespace AkerMcp.Unity
                         TypeName = prop.PropertyType.Name,
                         CanRead = prop.CanRead,
                         CanWrite = prop.CanWrite,
-                        Value = copies ? NotReadCopies : WireValue(prop.PropertyType, value)
+                        Value = sharedTwin != null
+                            ? $"(not read: the getter makes a copy in the scene; read {prefix}{sharedTwin})"
+                            : WireValue(prop.PropertyType, value)
                     };
                 }
 
@@ -249,8 +267,6 @@ namespace AkerMcp.Unity
             }
         }
 
-        private const string NotReadCopies = "(not read: this getter makes a copy in the scene; read the shared member)";
-
         /// <summary>
         /// Members every component inherits from UnityEngine.Object, Component and MonoBehaviour — name, tag,
         /// gameObject, transform, hideFlags, runInEditMode, destroyCancellationToken: the same value on every component,
@@ -259,19 +275,6 @@ namespace AkerMcp.Unity
         /// </summary>
         private static bool IsInheritedByEveryComponent(Type? declaringType) =>
             declaringType == typeof(UnityEngine.Object) || declaringType == typeof(Component) || declaringType == typeof(MonoBehaviour);
-
-        /// <summary>
-        /// Getters that instantiate what they return: in edit mode Renderer.material and MeshFilter.mesh leak a copy into
-        /// the scene (and Unity logs an error), so an inspection — a read — would change the scene it describes.
-        /// </summary>
-        private static bool GetterMakesACopy(PropertyInfo prop)
-        {
-            var owner = prop.DeclaringType;
-            if (owner == typeof(Renderer)) return prop.Name == "material" || prop.Name == "materials";
-            if (owner == typeof(MeshFilter)) return prop.Name == "mesh";
-            if (owner == typeof(Collider)) return prop.Name == "material";
-            return false;
-        }
 
         /// <summary>
         /// Strings and value types as they are — the client writes structs as JSON through its serializer, which guards
@@ -366,7 +369,12 @@ namespace AkerMcp.Unity
 
         private bool TryResolveOnComponent(Component component, string propertyPath)
         {
+            // The member name without an index: "sharedMaterials[0]" is the member sharedMaterials, which the resolver
+            // then indexes. Looked up with the brackets, no member matched and the path was "not found".
             var firstSegment = propertyPath.Split('.')[0];
+            int bracket = firstSegment.IndexOf('[');
+            if (bracket >= 0) firstSegment = firstSegment.Substring(0, bracket);
+            if (firstSegment.Length == 0) return false;
             var type = component.GetType();
             var prop = type.GetProperty(firstSegment,
                 BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);

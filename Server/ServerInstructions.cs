@@ -39,7 +39,7 @@ namespace AkerMcp.Server
                       "when the change is visual (placement, materials, lighting, UI). " +
                       "Property paths are dot notation: transform properties need no prefix ('position', " +
                       "'localScale'), other components take a type prefix ('Rigidbody.mass'), nested paths work " +
-                      "('MeshRenderer.material.color.r'), structs are JSON objects ({\"x\":1,\"y\":2,\"z\":3}). " +
+                      "('Light.color.r'), structs are JSON objects ({\"x\":1,\"y\":2,\"z\":3}). " +
                       "Scene paths are case-sensitive, forward slashes from the root; `query` finds objects by " +
                       "name pattern, type or tag. " +
                       "`execute` runs C# through Roslyn: state does not persist between calls, always return a " +
@@ -98,7 +98,7 @@ position                     Transform.position (Transform is searched first)
 position.x                   float
 Rigidbody.mass               a specific component, type prefix
 Rigidbody.useGravity         bool
-MeshRenderer.material.color  nested
+MeshRenderer.sharedMaterial.color  nested
 mesh.vertices[0]             array index
 ```
 

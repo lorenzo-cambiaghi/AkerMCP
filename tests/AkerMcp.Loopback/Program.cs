@@ -345,6 +345,9 @@ namespace AkerMcp.Loopback
             Check("set_property refuses text for a reference member instead of constructing one",
                 state.Asset == null && Text(asset).Contains("Cannot convert"), Text(asset));
 
+            // A value that does not fit is an error, never a zero; reads go through the shared twin; deadlines; log levels.
+            await Mechanisms.Run((name, a) => Call(reg, name, a), Check);
+
             // execute waits as long as the caller asked. The server used to give up at its fixed request deadline (30 s)
             // whatever timeout_ms said: a longer script answered "timed out after 30s" while the engine was still working.
             // The deadline is shortened here so the bench does not wait thirty real seconds; the ratio is the same.

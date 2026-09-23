@@ -1,6 +1,7 @@
 #nullable enable
 
 using System.Collections.Generic;
+using System.Globalization;
 using UnityEngine;
 using AkerMcp.Shared.Serialization;
 
@@ -112,27 +113,26 @@ namespace AkerMcp.Unity
             );
         }
 
-        // Helper: extract float from dict
+        // Helpers: a member from the dict. Invariant culture: a number given as text ({"x":"0.5"}) read with the editor's
+        // culture was 5 under it-IT, the fault set_property already fixed for bare numbers.
         private static float F(Dictionary<string, object?> d, string key, float def = 0f)
         {
             if (d.TryGetValue(key, out var v) && v != null)
-                return System.Convert.ToSingle(v);
+                return System.Convert.ToSingle(v, CultureInfo.InvariantCulture);
             return def;
         }
 
-        // Helper: extract int from dict
         private static int I(Dictionary<string, object?> d, string key, int def = 0)
         {
             if (d.TryGetValue(key, out var v) && v != null)
-                return System.Convert.ToInt32(v);
+                return System.Convert.ToInt32(v, CultureInfo.InvariantCulture);
             return def;
         }
 
-        // Helper: extract byte from dict
         private static byte B(Dictionary<string, object?> d, string key, byte def = 0)
         {
             if (d.TryGetValue(key, out var v) && v != null)
-                return System.Convert.ToByte(v);
+                return System.Convert.ToByte(v, CultureInfo.InvariantCulture);
             return def;
         }
 

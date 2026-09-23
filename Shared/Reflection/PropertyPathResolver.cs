@@ -283,7 +283,7 @@ namespace AkerMcp.Shared.Reflection
             if (value == null)
             {
                 if (targetType.IsValueType && Nullable.GetUnderlyingType(targetType) == null)
-                    throw new PropertyPathException($"Cannot set null to non-nullable value type {targetType.Name}");
+                    throw new PropertyValueException($"Cannot set null to non-nullable value type {targetType.Name}");
                 return null;
             }
 
@@ -305,7 +305,9 @@ namespace AkerMcp.Shared.Reflection
                 }
                 catch (Exception ex)
                 {
-                    throw new PropertyPathException($"Cannot convert '{text}' to {targetType.Name}", ex);
+                    // The reason is the useful half ("missing z", "one of Skybox, SolidColor, …"): the reply carries only
+                    // the outer message, so it goes in there.
+                    throw new PropertyValueException($"Cannot convert '{Brief(text)}' to {targetType.Name}: {ex.Message}", ex);
                 }
             }
 
@@ -315,12 +317,14 @@ namespace AkerMcp.Shared.Reflection
             }
             catch (Exception ex)
             {
-                throw new PropertyPathException(
+                throw new PropertyValueException(
                     $"Cannot convert value of type {valueType.Name} to {targetType.Name}", ex);
             }
         }
 
         private static readonly GenericSerializer Serializer = new GenericSerializer();
+
+        private static string Brief(string text) => text.Length <= 60 ? text : text.Substring(0, 60) + "…";
 
         /// <summary>The text as JSON, or — when it is not JSON, as an enum name is not — the same text as a JSON string.</summary>
         private static JsonElement ParseLenient(string text)
