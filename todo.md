@@ -77,6 +77,9 @@ Listed so nobody spends an afternoon rediscovering them as bugs.
 - [ ] Upload `FluidR3_GM_GS.sf2` as the `soundfont-v1` release asset, so the default URL
       resolves. Until then, `engine: "soundfont"` works only with `AKER_MCP_SOUNDFONT` set to
       a local copy — which is what the error message says.
+      `.github/workflows/soundfont-asset.yml` does it on the next published release (or by
+      hand from the Actions tab), and skips it once the asset is there. Tick this when the
+      first run is green.
 
 The file is 151,001,312 bytes with SHA-256
 `545B2833936F15F04DF5F0C5C4096B3BA6CED46EC7031F61991CAE46F8681986`, already pinned in

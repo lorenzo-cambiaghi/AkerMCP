@@ -1,0 +1,59 @@
+name: SoundFont asset
+
+# create_music's SoundFont engine downloads FluidR3 from a release of this repository. The
+# file is 151 MB and lives in no commit, so it is put there from its upstream source and
+# checked against the hash the server pins. Runs on every published release; does nothing
+# when the asset is already there. Tag, file name and hash are read from SoundFontLibrary.cs,
+# so the server and this job cannot disagree about which file they mean.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  ensure:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      SOURCE: https://archive.org/download/fluidr3-gm-gs/FluidR3_GM_GS.sf2
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read what the server expects
+        run: |
+          lib=Server/SoundFontLibrary.cs
+          path=$(grep -oE 'releases/download/[^"]+' "$lib")
+          tag=$(echo "$path" | cut -d/ -f3)
+          file=$(echo "$path" | cut -d/ -f4)
+          sha=$(grep -A1 'ExpectedSha256 =' "$lib" | grep -oE '[0-9A-Fa-f]{64}' | tr 'A-F' 'a-f')
+          [ -n "$tag" ] && [ -n "$file" ] && [ ${#sha} -eq 64 ] || { echo "cannot read $lib"; exit 1; }
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+          echo "FILE=$file" >> "$GITHUB_ENV"
+          echo "SHA256=$sha" >> "$GITHUB_ENV"
+
+      - name: Already published?
+        id: check
+        run: |
+          if gh release view "$TAG" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx "$FILE"; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch and verify
+        if: steps.check.outputs.present == 'false'
+        run: |
+          curl -fL --retry 3 -o "$FILE" "$SOURCE"
+          echo "$SHA256  $FILE" | sha256sum -c -
+
+      - name: Publish
+        if: steps.check.outputs.present == 'false'
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --latest=false --title "SoundFont for create_music" \
+              --notes "FluidR3 GM+GS by Frank Wen (MIT, notice attached), fetched by create_music with engine \"soundfont\". Not an AkerMCP version."
+          fi
+          gh release upload "$TAG" "$FILE" docs/FluidR3-LICENSE.txt --clobber
