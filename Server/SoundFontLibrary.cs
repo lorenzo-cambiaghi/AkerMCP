@@ -12,7 +12,7 @@ namespace AkerMcp.Server
     /// fetches it once if it is not there yet.
     ///
     /// <para>The file is not in the repository and not in the release package, and both of
-    /// those are deliberate. It is 148 MB, which no git host wants inside a checkout — GitHub
+    /// those are deliberate. It is 151 MB, which no git host wants inside a checkout — GitHub
     /// refuses a file over 100 MB outright — and bundling it would put a third party's asset
     /// in every download of a tool most of whose users will never ask for orchestral audio.
     /// So it lives as a release asset and arrives on first use, cached under the user's
@@ -31,10 +31,16 @@ namespace AkerMcp.Server
         /// <summary>Point this at any .sf2 to use it instead — the author's own font, a smaller one, anything.</summary>
         public const string PathVariable = "AKER_MCP_SOUNDFONT";
 
-        /// <summary>Override where the default is fetched from (a mirror, or a local file:// URL).</summary>
+        /// <summary>
+        /// Override where the default is fetched from: a mirror, or a local file:// URL. Either
+        /// goes through the same size and SHA-256 checks as the default download.
+        /// </summary>
         public const string UrlVariable = "AKER_MCP_SOUNDFONT_URL";
 
         public const string FileName = "FluidR3_GM_GS.sf2";
+
+        /// <summary>The licence notice, embedded from docs/ and written beside the cached font.</summary>
+        public const string LicenceFileName = "FluidR3-LICENSE.txt";
 
         /// <summary>
         /// Where the default font is published. A release asset of this repository rather than
@@ -55,7 +61,26 @@ namespace AkerMcp.Server
 
         private const long MinimumPlausibleBytes = 4L * 1024 * 1024;
 
-        private static readonly SemaphoreSlim Gate = new SemaphoreSlim(1, 1);
+        /// <summary>
+        /// How long one call waits for a first-time fetch before answering "still downloading".
+        /// The fetch itself carries on in the background: the server answers one message at a
+        /// time, so a call that sat through a 151 MB download held every other tool with it.
+        /// </summary>
+        internal static TimeSpan ForegroundWait { get; set; } = TimeSpan.FromSeconds(30);
+
+        /// <summary>
+        /// The longest the body may go without a byte. HttpClient.Timeout stops counting once the
+        /// headers arrive, so a server that went quiet mid-file held the fetch — and the claim on
+        /// the cache — for ever.
+        /// </summary>
+        internal static TimeSpan IdleTimeout { get; set; } = TimeSpan.FromSeconds(60);
+
+        /// <summary>The longest a whole fetch may take, however steadily it trickles.</summary>
+        internal static TimeSpan OverallTimeout { get; set; } = TimeSpan.FromMinutes(30);
+
+        private static readonly object Sync = new object();
+        private static Task<(string? path, string? error)>? _fetch;
+        private static long _received;
 
         /// <summary>Where a downloaded font is kept: per user, shared across projects.</summary>
         public static string CachePath => Path.Combine(
@@ -81,19 +106,57 @@ namespace AkerMcp.Server
                     : (null, Unavailable($"{PathVariable} points at '{configured}', which does not exist"));
             }
 
-            if (File.Exists(CachePath)) return (CachePath, null);
+            if (File.Exists(CachePath)) return (Cached(), null);
 
             var url = Environment.GetEnvironmentVariable(UrlVariable);
             if (string.IsNullOrWhiteSpace(url)) url = DefaultUrl;
 
-            await Gate.WaitAsync(ct).ConfigureAwait(false);
+            Task<(string? path, string? error)> fetch;
+            lock (Sync)
+            {
+                // One fetch per process, whoever asks: a second caller joins the first. A fetch
+                // that ended in failure is not kept, so the next call tries again.
+                if (_fetch == null || _fetch.IsCompleted)
+                {
+                    if (File.Exists(CachePath)) return (Cached(), null);
+                    Interlocked.Exchange(ref _received, 0);
+                    _fetch = Task.Run(() => Download(url!));
+                }
+                fetch = _fetch;
+            }
+
+            // A fast connection finishes inside the wait and the caller never knows; a slow one
+            // gets an answer now and the font on a later call.
+            var first = await Task.WhenAny(fetch, Task.Delay(ForegroundWait, ct)).ConfigureAwait(false);
+            if (first == fetch) return await fetch.ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            return (null, $"The SoundFont is still downloading in the background " +
+                          $"({Interlocked.Read(ref _received) / 1_000_000} of about 151 MB so far) — this happens " +
+                          "once. Try again in a minute, or use the chiptune engine (omit \"engine\") meanwhile.");
+        }
+
+        /// <summary>
+        /// The cached font, with the licence notice beside it. Written on every hit rather than
+        /// only after a download, so a font cached before the notice existed gets one too; a
+        /// failure to write it never costs the caller the music.
+        /// </summary>
+        private static string Cached()
+        {
+            var notice = Path.Combine(Path.GetDirectoryName(CachePath)!, LicenceFileName);
             try
             {
-                // Someone may have won the race while this call waited.
-                if (File.Exists(CachePath)) return (CachePath, null);
-                return await Download(url!, ct).ConfigureAwait(false);
+                if (!File.Exists(notice))
+                {
+                    using var source = typeof(SoundFontLibrary).Assembly.GetManifestResourceStream(LicenceFileName);
+                    if (source != null)
+                    {
+                        using var target = File.Create(notice);
+                        source.CopyTo(target);
+                    }
+                }
             }
-            finally { Gate.Release(); }
+            catch (Exception ex) { StdioTransport.LogInfo($"Could not write {notice}: {ex.Message}"); }
+            return CachePath;
         }
 
         /// <summary>True when a font is already available without going to the network.</summary>
@@ -104,56 +167,144 @@ namespace AkerMcp.Server
             return File.Exists(CachePath);
         }
 
-        private static async Task<(string? path, string? error)> Download(string url, CancellationToken ct)
+        /// <summary>Where a fetch in progress writes, beside the target and moved over it at the end.</summary>
+        internal static string PartPath => CachePath + ".part";
+
+        /// <summary>
+        /// Fetch the font into the cache. Never throws: every way it can end is an answer.
+        /// </summary>
+        private static async Task<(string? path, string? error)> Download(string url)
         {
-            var directory = Path.GetDirectoryName(CachePath)!;
-            Directory.CreateDirectory(directory);
             // Download beside the target and move at the end: an interrupted fetch must not
             // leave a half file that looks cached and then fails to parse for good.
-            var temp = CachePath + ".part";
+            var temp = PartPath;
+            FileStream? claim = null;
+            bool moved = false;
 
             try
             {
-                StdioTransport.LogInfo($"Fetching the SoundFont for create_music from {url} (about 148 MB, once).");
+                Directory.CreateDirectory(Path.GetDirectoryName(CachePath)!);
 
-                using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(15) };
-                using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct)
-                                               .ConfigureAwait(false);
-                if (!response.IsSuccessStatusCode)
-                    return (null, Unavailable($"the download returned {(int)response.StatusCode} {response.ReasonPhrase}"));
+                // One process fetches at a time. Two servers — two editors open, say — share this
+                // cache, and without a claim both wrote the same .part and the second failed with
+                // a bare sharing violation. The claim is held until the file is in place and
+                // deletes itself when released, a crash included.
+                claim = await Claim().ConfigureAwait(false);
+                if (claim == null)
+                    return (null, Unavailable("another AkerMcp server on this machine is downloading it right now; " +
+                                              "try again in a minute"));
+                // The other one may have finished while this one was getting here.
+                if (File.Exists(CachePath)) return (Cached(), null);
 
-                await using (var netStream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false))
-                await using (var file = File.Create(temp))
-                    await netStream.CopyToAsync(file, ct).ConfigureAwait(false);
+                StdioTransport.LogInfo($"Fetching the SoundFont for create_music from {url} (about 151 MB, once).");
+
+                if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.IsFile)
+                {
+                    // HttpClient has no file scheme: a local copy is read directly, and then
+                    // checked exactly like a download.
+                    await using var source = new FileStream(uri.LocalPath, FileMode.Open, FileAccess.Read,
+                                                            FileShare.Read, 81920, useAsync: true);
+                    await using var file = File.Create(temp);
+                    await source.CopyToAsync(file).ConfigureAwait(false);
+                }
+                else
+                {
+                    var failure = await Fetch(url, temp).ConfigureAwait(false);
+                    if (failure != null) return (null, Unavailable(failure));
+                }
 
                 var size = new FileInfo(temp).Length;
                 if (size < MinimumPlausibleBytes)
-                {
-                    File.Delete(temp);
                     return (null, Unavailable($"the download was only {size / 1024} KB, which is not a SoundFont " +
                                               "(an error page, most likely)"));
-                }
 
-                if (ExpectedSha256.Length > 0)
-                {
-                    var actual = Sha256(temp);
-                    if (!string.Equals(actual, ExpectedSha256, StringComparison.OrdinalIgnoreCase))
-                    {
-                        File.Delete(temp);
-                        return (null, Unavailable($"the download's SHA-256 is {actual}, not the expected " +
-                                                  $"{ExpectedSha256}"));
-                    }
-                }
+                var actual = Sha256(temp);
+                if (!string.Equals(actual, ExpectedSha256, StringComparison.OrdinalIgnoreCase))
+                    return (null, Unavailable($"the download's SHA-256 is {actual}, not the expected {ExpectedSha256}"));
 
                 File.Move(temp, CachePath, overwrite: true);
+                moved = true;
                 StdioTransport.LogInfo($"SoundFont cached at {CachePath} ({size / (1024 * 1024)} MB).");
-                return (CachePath, null);
+                return (Cached(), null);
             }
-            catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
-                try { if (File.Exists(temp)) File.Delete(temp); } catch { /* best effort */ }
                 return (null, Unavailable($"{ex.GetType().Name}: {ex.Message}"));
+            }
+            finally
+            {
+                // However the fetch ended — a bad hash, a stall, a refused connection — no .part
+                // is left to fill the disk. Only the holder of the claim may touch it: without the
+                // claim, the .part belongs to the other process's fetch in progress.
+                if (claim != null && !moved)
+                {
+                    try { if (File.Exists(temp)) File.Delete(temp); } catch { /* best effort */ }
+                }
+                claim?.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// The cross-process claim on the cache, or null if another process keeps it. Waited for
+        /// briefly: a fetch that fails, or is about to finish, lets go within moments, and giving
+        /// up at once turned two servers starting together into a spurious error.
+        /// </summary>
+        private static async Task<FileStream?> Claim()
+        {
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+            while (true)
+            {
+                try
+                {
+                    return new FileStream(CachePath + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite,
+                                          FileShare.None, 1, FileOptions.DeleteOnClose);
+                }
+                catch (IOException) when (DateTime.UtcNow < deadline)
+                {
+                    await Task.Delay(200).ConfigureAwait(false);
+                }
+                catch (IOException)
+                {
+                    return null;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Stream an HTTP body into <paramref name="temp"/>, with a deadline on every read and on
+        /// the whole. Returns null when the body arrived, or what went wrong.
+        /// </summary>
+        private static async Task<string?> Fetch(string url, string temp)
+        {
+            using var overall = new CancellationTokenSource(OverallTimeout);
+            using var idle = CancellationTokenSource.CreateLinkedTokenSource(overall.Token);
+            // The deadlines below are the only ones: HttpClient's own would stop at the headers.
+            using var http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+            try
+            {
+                idle.CancelAfter(IdleTimeout);
+                using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, idle.Token)
+                                               .ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode)
+                    return $"the download returned {(int)response.StatusCode} {response.ReasonPhrase}";
+
+                await using var body = await response.Content.ReadAsStreamAsync(idle.Token).ConfigureAwait(false);
+                await using var file = File.Create(temp);
+                var buffer = new byte[81920];
+                while (true)
+                {
+                    idle.CancelAfter(IdleTimeout);          // re-armed for every read
+                    int n = await body.ReadAsync(buffer, idle.Token).ConfigureAwait(false);
+                    if (n == 0) return null;
+                    await file.WriteAsync(buffer.AsMemory(0, n), idle.Token).ConfigureAwait(false);
+                    Interlocked.Add(ref _received, n);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                return overall.IsCancellationRequested
+                    ? $"the download did not finish within {OverallTimeout.TotalMinutes:0} minutes"
+                    : $"the download stalled: no data for {IdleTimeout.TotalSeconds:0} seconds";
             }
         }
 

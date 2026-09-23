@@ -22,6 +22,7 @@ namespace AkerMcp.Loopback
         public readonly FakeAgentConsent Consent = new FakeAgentConsent();
         public readonly FakeEditorContext Editor = new FakeEditorContext();
         public readonly FakeCodeExecutor Executor = new FakeCodeExecutor();
+        public readonly FakeSoundImporter Sound = new FakeSoundImporter();
 
         private readonly string _engineName;
 
@@ -40,6 +41,7 @@ namespace AkerMcp.Loopback
         protected override IPlayModeController? CreatePlayModeController() => Play;
         protected override IInputSimulator? CreateInputSimulator() => Input;
         protected override IAgentConsent? CreateAgentConsent() => Consent;
+        protected override ISoundImporter? CreateSoundImporter() => Sound;
 
         protected override void Log(string message) => Console.Error.WriteLine("[fake] " + message);
         protected override void LogError(string message) => Console.Error.WriteLine("[fake][err] " + message);
@@ -240,6 +242,18 @@ namespace AkerMcp.Loopback
         {
             if (_playing && !_paused) _frames++;
             return new PlayState { IsPlaying = _playing, IsPaused = _paused, Time = _time, FrameCount = _frames, Fps = 60 };
+        }
+    }
+
+    // Keeps what the server handed over, so a test can read the WAV a tool actually rendered.
+    public sealed class FakeSoundImporter : ISoundImporter
+    {
+        public SoundImportRequest? Last;
+
+        public SoundImportResult ImportSound(SoundImportRequest request)
+        {
+            Last = request;
+            return new SoundImportResult { AssetPath = $"res://{request.Name}.wav", Message = "imported" };
         }
     }
 

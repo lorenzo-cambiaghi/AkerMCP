@@ -1293,10 +1293,17 @@ namespace AkerMcp.Server
             => HandleCreateAudio(args, ct, SoundSynthesizer.RenderToWav, "sound-spec");
 
         private Task<ToolResult> HandleCreateMusic(JsonElement? args, CancellationToken ct)
-            // Async under the hood: the SoundFont engine may have to fetch its font, and that
-            // must not block the pipe. Chiptune never touches it.
-            => HandleCreateAudio(args, ct, spec => MusicSequencer.RenderToWavAsync(spec, ct)
-                                                                 .GetAwaiter().GetResult(), "score");
+        {
+            // A looped clip is rendered to exactly its length, with the release tail folded onto
+            // the start: a tail left at the end delays every downbeat after the first.
+            bool loop = args is JsonElement a && a.ValueKind == JsonValueKind.Object
+                        && a.TryGetProperty("loop", out var lp) && lp.ValueKind == JsonValueKind.True;
+            // Async under the hood: the SoundFont engine may have to fetch its font. The fetch
+            // runs in the background and a call waits for it at most 30 s, so the pipe is held
+            // no longer than that. Chiptune never touches it.
+            return HandleCreateAudio(args, ct, spec => MusicSequencer.RenderToWavAsync(spec, loop, ct)
+                                                                     .GetAwaiter().GetResult(), "score");
+        }
 
         /// <summary>
         /// Render a spec to WAV and hand it to the engine's importer. Shared by create_sound

@@ -37,6 +37,17 @@ namespace AkerMcp.Server
         /// growing a second, worse synth beside this one.
         /// </summary>
         public static short[] RenderSamples(JsonElement spec, out int sampleRateOut)
+            => RenderSamples(spec, out sampleRateOut, MaxSoundSeconds);
+
+        /// <summary>The longest one-shot create_sound renders: an effect, not a piece.</summary>
+        public const double MaxSoundSeconds = 10.0;
+
+        /// <summary>
+        /// The same, with the length cap chosen by the caller. The sequencer lifts it for a held
+        /// note: a pad written as sixteen slow steps has to last sixteen steps, and capping it at
+        /// the one-shot limit left it silent for the rest. The score's own size limit bounds it.
+        /// </summary>
+        internal static short[] RenderSamples(JsonElement spec, out int sampleRateOut, double maxSeconds)
         {
             int sampleRate = Clamp((int)ReadNum(spec, "sample_rate", 44100), 8000, 48000);
             sampleRateOut = sampleRate;
@@ -76,7 +87,7 @@ namespace AkerMcp.Server
             if (envTotal <= 0) { sustain = 0.15; envTotal = 0.15; }
 
             double duration = ReadNum(spec, "duration", envTotal);
-            duration = Clamp(duration, 0.02, 10.0);
+            duration = Clamp(duration, 0.02, Math.Max(0.02, maxSeconds));
             double scale = duration / envTotal;
             attack *= scale; sustain *= scale; decay *= scale;
 
@@ -156,6 +167,12 @@ namespace AkerMcp.Server
                 };
 
                 // ---- filters (sfxr's, so the character is the one people expect) ----
+                // The high-pass works on the CHANGE in the low-pass output, so it needs that
+                // output one sample ago. It used to be fed the signal itself (with the low-pass
+                // open) or a copy of it (with it closed): the first is a leaky integrator, a
+                // low-pass that boosted and clipped, the second a plain volume cut — "highpass"
+                // did the opposite of its name or nothing at all.
+                double pp = fltp;
                 if (lowpassNow > 0)
                 {
                     double fltw = Clamp(2.0 * Math.Sin(Math.PI * Math.Min(lowpassNow, sampleRate * 0.49) / sampleRate), 0, 1);
@@ -163,14 +180,16 @@ namespace AkerMcp.Server
                     fltp += fltdp;
                     fltdp += (sample - fltp) * fltw;
                     fltdp -= fltdp * fltdmp;
-                    double before = fltphp;
-                    fltphp += fltp - before;           // carries the low-passed signal forward
                     sample = fltp;
+                }
+                else
+                {
+                    fltp = sample;                     // an open low-pass passes the signal, as in sfxr
                 }
                 if (highpassHz > 0)
                 {
                     double flthp = Clamp(2.0 * Math.Sin(Math.PI * Math.Min(highpassHz, sampleRate * 0.49) / sampleRate), 0, 1);
-                    fltphp += sample - fltp;
+                    fltphp += fltp - pp;
                     fltphp -= fltphp * flthp;
                     sample = fltphp;
                 }

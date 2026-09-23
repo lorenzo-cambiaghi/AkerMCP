@@ -25,7 +25,8 @@ namespace AkerMcp.AudioSamples
     /// </summary>
     public static class Program
     {
-        private record Sample(string Id, string Title, string Note, string Spec, bool IsMusic = false);
+        /// <param name="Loop">Rendered as create_music renders with "loop": true, and played on repeat by the page.</param>
+        private record Sample(string Id, string Title, string Note, string Spec, bool IsMusic = false, bool Loop = false);
 
         private static readonly Sample[] Samples =
         {
@@ -93,13 +94,13 @@ namespace AkerMcp.AudioSamples
             // wearing out. Four bars of Am–F–C–G, a melody that leaves gaps, and a bass that
             // walks to the next chord instead of sitting on the root.
             new("level-loop", "Level theme (the README example)",
-                "Written at two steps per beat, so a token is an eighth note and a bar is eight tokens. The melody rests where the bass moves, which is what keeps a short loop from nagging.",
+                "Written at two steps per beat, so a token is an eighth note and a bar is eight tokens. The melody rests where the bass moves, which is what keeps a short loop from nagging. Rendered with \"loop\": true — exactly four bars, the last notes' release folded onto the start — so it plays on repeat here without a gap.",
                 "{\"bpm\":108,\"steps_per_beat\":2,\"channels\":[" +
                 "{\"instrument\":\"lead\",\"notes\":\"E5 . . . D5 . C5 . A4 . C5 . D5 - - . E5 . G5 . E5 . D5 . C5 - - . B4 . . .\"}," +
                 "{\"instrument\":\"pad\",\"notes\":\"A4*8 F4*8 C5*8 G4*8\",\"volume\":0.5}," +
                 "{\"instrument\":\"bass\",\"notes\":\"A2 . A2 . E3 . A2 . F2 . F2 . C3 . F2 . C3 . C3 . G3 . C3 . G2 . G2 . D3 . G2 .\"}," +
                 "{\"instrument\":\"drums\",\"notes\":\"k . h . s . h . k . h . s . h . k . h . s . h . k . h . s . h o\"}]}",
-                IsMusic: true),
+                IsMusic: true, Loop: true),
 
             new("level-loop-soundfont", "Level theme — SoundFont",
                 "The same four bars with sampled instruments: the notes below are identical, only the instrument names and one word changed.",
@@ -161,7 +162,7 @@ namespace AkerMcp.AudioSamples
                 if (NeedsSoundFont(s) && !haveFont) { Console.WriteLine($"  {s.Id,-18} skipped"); continue; }
 
                 var spec = JsonSerializer.Deserialize<JsonElement>(s.Spec);
-                var wav = s.IsMusic ? MusicSequencer.RenderToWav(spec) : SoundSynthesizer.RenderToWav(spec);
+                var wav = s.IsMusic ? MusicSequencer.RenderToWav(spec, s.Loop) : SoundSynthesizer.RenderToWav(spec);
                 File.WriteAllBytes(Path.Combine(wavDir, s.Id + ".wav"), wav);
                 Console.WriteLine($"  {s.Id,-18} {wav.Length / 1024,4} KB");
             }
@@ -176,14 +177,14 @@ namespace AkerMcp.AudioSamples
         {
             p.Append($"<h2>{title}</h2>\n");
             p.Append($"<p class=\"lead\">Every sample below was produced by <code>{tool}</code> from the spec beside it. " +
-                     "No samples, no recordings, no asset packs: the server renders the WAV and hands it to the engine.</p>\n");
+                     "No recordings, no asset packs: the server renders the WAV and hands it to the engine.</p>\n");
             p.Append("<div class=\"grid\">\n");
             foreach (var s in all)
             {
                 if (s.IsMusic != music) continue;
                 p.Append("<figure>\n");
                 p.Append($"  <figcaption>{Escape(s.Title)}</figcaption>\n");
-                p.Append($"  <audio controls preload=\"none\" src=\"samples/{s.Id}.wav\"></audio>\n");
+                p.Append($"  <audio controls{(s.Loop ? " loop" : "")} preload=\"none\" src=\"samples/{s.Id}.wav\"></audio>\n");
                 p.Append($"  <p class=\"note\">{Escape(s.Note)}</p>\n");
                 p.Append($"  <pre><code>{Escape(Pretty(s.Spec))}</code></pre>\n");
                 p.Append("</figure>\n");
@@ -243,7 +244,8 @@ namespace AkerMcp.AudioSamples
 <main>
 <h1>Audio the model writes</h1>
 <p class="sub">Placeholder sound and music for a prototype, generated on the spot from a spec —
-no asset packs, no downloads, nothing to licence.</p>
+no asset packs. The effects and the chiptune need nothing at all; the SoundFont samples play the
+same scores on FluidR3 (MIT), fetched once on first use.</p>
 
 """);
 
@@ -252,12 +254,13 @@ no asset packs, no downloads, nothing to licence.</p>
 <p><strong>Why this is here.</strong> A prototype stops for want of a jump sound as surely as for
 want of a jump. The synthesiser is sfxr's — pitched noise, a resonant low-pass, duty cycle,
 arpeggio, punch, retrigger — and the music is a tracker over the same voice, so a melody inherits
-the filters rather than reimplementing them. Chiptune rather than General MIDI on purpose: the
-small GM SoundFont everyone reaches for first is GPL, and its samples end up inside the audio
-produced, which for a tool whose output lands in someone else's game is the wrong thing to
-inherit.</p>
+the filters rather than reimplementing them. Chiptune is the default because it needs nothing: no
+download, no licence. <code>"engine": "soundfont"</code> plays the same score on sampled
+instruments through FluidR3, which is MIT, rather than the small General MIDI font everyone
+reaches for first: that one is GPL, and its samples end up inside the audio produced, which for a
+tool whose output lands in someone else's game is the wrong thing to inherit.</p>
 <p>Copy any spec into <code>create_sound</code> or <code>create_music</code> and it produces
-exactly the file you just played.</p>
+exactly the file you just played (the looping one with <code>"loop": true</code>).</p>
 </footer>
 </main>
 </body>

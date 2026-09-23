@@ -611,8 +611,194 @@ namespace AkerMcp.Loopback
                 SoundFontLibrary.ExpectedSha256.Length == 64
                 && SoundFontLibrary.DefaultUrl.EndsWith(SoundFontLibrary.FileName, StringComparison.Ordinal));
 
+            // The notice written beside a downloaded font comes from a resource embedded out of
+            // docs/: a renamed file or a dropped csproj line would leave the copy without it, and
+            // nothing else would say so.
+            using (var notice = typeof(SoundFontLibrary).Assembly.GetManifestResourceStream(SoundFontLibrary.LicenceFileName))
+            {
+                var text = notice == null ? "" : new System.IO.StreamReader(notice).ReadToEnd();
+                Check("the server carries the FluidR3 licence notice it writes beside the font",
+                    text.Contains("MIT License") && text.Contains(SoundFontLibrary.ExpectedSha256),
+                    notice == null ? "resource missing" : $"{text.Length} chars");
+            }
+
             Check("an old spec still renders the length it asks for",
                 Render("{\"wave\":\"saw\",\"freq\":1200,\"freq_sweep\":-3000,\"duration\":0.25}").Length == 11025);
+
+            // ---- the mechanisms under the audio --------------------------------------
+            // Contracts, not taste: where notes land, what a filter passes relative to what it
+            // stops, what a score is refused for. Nothing here pins how anything sounds.
+            static JsonElement J(string json) => JsonSerializer.Deserialize<JsonElement>(json);
+            static string Fails(Action act) { try { act(); return ""; } catch (Exception ex) { return ex.Message; } }
+            static double Energy(short[] p, long from, long to)
+            {
+                double sum = 0; long n = 0;
+                for (long i = from; i < to && i < p.Length; i++, n++) sum += (double)p[i] * p[i];
+                return n > 0 ? Math.Sqrt(sum / n) : 0;
+            }
+
+            // A high-pass passes what is far above its cutoff and stops what is far below. It used
+            // to integrate instead — boosting the lows until they clipped — and behind a low-pass
+            // it was a plain volume cut. Each ratio is against the same spec without the high-pass.
+            double HighpassPasses(int hz, string lowpass)
+            {
+                string spec = $"{{\"wave\":\"sine\",\"freq\":{hz},\"duration\":0.5,\"attack\":0,\"sustain\":1,\"decay\":0{lowpass}";
+                return Rms(Render(spec + ",\"highpass\":3000}"), 0.2, 0.9) / Math.Max(1, Rms(Render(spec + "}"), 0.2, 0.9));
+            }
+            double openLow = HighpassPasses(100, ""), openHigh = HighpassPasses(9000, "");
+            double lpLow = HighpassPasses(100, ",\"lowpass\":12000"), lpHigh = HighpassPasses(9000, ",\"lowpass\":12000");
+            Check("highpass stops a tone far below its cutoff and passes one far above, with or without a low-pass",
+                openLow < openHigh * 0.25 && lpLow < lpHigh * 0.25,
+                $"passed below/above: open {openLow:0.00}/{openHigh:0.00}, behind a low-pass {lpLow:0.00}/{lpHigh:0.00}");
+
+            // A loop is exactly its music, steps x repeat x the step grid: a tail inside it put a
+            // gap at every loop point.
+            int grid = (int)(60.0 / 120 / 4 * 44100);
+            var loopWav = MusicSequencer.RenderToWav(J("{\"bpm\":120,\"repeat\":2,\"channels\":[" +
+                "{\"instrument\":\"lead\",\"notes\":\"C4 E4 G4 C5 - - . .\"},{\"instrument\":\"drums\",\"notes\":\"k h s h\"}]}"), loop: true);
+            int dataBytes = BitConverter.ToInt32(loopWav, 40);
+            Check("a looped score is exactly steps x repeat x step long", dataBytes == 8 * 2 * grid * 2,
+                $"{dataBytes / 2} samples, expected {8 * 2 * grid}");
+
+            // The tool has to hand 'loop' to the renderer as well as to the importer: given only to
+            // the importer, a looping source played the tail too, a gap at every loop point.
+            var musicCall = await Call(reg, "create_music", new
+            {
+                name = "loop-wiring",
+                loop = true,
+                spec = new
+                {
+                    bpm = 120, repeat = 2,
+                    channels = new object[]
+                    {
+                        new { instrument = "lead", notes = "C4 E4 G4 C5 - - . ." },
+                        new { instrument = "drums", notes = "k h s h" },
+                    },
+                },
+            });
+            var imported = fake.Sound.Last;
+            int importedBytes = imported == null ? -1 : BitConverter.ToInt32(imported.Wav, 40);
+            Check("create_music with loop:true imports a clip exactly as long as its loop",
+                !musicCall.IsError && imported != null && imported.Loop && importedBytes == 8 * 2 * grid * 2,
+                $"{Text(musicCall)} ({importedBytes / 2} samples, expected {8 * 2 * grid})");
+            Check("the WAV header agrees with the data it carries",
+                BitConverter.ToInt32(loopWav, 4) == loopWav.Length - 8 && dataBytes == loopWav.Length - 44
+                && BitConverter.ToInt32(loopWav, 24) == 44100 && BitConverter.ToInt32(loopWav, 28) == 44100 * 2
+                && BitConverter.ToInt16(loopWav, 32) == 2 && BitConverter.ToInt16(loopWav, 34) == 16, $"{loopWav.Length} bytes");
+
+            // repeat plays the whole score again: a short part comes back with the long one, not
+            // straight after its own end.
+            var offsets = Music("{\"bpm\":120,\"repeat\":2,\"channels\":[" +
+                "{\"instrument\":\"lead\",\"notes\":\". . . . . . . . . . . . . . . .\"},{\"instrument\":\"bass\",\"notes\":\"C3*4\"}]}");
+            double secondPass = Energy(offsets, 17L * grid, 19L * grid), afterFirst = Energy(offsets, 5L * grid, 7L * grid);
+            Check("repeat brings a short part back with the whole score, not after its own end",
+                secondPass > 0 && afterFirst < secondPass * 0.1, $"rms steps 5-7 {afterFirst:0} vs 17-19 {secondPass:0}");
+
+            // The SoundFont timeline, without the font. Two parts ending on a shared note put two
+            // note-offs on one instant, and the old ordering made List.Sort throw on exactly that.
+            var duet = MusicSequencer.Score.Parse(J("{\"engine\":\"soundfont\",\"repeat\":2,\"channels\":[" +
+                "{\"instrument\":\"flute\",\"notes\":\"C5 E5 G5 E5 D5 B4 C5*4\"}," +
+                "{\"instrument\":\"bass\",\"notes\":\"C3 C3 G2 G2 G2 G2 C3*4\"}]}"), loop: false);
+            string timelineError = "";
+            List<SoundFontRenderer.NoteEvent>? timeline = null;
+            try { timeline = SoundFontRenderer.Timeline(duet); } catch (Exception ex) { timelineError = ex.Message; }
+            Check("the SoundFont timeline orders a duet that ends together, note-offs first at one instant",
+                timeline != null && timeline.Zip(timeline.Skip(1)).All(p => p.First.Sample < p.Second.Sample
+                    || (p.First.Sample == p.Second.Sample && (!p.First.On || p.Second.On))), timelineError);
+
+            var band = MusicSequencer.Score.Parse(J("{\"engine\":\"soundfont\",\"repeat\":2,\"channels\":[" +
+                "{\"instrument\":\"flute\",\"notes\":\"C5 E5 G5 E5 D5 B4 C5*4\"},{\"instrument\":\"drums\",\"notes\":\"k s\"}]}"), loop: false);
+            var bandHits = SoundFontRenderer.Timeline(band).Where(e => e.On && e.Channel == 9).Select(e => e.Sample).ToList();
+            Check("the SoundFont timeline repeats a short part with the whole score",
+                bandHits.Contains(band.Steps * band.StepSamples) && !bandHits.Contains(2 * band.StepSamples),
+                $"drum hits at {string.Join(", ", bandHits)} (grid {band.StepSamples})");
+
+            // Refused before its buffer exists: a clip over the engine link's 64 MB frame used to
+            // drop the connection, and a long enough score asked for gigabytes first.
+            long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            var oversized = Fails(() => MusicSequencer.RenderToWav(J("{\"bpm\":20,\"steps_per_beat\":1,\"sample_rate\":48000," +
+                "\"channels\":[{\"instrument\":\"pad\",\"notes\":\"C4*64 C4*64 C4*64 C4*64\"}]}")));
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+            Check("a score over the size limit is refused before it is rendered",
+                oversized.Contains("too long") && allocated < 8L * 1024 * 1024, $"{allocated / 1024} KB allocated: {oversized}");
+
+            var badTokens = Fails(() => Music("{\"channels\":[{\"instrument\":\"lead\",\"notes\":\"C4 H4 C5x E4\"}]}"));
+            Check("a token that is not a note is an error that names it",
+                badTokens.Contains("'H4'") && badTokens.Contains("'C5x'") && !badTokens.Contains("'E4'")
+                && !MusicSequencer.TryNoteToFrequency("C5,", out _), badTokens);
+
+            var badInstrument = Fails(() => Music("{\"channels\":[{\"instrument\":\"kazoo\",\"notes\":\"C4\"}]}"));
+            var badEngine = Fails(() => Music("{\"engine\":\"fm\",\"channels\":[{\"instrument\":\"lead\",\"notes\":\"C4\"}]}"));
+            Check("an unknown instrument or engine is an error that lists the valid ones",
+                badInstrument.Contains("'kazoo'") && badInstrument.Contains("pluck")
+                && badEngine.Contains("'fm'") && badEngine.Contains("soundfont"), $"{badInstrument} | {badEngine}");
+
+            // '-' continues the slot before it: after a rest that is more rest, never the note
+            // before the rest reaching over it.
+            var restThenHold = Music("{\"bpm\":60,\"steps_per_beat\":1,\"channels\":[{\"instrument\":\"pad\",\"notes\":\"C4 . -\"}]}");
+            double noteSlot = Energy(restThenHold, 0, 44100), restSlot = Energy(restThenHold, 52920, 88200);
+            Check("a rest followed by a hold stays silent", restSlot < noteSlot * 0.05,
+                $"rms note {noteSlot:0} vs rest {restSlot:0}");
+
+            // A drum hit is its own envelope whatever the grid: it used to be stretched to the
+            // step's length, the same hat four times longer at one step per beat than at four.
+            static int LastAudible(short[] p) { int last = 0; for (int i = 0; i < p.Length; i++) if (Math.Abs((int)p[i]) > 300) last = i; return last; }
+            int hatFine = LastAudible(Music("{\"bpm\":120,\"steps_per_beat\":4,\"channels\":[{\"instrument\":\"drums\",\"notes\":\"h\"}]}"));
+            int hatCoarse = LastAudible(Music("{\"bpm\":120,\"steps_per_beat\":1,\"channels\":[{\"instrument\":\"drums\",\"notes\":\"h\"}]}"));
+            Check("a drum hit lasts as long whatever the step grid", Math.Abs(hatFine - hatCoarse) < 441,
+                $"{hatFine} vs {hatCoarse} samples");
+
+            // The fetch, without the network: a file that is not the pinned one is refused and
+            // leaves nothing behind, and a server that goes quiet after its headers is given up
+            // on rather than waited for — HttpClient's own timeout stops counting at the headers.
+            if (!SoundFontLibrary.IsAvailableLocally())
+            {
+                const string piano = "{\"engine\":\"soundfont\",\"channels\":[{\"instrument\":\"piano\",\"notes\":\"C4\"}]}";
+                var urlBefore = Environment.GetEnvironmentVariable(SoundFontLibrary.UrlVariable);
+                var idleBefore = SoundFontLibrary.IdleTimeout;
+                var bogusFont = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "not-the-pinned-font.sf2");
+                var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+                using var hangUp = new CancellationTokenSource();
+                try
+                {
+                    System.IO.File.WriteAllBytes(bogusFont, new byte[5 * 1024 * 1024]);
+                    Environment.SetEnvironmentVariable(SoundFontLibrary.UrlVariable, new Uri(bogusFont).AbsoluteUri);
+                    var refused = Fails(() => Music(piano));
+                    Check("a font that is not the pinned file is refused and leaves no .part",
+                        refused.Contains("SHA-256") && !System.IO.File.Exists(SoundFontLibrary.PartPath)
+                        && !SoundFontLibrary.IsAvailableLocally(), refused);
+
+                    listener.Start();
+                    _ = Task.Run(async () =>
+                    {
+                        using var client = await listener.AcceptTcpClientAsync();
+                        var stream = client.GetStream();
+                        await stream.ReadAsync(new byte[4096]);
+                        await stream.WriteAsync(System.Text.Encoding.ASCII.GetBytes(
+                            "HTTP/1.1 200 OK\r\nContent-Length: 10000000\r\n\r\n"));
+                        await stream.WriteAsync(new byte[1000]);
+                        try { await Task.Delay(TimeSpan.FromSeconds(20), hangUp.Token); } catch (OperationCanceledException) { }
+                    });
+                    SoundFontLibrary.IdleTimeout = TimeSpan.FromSeconds(1);
+                    Environment.SetEnvironmentVariable(SoundFontLibrary.UrlVariable,
+                        $"http://127.0.0.1:{((System.Net.IPEndPoint)listener.LocalEndpoint).Port}/quiet.sf2");
+                    var stalled = Fails(() => Music(piano));
+                    Check("a download that stalls is abandoned and leaves no .part",
+                        stalled.Contains("stalled") && !System.IO.File.Exists(SoundFontLibrary.PartPath), stalled);
+                }
+                finally
+                {
+                    hangUp.Cancel();
+                    listener.Stop();
+                    SoundFontLibrary.IdleTimeout = idleBefore;
+                    Environment.SetEnvironmentVariable(SoundFontLibrary.UrlVariable, urlBefore);
+                    try { System.IO.File.Delete(bogusFont); } catch { /* temp */ }
+                }
+            }
+            else
+            {
+                Check("the fetch checks (skipped: a font is cached on this machine)", true);
+            }
 
             Check("an engine with no IAgentConsent is recognised, however it says so",
                 ConsentGate.IsNoPolicyAnswer("NOT_SUPPORTED: whatever")

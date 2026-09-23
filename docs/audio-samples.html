@@ -31,9 +31,10 @@
 <main>
 <h1>Audio the model writes</h1>
 <p class="sub">Placeholder sound and music for a prototype, generated on the spot from a spec —
-no asset packs, no downloads, nothing to licence.</p>
+no asset packs. The effects and the chiptune need nothing at all; the SoundFont samples play the
+same scores on FluidR3 (MIT), fetched once on first use.</p>
 <h2>Sound effects</h2>
-<p class="lead">Every sample below was produced by <code>create_sound</code> from the spec beside it. No samples, no recordings, no asset packs: the server renders the WAV and hands it to the engine.</p>
+<p class="lead">Every sample below was produced by <code>create_sound</code> from the spec beside it. No recordings, no asset packs: the server renders the WAV and hands it to the engine.</p>
 <div class="grid">
 <figure>
   <figcaption>Pistol</figcaption>
@@ -129,7 +130,7 @@ no asset packs, no downloads, nothing to licence.</p>
 </figure>
 </div>
 <h2>Music</h2>
-<p class="lead">Every sample below was produced by <code>create_music</code> from the spec beside it. No samples, no recordings, no asset packs: the server renders the WAV and hands it to the engine.</p>
+<p class="lead">Every sample below was produced by <code>create_music</code> from the spec beside it. No recordings, no asset packs: the server renders the WAV and hands it to the engine.</p>
 <div class="grid">
 <figure>
   <figcaption>Overworld</figcaption>
@@ -165,8 +166,8 @@ no asset packs, no downloads, nothing to licence.</p>
 </figure>
 <figure>
   <figcaption>Level theme (the README example)</figcaption>
-  <audio controls preload="none" src="samples/level-loop.wav"></audio>
-  <p class="note">Written at two steps per beat, so a token is an eighth note and a bar is eight tokens. The melody rests where the bass moves, which is what keeps a short loop from nagging.</p>
+  <audio controls loop preload="none" src="samples/level-loop.wav"></audio>
+  <p class="note">Written at two steps per beat, so a token is an eighth note and a bar is eight tokens. The melody rests where the bass moves, which is what keeps a short loop from nagging. Rendered with "loop": true — exactly four bars, the last notes' release folded onto the start — so it plays on repeat here without a gap.</p>
   <pre><code>{"bpm":108, "steps_per_beat":2, "channels":[{"instrument":"lead",
 "notes":"E5 . . . D5 . C5 . A4 . C5 . D5 - - . E5 . G5 . E5 . D5 . C5 - - . B4 . . ."},
 {"instrument":"pad", "notes":"A4*8 F4*8 C5*8 G4*8",
@@ -217,12 +218,13 @@ no asset packs, no downloads, nothing to licence.</p>
 <p><strong>Why this is here.</strong> A prototype stops for want of a jump sound as surely as for
 want of a jump. The synthesiser is sfxr's — pitched noise, a resonant low-pass, duty cycle,
 arpeggio, punch, retrigger — and the music is a tracker over the same voice, so a melody inherits
-the filters rather than reimplementing them. Chiptune rather than General MIDI on purpose: the
-small GM SoundFont everyone reaches for first is GPL, and its samples end up inside the audio
-produced, which for a tool whose output lands in someone else's game is the wrong thing to
-inherit.</p>
+the filters rather than reimplementing them. Chiptune is the default because it needs nothing: no
+download, no licence. <code>"engine": "soundfont"</code> plays the same score on sampled
+instruments through FluidR3, which is MIT, rather than the small General MIDI font everyone
+reaches for first: that one is GPL, and its samples end up inside the audio produced, which for a
+tool whose output lands in someone else's game is the wrong thing to inherit.</p>
 <p>Copy any spec into <code>create_sound</code> or <code>create_music</code> and it produces
-exactly the file you just played.</p>
+exactly the file you just played (the looping one with <code>"loop": true</code>).</p>
 </footer>
 </main>
 </body>
