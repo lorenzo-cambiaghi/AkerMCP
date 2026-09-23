@@ -43,6 +43,8 @@ crashlytics-build.properties
 !README.txt
 # Unity records its editor version here — keep it tracked despite the *.txt rule.
 !samples/unity/ProjectSettings/ProjectVersion.txt
+# The FluidR3 licence notice the README links to, and the server embeds.
+!docs/FluidR3-LICENSE.txt
 
 # Sample harness junctions — the canonical plugin source lives under plugins/.
 # These are recreated by setup-samples.bat / setup-samples.sh and must never be committed.

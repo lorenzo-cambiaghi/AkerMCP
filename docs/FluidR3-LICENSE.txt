@@ -1,0 +1,52 @@
+FluidR3 General MIDI SoundFont — licence
+========================================
+
+AkerMCP does not contain this SoundFont. `create_music` with "engine": "soundfont"
+downloads it on first use to a per-user cache, and this notice travels with it because
+that is the one condition the licence asks for. Nothing obliges you to use this font:
+AKER_MCP_SOUNDFONT points the tool at any .sf2 you prefer.
+
+The licence covers redistributing the SoundFont or a derived sound library. It does not
+cover recordings made with it, so audio that create_music generates for your project
+carries no obligation from this file.
+
+
+MIT License
+-----------
+
+Copyright (c) 2000-2002, 2008 Frank Wen <getfrank@gmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+The file this tool fetches
+--------------------------
+
+FluidR3 GM+GS, 151,001,312 bytes,
+SHA-256 545B2833936F15F04DF5F0C5C4096B3BA6CED46EC7031F61991CAE46F8681986
+
+The download is rejected unless it matches that hash, so a mirror cannot serve
+something else in its place.
+
+
+MeltySynth
+----------
+
+The synthesiser that reads the SoundFont is MeltySynth by Nobuaki Tanaka, also MIT,
+pulled in as a NuGet package: https://github.com/sinshu/meltysynth
