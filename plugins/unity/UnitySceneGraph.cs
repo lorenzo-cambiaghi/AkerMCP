@@ -70,22 +70,58 @@ namespace AkerMcp.Unity
             }
         }
 
+        /// <summary>
+        /// Creates a GameObject: empty, a primitive shape, or carrying the component <paramref name="type"/> names.
+        /// <para>
+        /// Every failure throws before anything is left in the scene. It used to succeed regardless: an unknown type
+        /// gave an empty GameObject named after it, a missing parent put the object at the scene root, and both were
+        /// reported as "created" — so the caller went on configuring a component that did not exist.
+        /// </para>
+        /// </summary>
         public ISceneNode CreateNode(string type, string? name, string? parentPath)
         {
-            var go = new GameObject(name ?? type);
-
+            Transform? parent = null;
             if (!string.IsNullOrEmpty(parentPath))
             {
-                var parent = FindByPath(parentPath);
-                if (parent != null)
-                    go.transform.SetParent(parent.transform, false);
+                var parentObject = FindByPath(parentPath)
+                    ?? throw new System.InvalidOperationException(
+                        $"Parent '{parentPath}' not found in the active scene; nothing was created.");
+                parent = parentObject.transform;
             }
 
-            var componentType = UnityCapabilities.ResolveUnityType(type);
-            if (componentType != null && typeof(Component).IsAssignableFrom(componentType) && componentType != typeof(Transform))
+            GameObject go;
+            if (UnityCapabilities.TryGetPrimitive(type, out var primitive))
             {
-                go.AddComponent(componentType);
+                go = GameObject.CreatePrimitive(primitive);
+                go.name = name ?? type;
             }
+            else if (UnityCapabilities.IsEmptyObjectType(type))
+            {
+                go = new GameObject(name ?? "GameObject");
+            }
+            else
+            {
+                var componentType = UnityCapabilities.ResolveComponentType(type, out var problem)
+                    ?? throw new System.InvalidOperationException(problem + " Nothing was created.");
+
+                go = new GameObject(name ?? type);
+                try
+                {
+                    // Unity refuses some types by logging and returning null (an editor-only script, a component the
+                    // GameObject cannot take) rather than throwing.
+                    if (go.AddComponent(componentType) == null)
+                        throw new System.InvalidOperationException(
+                            $"Unity refused to add {componentType.FullName} (the Console says why); nothing was created.");
+                }
+                catch
+                {
+                    Object.DestroyImmediate(go);
+                    throw;
+                }
+            }
+
+            if (parent != null)
+                go.transform.SetParent(parent, false);
 
 #if UNITY_EDITOR
             UnityEditor.Undo.RegisterCreatedObjectUndo(go, $"MCP: Create {type}");
@@ -102,11 +138,14 @@ namespace AkerMcp.Unity
             if (!recursive)
             {
                 // Preserve children: re-parent them (keeping world position) to the
-                // deleted object's parent before destroying the node itself.
+                // deleted object's parent before destroying the node itself. In their
+                // own order: each one lands last under the new parent, so walking them
+                // backwards reversed them.
                 var parent = go.transform.parent;
-                for (int i = go.transform.childCount - 1; i >= 0; i--)
+                var children = new List<Transform>(go.transform.childCount);
+                foreach (Transform c in go.transform) children.Add(c);
+                foreach (var child in children)
                 {
-                    var child = go.transform.GetChild(i);
 #if UNITY_EDITOR
                     UnityEditor.Undo.SetTransformParent(child, parent, "MCP: Detach child before delete");
 #else
@@ -132,7 +171,7 @@ namespace AkerMcp.Unity
         {
             if (string.IsNullOrEmpty(path)) return null;
 
-            var cleanPath = path.TrimStart('/');
+            var cleanPath = path!.TrimStart('/'); // Unity's IsNullOrEmpty carries no [NotNullWhen]
             var parts = cleanPath.Split('/');
 
             var scene = SceneManager.GetActiveScene();

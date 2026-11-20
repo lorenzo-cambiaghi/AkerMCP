@@ -38,7 +38,8 @@ namespace AkerMcp.Unity
             type = typeof(GameObject).Assembly.GetType($"UnityEngine.{typeName}");
             if (type != null) return type;
 
-            return null;
+            // Any component of any loaded assembly: physics 2D, AI, UI, TextMeshPro, the project's own scripts.
+            return ResolveComponentType(typeName, out _);
         }
 
         public void RegisterTypeAlias(string alias, Type type)
@@ -46,7 +47,133 @@ namespace AkerMcp.Unity
             _aliases[alias] = type;
         }
 
-        public static Type? ResolveUnityType(string typeName)
+        /// <summary>
+        /// The component type <c>create</c> adds for <paramref name="typeName"/>: a built-in alias, a full name
+        /// ("UnityEngine.UI.Image", "TMPro.TextMeshProUGUI") or a short name ("BoxCollider2D", "NavMeshAgent",
+        /// "PlayerController"), matched case-insensitively across every loaded assembly. Null with the reason in
+        /// <paramref name="problem"/> when nothing — or more than one thing — matches.
+        /// <para>
+        /// It used to look in UnityEngine.CoreModule only. Every component that lives elsewhere (Physics2D, AI, UI,
+        /// TextMeshPro, user MonoBehaviours) resolved to nothing, and <c>create</c> made an empty GameObject and
+        /// reported success.
+        /// </para>
+        /// </summary>
+        public static Type? ResolveComponentType(string typeName, out string? problem)
+        {
+            problem = null;
+            var name = (typeName ?? "").Trim();
+
+            if (Builtins.TryGetValue(name, out var builtin))
+                return builtin;
+
+            var index = ComponentIndex.Instance;
+            if (index.ByFullName.TryGetValue(name, out var exact))
+                return exact;
+
+            if (index.ByName.TryGetValue(name, out var candidates))
+            {
+                if (candidates.Count == 1) return candidates[0];
+
+                // The engine's own type wins a short-name clash with a package or project type of the same name.
+                var engine = candidates.Where(t => t.Namespace != null && t.Namespace.StartsWith("UnityEngine", StringComparison.Ordinal)).ToList();
+                if (engine.Count == 1) return engine[0];
+
+                problem = $"Component type '{name}' is ambiguous: {string.Join(", ", candidates.Select(t => t.FullName).OrderBy(n => n))}. " +
+                          "Pass the full name.";
+                return null;
+            }
+
+            problem = $"Unknown component type '{name}': no loaded assembly defines an addable Component with that name. " +
+                      "Use type \"GameObject\" for an empty object, a primitive (Cube, Sphere, Capsule, Cylinder, Plane, Quad), " +
+                      "or a component's name or full name (e.g. \"BoxCollider2D\", \"UnityEngine.UI.Image\").";
+            return null;
+        }
+
+        /// <summary>Kept for existing callers: the component type, or null.</summary>
+        public static Type? ResolveUnityType(string typeName) => ResolveComponentType(typeName, out _);
+
+        // Names that ask for a GameObject with nothing on it.
+        public static bool IsEmptyObjectType(string typeName)
+        {
+            switch ((typeName ?? "").Trim().ToLowerInvariant())
+            {
+                case "gameobject":
+                case "empty":
+                case "transform":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        // "Cube" etc. are not components: they are GameObject.CreatePrimitive shapes. They used to fall through to an
+        // empty GameObject that happened to be named "Cube".
+        public static bool TryGetPrimitive(string typeName, out PrimitiveType primitive)
+        {
+            switch ((typeName ?? "").Trim().ToLowerInvariant())
+            {
+                case "cube": primitive = PrimitiveType.Cube; return true;
+                case "sphere": primitive = PrimitiveType.Sphere; return true;
+                case "capsule": primitive = PrimitiveType.Capsule; return true;
+                case "cylinder": primitive = PrimitiveType.Cylinder; return true;
+                case "plane": primitive = PrimitiveType.Plane; return true;
+                case "quad": primitive = PrimitiveType.Quad; return true;
+                default: primitive = default; return false;
+            }
+        }
+
+        /// <summary>
+        /// Every addable component type of the loaded assemblies, by short and by full name. Built once per domain:
+        /// the set of compiled types only changes with a domain reload, which drops this cache along with the rest.
+        /// </summary>
+        private sealed class ComponentIndex
+        {
+            private static ComponentIndex? _instance;
+            public static ComponentIndex Instance => _instance ??= new ComponentIndex();
+
+            public readonly Dictionary<string, List<Type>> ByName = new Dictionary<string, List<Type>>(StringComparer.OrdinalIgnoreCase);
+            public readonly Dictionary<string, Type> ByFullName = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
+
+            private ComponentIndex()
+            {
+                foreach (var type in AllComponentTypes())
+                {
+                    // Not addable: abstract bases, open generics, and the Transform every GameObject already has.
+                    if (type.IsAbstract || type.IsGenericTypeDefinition || typeof(Transform).IsAssignableFrom(type))
+                        continue;
+                    if (type.FullName == null) continue;
+
+                    ByFullName[type.FullName] = type;
+                    if (!ByName.TryGetValue(type.Name, out var list))
+                        ByName[type.Name] = list = new List<Type>();
+                    list.Add(type);
+                }
+            }
+
+            private static IEnumerable<Type> AllComponentTypes()
+            {
+#if UNITY_EDITOR
+                // The editor's prebuilt index of derived types: no walk over every assembly.
+                return UnityEditor.TypeCache.GetTypesDerivedFrom<Component>();
+#else
+                var found = new List<Type>();
+                foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    Type[] types;
+                    try { types = assembly.GetTypes(); }
+                    catch (ReflectionTypeLoadException ex) { types = ex.Types.Where(t => t != null).ToArray()!; }
+                    catch { continue; }
+                    foreach (var t in types)
+                        if (typeof(Component).IsAssignableFrom(t)) found.Add(t);
+                }
+                return found;
+#endif
+            }
+        }
+
+        private static readonly Dictionary<string, Type> Builtins = CreateBuiltins();
+
+        private static Dictionary<string, Type> CreateBuiltins()
         {
             var builtins = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase)
             {
@@ -69,16 +196,7 @@ namespace AkerMcp.Unity
                 ["LineRenderer"] = typeof(LineRenderer),
                 ["ParticleSystem"] = typeof(ParticleSystem),
             };
-
-            if (builtins.TryGetValue(typeName, out var type))
-                return type;
-
-            // Try to find by name in loaded assemblies
-            type = typeof(GameObject).Assembly.GetType($"UnityEngine.{typeName}");
-            if (type != null && typeof(Component).IsAssignableFrom(type))
-                return type;
-
-            return null;
+            return builtins;
         }
 
         private void RegisterBuiltinTypes()
