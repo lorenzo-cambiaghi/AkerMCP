@@ -1,3 +1,4 @@
+#if TOOLS
 #nullable enable
 using System;
 using System.Collections.Generic;
@@ -11,10 +12,11 @@ namespace AkerMcp.GodotAdapter
 {
     /// <summary>
     /// Editor integration: selection, scene I/O, project path and a log buffer.
-    /// Note: Godot exposes no global log-capture hook (unlike Unity's
-    /// <c>Application.logMessageReceived</c>), so the console buffer only holds
-    /// messages routed through <see cref="Log"/> / <see cref="Append"/> — chiefly
-    /// the plugin's own output and <c>Log()</c> calls from `execute` scripts.
+    /// Note: up to Godot 4.4 there is no global log-capture hook (unlike Unity's
+    /// <c>Application.logMessageReceived</c>; <c>OS.AddLogger</c> only arrives in 4.5), so the
+    /// console buffer only holds messages routed through <see cref="Log"/> / <see cref="Append"/>:
+    /// the plugin's own output (<see cref="GodotMcpPlugin"/>'s Log/LogError) and <c>Log()</c>
+    /// calls from `execute` scripts. Engine errors and a bare <c>GD.Print</c> never reach it.
     /// </summary>
     public class GodotEditorContext : IEditorContext
     {
@@ -81,3 +83,4 @@ namespace AkerMcp.GodotAdapter
         }
     }
 }
+#endif

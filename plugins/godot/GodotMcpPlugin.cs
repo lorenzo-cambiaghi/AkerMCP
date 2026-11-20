@@ -1,3 +1,4 @@
+#if TOOLS
 #nullable enable
 using Godot;
 using AkerMcp.Client;
@@ -58,8 +59,28 @@ namespace AkerMcp.GodotAdapter
         protected override IPlayModeController? CreatePlayModeController() => new GodotPlayModeController();
         protected override ISoundImporter? CreateSoundImporter() => new GodotAudioImporter();
 
-        protected override void Log(string message) => GD.Print($"[AkerMcp] {message}");
-        protected override void LogError(string message) => GD.PrintErr($"[AkerMcp] {message}");
+        // Godot has no hook that hands a plugin the editor's console, so get_console_logs only ever
+        // sees what is appended to the context's buffer. These two printed and appended nothing: the
+        // buffer stayed empty for the plugin's whole life, and get_console_logs answered "no entries"
+        // even right after a pipe error had been printed.
+        protected override void Log(string message)
+        {
+            GD.Print($"[AkerMcp] {message}");
+            _editorContext?.Append(LogLevel.Info, message);
+        }
+
+        protected override void LogError(string message)
+        {
+            GD.PrintErr($"[AkerMcp] {message}");
+            _editorContext?.Append(LogLevel.Error, message);
+        }
+
+        /// <summary>
+        /// Adds a line to the buffer get_console_logs reads, for code that prints on its own (the
+        /// `execute` globals). A no-op while the plugin is not running.
+        /// </summary>
+        internal static void AppendToConsole(LogLevel level, string message)
+            => _instance?._editorContext?.Append(level, message);
 
         /// <summary>Drains the main-thread action queue. Called once per editor frame.</summary>
         public void Tick() => _dispatcher?.ProcessQueue();
@@ -71,3 +92,4 @@ namespace AkerMcp.GodotAdapter
         }
     }
 }
+#endif

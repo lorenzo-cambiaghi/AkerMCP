@@ -1,7 +1,9 @@
+#if TOOLS
 #nullable enable
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using Godot;
 using AkerMcp.Shared.Abstraction;
 
@@ -24,8 +26,8 @@ namespace AkerMcp.GodotAdapter
             var cfg = LoadPresets();
             if (cfg == null) return list;
 
-            foreach (var (_, name, _) in ReadPresets(cfg))
-                list.Add(new PlatformInfo { Name = name, IsActive = false, IsSupported = true });
+            foreach (var preset in ReadPresets(cfg))
+                list.Add(new PlatformInfo { Name = preset.Name, IsActive = false, IsSupported = true });
             return list;
         }
 
@@ -33,15 +35,19 @@ namespace AkerMcp.GodotAdapter
         {
             var cfg = LoadPresets();
             if (cfg == null) return NoPresets(platform);
-            if (!TryFindPreset(cfg, platform, out var section, out var godotPlatform))
+            if (!TryFindPreset(cfg, platform, out var preset))
                 return NotFound(platform);
 
-            var settings = new Dictionary<string, string> { ["__godotPlatform"] = godotPlatform };
-            var optSection = section + ".options";
+            var settings = new Dictionary<string, string>
+            {
+                ["__godotPlatform"] = preset.Platform,
+                ["__presetName"] = preset.Name,
+            };
+            var optSection = preset.Section + ".options";
             if (cfg.HasSection(optSection))
             {
                 foreach (var key in cfg.GetSectionKeys(optSection))
-                    settings[key] = cfg.GetValue(optSection, key).ToString();
+                    settings[key] = Format(cfg.GetValue(optSection, key));
             }
             return new BuildSettingsResult { Success = true, Platform = platform, Settings = settings };
         }
@@ -50,21 +56,39 @@ namespace AkerMcp.GodotAdapter
         {
             var cfg = LoadPresets();
             if (cfg == null) return NoPresets(platform);
-            if (!TryFindPreset(cfg, platform, out var section, out _))
+            if (!TryFindPreset(cfg, platform, out var preset))
                 return NotFound(platform);
 
-            var optSection = section + ".options";
+            var optSection = preset.Section + ".options";
+            var unknown = new List<string>();
+            var rejected = new List<string>();
             foreach (var kv in values)
             {
                 if (kv.Key.StartsWith("__")) continue; // informational keys are read-only
-                cfg.SetValue(optSection, kv.Key, Coerce(kv.Value));
+
+                // Only options the preset already has: the export dialog writes every option of the
+                // platform, so a key that is not there is a typo or belongs to another platform, and
+                // writing it would leave a dead line in export_presets.cfg.
+                if (!cfg.HasSectionKey(optSection, kv.Key))
+                {
+                    unknown.Add(kv.Key);
+                    continue;
+                }
+
+                if (TryCoerce(kv.Value, cfg.GetValue(optSection, kv.Key), out var value))
+                    cfg.SetValue(optSection, kv.Key, value);
+                else
+                    rejected.Add($"{kv.Key}='{kv.Value}' (expects {cfg.GetValue(optSection, kv.Key).VariantType})");
             }
 
             var saveErr = cfg.Save(PresetsPath);
             if (saveErr != Error.Ok)
                 return new BuildSettingsResult { Success = false, Platform = platform, Error = $"Failed to save export presets: {saveErr}" };
 
-            return GetPlatformSettings(platform);
+            var result = GetPlatformSettings(platform);
+            if (unknown.Count > 0) result.UnknownKeys = unknown;
+            if (rejected.Count > 0) result.Error = "Not applied, the value does not fit the option's type: " + string.Join(", ", rejected);
+            return result;
         }
 
         public PlatformSwitchResult SwitchPlatform(string platform)
@@ -84,7 +108,7 @@ namespace AkerMcp.GodotAdapter
             var cfg = LoadPresets();
             if (cfg == null)
                 return new BuildResult { Success = false, Error = "No export_presets.cfg found. Create an export preset in the editor first." };
-            if (!TryFindPreset(cfg, request.Platform, out _, out _))
+            if (!TryFindPreset(cfg, request.Platform, out var preset))
                 return new BuildResult { Success = false, Error = $"Unknown export preset '{request.Platform}'. Call list_platforms." };
 
             string outAbs = ResolveOutputPath(request.OutputPath);
@@ -94,7 +118,10 @@ namespace AkerMcp.GodotAdapter
                 "--headless",
                 "--path", ProjectSettings.GlobalizePath("res://"),
                 request.Development ? "--export-debug" : "--export-release",
-                request.Platform,
+                // The preset's exact name. The preset is matched loosely (any case, or by platform),
+                // but the CLI wants the name as written: "windows" for a preset called
+                // "Windows Desktop" failed with "Invalid export preset name".
+                preset.Name,
                 outAbs
             };
 
@@ -113,18 +140,38 @@ namespace AkerMcp.GodotAdapter
             bool ok = exit == 0 && fileExists;
             long size = fileExists ? new System.IO.FileInfo(outAbs).Length : 0;
 
+            // Godot exports what the preset's resource filter selects; there is no per-build scene
+            // list to pass. Said out loud, so a caller does not assume its list was honoured.
+            string scenesNote = request.Scenes is { Length: > 0 }
+                ? " Note: 'scenes' is ignored on Godot; the preset's Resources filter decides what is exported."
+                : "";
+
             return new BuildResult
             {
                 Success = ok,
                 OutputPath = ok ? outAbs : null,
                 SizeBytes = size,
                 DurationSeconds = sw.Elapsed.TotalSeconds,
-                Summary = ok ? $"Export succeeded → {outAbs}" : $"Export exited with code {exit}",
-                Error = ok ? null : $"Export failed (exit {exit}).\n{Tail(log.ToString(), 1500)}"
+                Summary = (ok ? $"Export of preset '{preset.Name}' succeeded → {outAbs}" : $"Export exited with code {exit}") + scenesNote,
+                Error = ok ? null : $"Export of preset '{preset.Name}' failed (exit {exit}).\n{Tail(log.ToString(), 1500)}"
             };
         }
 
         // --- helpers -------------------------------------------------------------
+
+        private readonly struct Preset
+        {
+            public Preset(string section, string name, string platform)
+            {
+                Section = section;
+                Name = name;
+                Platform = platform;
+            }
+
+            public string Section { get; }
+            public string Name { get; }
+            public string Platform { get; }
+        }
 
         private static ConfigFile? LoadPresets()
         {
@@ -132,7 +179,7 @@ namespace AkerMcp.GodotAdapter
             return cfg.Load(PresetsPath) == Error.Ok ? cfg : null;
         }
 
-        private static IEnumerable<(string section, string name, string platform)> ReadPresets(ConfigFile cfg)
+        private static IEnumerable<Preset> ReadPresets(ConfigFile cfg)
         {
             foreach (var section in cfg.GetSections())
             {
@@ -140,26 +187,28 @@ namespace AkerMcp.GodotAdapter
                 {
                     var name = cfg.GetValue(section, "name", "").AsString();
                     var platform = cfg.GetValue(section, "platform", "").AsString();
-                    yield return (section, name, platform);
+                    yield return new Preset(section, name, platform);
                 }
             }
         }
 
-        private static bool TryFindPreset(ConfigFile cfg, string platform, out string section, out string godotPlatform)
+        // An exact preset name wins over a platform match, so "Windows Desktop" still picks that
+        // preset when another one happens to be named after a platform.
+        private static bool TryFindPreset(ConfigFile cfg, string platform, out Preset found)
         {
-            foreach (var (sec, name, plat) in ReadPresets(cfg))
+            Preset? byPlatform = null;
+            foreach (var preset in ReadPresets(cfg))
             {
-                if (string.Equals(name, platform, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(plat, platform, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(preset.Name, platform, StringComparison.OrdinalIgnoreCase))
                 {
-                    section = sec;
-                    godotPlatform = plat;
+                    found = preset;
                     return true;
                 }
+                if (byPlatform == null && string.Equals(preset.Platform, platform, StringComparison.OrdinalIgnoreCase))
+                    byPlatform = preset;
             }
-            section = "";
-            godotPlatform = "";
-            return false;
+            found = byPlatform ?? default;
+            return byPlatform != null;
         }
 
         private static string ResolveOutputPath(string path)
@@ -171,13 +220,58 @@ namespace AkerMcp.GodotAdapter
             return ProjectSettings.GlobalizePath("res://" + path.TrimStart('/'));
         }
 
-        private static Variant Coerce(string v)
+        // The type comes from the value the option already holds, not from the look of the text:
+        // guessing turned a version string "1.10" into the float 1.1 (and "1.0" into 1), which
+        // export_presets.cfg then kept as a number.
+        private static bool TryCoerce(string text, Variant existing, out Variant value)
         {
-            if (bool.TryParse(v, out var b)) return b;
-            if (long.TryParse(v, out var l)) return l;
-            if (double.TryParse(v, System.Globalization.NumberStyles.Any,
-                    System.Globalization.CultureInfo.InvariantCulture, out var d)) return d;
-            return v;
+            var inv = CultureInfo.InvariantCulture;
+            switch (existing.VariantType)
+            {
+                case Variant.Type.Bool:
+                    if (bool.TryParse(text, out var b)) { value = b; return true; }
+                    if (text == "0" || text == "1") { value = text == "1"; return true; }
+                    break;
+                case Variant.Type.Int:
+                    if (long.TryParse(text, NumberStyles.Integer, inv, out var l)) { value = l; return true; }
+                    break;
+                case Variant.Type.Float:
+                    if (double.TryParse(text, NumberStyles.Float, inv, out var d)) { value = d; return true; }
+                    break;
+                case Variant.Type.String:
+                case Variant.Type.StringName:
+                case Variant.Type.NodePath:
+                case Variant.Type.Nil:
+                    value = text;
+                    return true;
+                default:
+                    // Arrays, dictionaries, packed arrays: Godot's own literal form, as Format
+                    // shows them, e.g. PackedStringArray("a", "b").
+                    var parsed = GD.StrToVar(text);
+                    if (parsed.VariantType == existing.VariantType) { value = parsed; return true; }
+                    break;
+            }
+            value = default;
+            return false;
+        }
+
+        // Scalars as plain text; anything else in Godot's own literal form (PackedStringArray("a", "b")),
+        // which is what TryCoerce parses back — the plain form ("[a, b]") would not round-trip.
+        private static string Format(Variant v)
+        {
+            switch (v.VariantType)
+            {
+                case Variant.Type.Nil:
+                case Variant.Type.Bool:
+                case Variant.Type.Int:
+                case Variant.Type.Float:
+                case Variant.Type.String:
+                case Variant.Type.StringName:
+                case Variant.Type.NodePath:
+                    return v.ToString();
+                default:
+                    return GD.VarToStr(v);
+            }
         }
 
         private static string Tail(string s, int max)
@@ -198,3 +292,4 @@ namespace AkerMcp.GodotAdapter
         };
     }
 }
+#endif

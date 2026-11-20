@@ -1,5 +1,7 @@
+#if TOOLS
 #nullable enable
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Godot;
 using AkerMcp.Shared.Abstraction;
@@ -8,65 +10,114 @@ namespace AkerMcp.GodotAdapter
 {
     /// <summary>
     /// Imports a server-synthesized WAV as a Godot AudioStreamWav and optionally places an
-    /// AudioStreamPlayer2D in the edited scene. Runs on the main thread (dispatched by the IPC
-    /// handler). Builds the stream straight from the PCM so placement doesn't wait on the
-    /// editor's async (re)import — mirroring GodotSpriteImporter.
+    /// audio player in the edited scene. Runs on the main thread (dispatched by the IPC
+    /// handler). The WAV goes through the editor's importer, like GodotSpriteImporter's PNG,
+    /// so the scene references the file instead of carrying the samples.
     /// </summary>
     public class GodotAudioImporter : ISoundImporter
     {
         private const string ResDir = "res://placeholders";
+
+        // ResourceImporterWAV's edit/loop_mode: 0 Detect From WAV, 1 Disabled, 2 Forward,
+        // 3 Ping-Pong, 4 Backward. Our WAV carries no smpl chunk, so "detect" means no loop.
+        private const int LoopModeDetect = 0;
+        private const int LoopModeForward = 2;
 
         public SoundImportResult ImportSound(SoundImportRequest req)
         {
             var safeName = Sanitize(req.Name);
             var resPath = $"{ResDir}/{safeName}.wav";
 
-            var globalDir = ProjectSettings.GlobalizePath(ResDir);
-            Directory.CreateDirectory(globalDir);
-            File.WriteAllBytes(ProjectSettings.GlobalizePath(resPath), req.Wav);
-            EditorInterface.Singleton.GetResourceFilesystem()?.Scan();
+            bool hasPosition = req.PosX.HasValue || req.PosY.HasValue || req.PosZ.HasValue;
+            bool place = !string.IsNullOrEmpty(req.ScenePath) || hasPosition || req.AutoPlay;
+            // Resolved before anything is written; see GodotSpriteImporter for why not GetNodeOrNull.
+            var parent = place ? GodotSpriteImporter.ResolveParent(req.ScenePath) : null;
 
-            var stream = BuildStream(req.Wav, req.Loop);
+            Directory.CreateDirectory(ProjectSettings.GlobalizePath(ResDir));
+            File.WriteAllBytes(ProjectSettings.GlobalizePath(resPath), req.Wav);
+
+            // Looping belongs to the stream, and an imported stream takes it from its import
+            // options: set on the loaded instance it would be lost on the next editor start.
+            var importParams = new Dictionary<string, Variant>
+            {
+                ["edit/loop_mode"] = req.Loop ? LoopModeForward : LoopModeDetect,
+                ["edit/loop_begin"] = 0,
+                ["edit/loop_end"] = -1,
+            };
+
+            string? note = place && parent == null ? " No scene is open in the editor, so no player was placed." : null;
+            AudioStream? stream = GodotResourceImport.ImportAndLoad<AudioStream>(resPath, importParams);
+            if (stream == null && parent != null)
+            {
+                // The editor could not import it now (a full scan is running): place a stream built
+                // from the samples, which the scene embeds, rather than nothing.
+                stream = BuildStream(req.Wav, req.Loop);
+                note = " The editor was busy scanning, so the sound is embedded in the scene for now; " +
+                       "run create_sound again once the scan ends to reference the file instead.";
+            }
+            else if (stream == null)
+            {
+                note += " The editor imports the file on its next filesystem scan.";
+            }
 
             string? nodePath = null;
-            bool place = !string.IsNullOrEmpty(req.ScenePath) || req.PosX.HasValue || req.PosY.HasValue || req.AutoPlay;
-            if (place && stream != null)
+            Node? player = null;
+            if (parent != null && stream != null)
             {
-                var root = EditorInterface.Singleton.GetEditedSceneRoot();
-                if (root != null)
-                {
-                    var player = new AudioStreamPlayer2D
-                    {
-                        Name = safeName,
-                        Stream = stream,
-                        VolumeDb = LinearToDb(req.Volume),
-                        Autoplay = req.AutoPlay,
-                        Position = new Vector2(req.PosX ?? 0f, req.PosY ?? 0f),
-                    };
+                player = CreatePlayer(req, parent, hasPosition, stream);
+                player.Name = safeName;
 
-                    Node parent = root;
-                    if (!string.IsNullOrEmpty(req.ScenePath))
-                    {
-                        var found = root.GetNodeOrNull(req.ScenePath);
-                        if (found != null) parent = found;
-                    }
-                    parent.AddChild(player);
-                    player.Owner = root; // serialize with the scene
-                    nodePath = player.GetPath().ToString();
-                }
+                GodotSceneGraph.AddChildUndoable(parent, player, $"AkerMcp: Place sound {safeName}");
+                nodePath = new GodotSceneNode(player).Path;
             }
 
             return new SoundImportResult
             {
                 AssetPath = resPath,
                 NodePath = nodePath,
-                Message = nodePath != null
-                    ? $"Imported sound '{safeName}' and placed a player at {nodePath}."
-                    : $"Imported sound '{safeName}' at {resPath}."
+                Message = (nodePath != null && player != null
+                    ? $"Imported sound '{safeName}' and placed an {player.GetClass()} at {nodePath}."
+                    : $"Imported sound '{safeName}' at {resPath}.") + note
             };
         }
 
-        // Parse our own 44-byte PCM WAV header and build an AudioStreamWav from the samples.
+        // The player type follows what the sound is for. It was always an AudioStreamPlayer2D, so
+        // music and UI sounds were panned and attenuated by the 2D camera, and in a 3D scene the
+        // player sat outside the 3D world entirely.
+        //   no position            → AudioStreamPlayer   (non-positional: music, UI)
+        //   z given, or a 3D place → AudioStreamPlayer3D
+        //   otherwise              → AudioStreamPlayer2D
+        private static Node CreatePlayer(SoundImportRequest req, Node parent, bool hasPosition, AudioStream stream)
+        {
+            float volumeDb = LinearToDb(req.Volume);
+            if (!hasPosition)
+                return new AudioStreamPlayer { Stream = stream, VolumeDb = volumeDb, Autoplay = req.AutoPlay };
+
+            if (req.PosZ.HasValue || Is3DPlace(parent))
+                return new AudioStreamPlayer3D
+                {
+                    Stream = stream, VolumeDb = volumeDb, Autoplay = req.AutoPlay,
+                    Position = new Vector3(req.PosX ?? 0f, req.PosY ?? 0f, req.PosZ ?? 0f),
+                };
+
+            return new AudioStreamPlayer2D
+            {
+                Stream = stream, VolumeDb = volumeDb, Autoplay = req.AutoPlay,
+                Position = new Vector2(req.PosX ?? 0f, req.PosY ?? 0f),
+            };
+        }
+
+        // The parent decides first (a positional player is positioned relative to it); a plain
+        // Node parent defers to the scene root.
+        private static bool Is3DPlace(Node parent)
+        {
+            if (parent is Node3D) return true;
+            if (parent is CanvasItem) return false;
+            return EditorInterface.Singleton.GetEditedSceneRoot() is Node3D;
+        }
+
+        // Fallback only (see ImportSound): parse our own 44-byte PCM WAV header and build an
+        // AudioStreamWav from the samples.
         private static AudioStreamWav? BuildStream(byte[] wav, bool loop)
         {
             if (wav == null || wav.Length <= 44) return null;
@@ -102,3 +153,4 @@ namespace AkerMcp.GodotAdapter
         }
     }
 }
+#endif
