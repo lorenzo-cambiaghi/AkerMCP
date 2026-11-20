@@ -1670,6 +1670,12 @@ namespace AkerMcp.Server
                 StdioTransport.LogInfo(
                     $"Engine capture returned no image ({engineResult.ErrorCode ?? engineResult.Error ?? "null"}); using OS-level fallback.");
 
+                // The game view of a game running in its own window (Godot) is that window, not the editor's: the
+                // same routing capture_sequence and send_input already make after enter_play.
+                if (!string.IsNullOrWhiteSpace(_gameWindowTitle)
+                    && string.Equals(ReadString(args, "view"), "game", StringComparison.OrdinalIgnoreCase))
+                    return CaptureWindowJpeg(_gameWindowTitle!);
+
                 var windowText = await _engine.ForwardResourceRead(
                     IpcConstants.Methods.GetWindowInfo, ct);
                 if (string.IsNullOrEmpty(windowText) || windowText.StartsWith("Error:"))
@@ -1752,6 +1758,7 @@ namespace AkerMcp.Server
 
             var content = new List<ContentItem>();
             var sw = System.Diagnostics.Stopwatch.StartNew();
+            int captured = 0;
             for (int i = 0; i < count; i++)
             {
                 if (i > 0 && intervalMs > 0)
@@ -1768,13 +1775,14 @@ namespace AkerMcp.Server
                     content.Add(ContentItem.FromText($"frame {i + 1}/{count} failed: {error}"));
                     break;
                 }
+                captured++;
                 content.Add(ContentItem.FromText($"frame {i + 1}/{count} @ ~{sw.Elapsed.TotalSeconds:0.0}s"));
                 content.Add(ContentItem.FromImage(Convert.ToBase64String(jpeg), "image/jpeg"));
             }
 
-            if (content.Count == 0)
-                return ToolResult.Error("capture_sequence produced no frames.");
-            return new ToolResult { Content = content };
+            // Counted, not inferred from the content: a first frame that failed leaves its error text there, and
+            // "no content" never happened — a sequence with no picture at all came back as a success.
+            return new ToolResult { Content = content, IsError = captured == 0 };
         }
 
         // Capture an OS window (by title substring) as a normalized JPEG — for capture_sequence's

@@ -873,6 +873,11 @@ namespace AkerMcp.Loopback
             var both = await Call(reg, "ui_action", new { action = "left_click", x = 1, y = 1, steps = new object[] { new { action = "wait" } } });
             Check("ui_action refuses 'action' and 'steps' together", both.IsError && Text(both).Contains("not both"), Text(both));
 
+            // A sequence that captured nothing is an error: a first frame that failed left its message in the content,
+            // which then counted as a result.
+            var noFrames = await Call(reg, "capture_sequence", new { count = 2, interval_ms = 10, window_title = "no-such-window-" + Guid.NewGuid().ToString("N") });
+            Check("capture_sequence with no frame captured is an error", noFrames.IsError && CountImages(noFrames) == 0, Text(noFrames));
+
             var pt = await Call(reg, "playtest", new
             {
                 steps = new object[]
