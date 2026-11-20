@@ -3,7 +3,6 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
-using System.IO;
 using System.Reflection;
 using Stride.Assets.Entities;
 using Stride.Core.Assets;
@@ -74,7 +73,7 @@ namespace AkerMcp.StrideAdapter
                 throw new NotSupportedException(
                     $"Only one level of struct nesting is supported (e.g. 'Transform.Position.X'); '{propertyPath}' is deeper.");
 
-            var memberNode = node.TryGetChild(segments[0])
+            var memberNode = FindMember(node, segments[0])
                 ?? throw new InvalidOperationException($"Member '{segments[0]}' not found on {target.GetType().Name}.");
 
             var undo = session.ServiceProvider.Get<IUndoRedoService>();
@@ -108,6 +107,15 @@ namespace AkerMcp.StrideAdapter
         }
 
         public static Entity CreateEntity(string name, Guid? parentId)
+            => AddEntity(new Entity { Name = name }, parentId, $"Create entity {name}");
+
+        /// <summary>
+        /// Adds a fully built <paramref name="entity"/> (components included) to the edited
+        /// scene asset, last under <paramref name="parentId"/> or at the root, as one
+        /// undoable step. Going through the asset's hierarchy graph is what makes it a
+        /// real, saved part of the scene: the editor game picks it up from there.
+        /// </summary>
+        public static Entity AddEntity(Entity entity, Guid? parentId, string undoName)
         {
             var (session, editor, asset) = RequireSceneContext();
             var graph = HierarchyGraph(editor);
@@ -120,7 +128,6 @@ namespace AkerMcp.StrideAdapter
                 parent = pdesign.Entity;
             }
 
-            var entity = new Entity { Name = name };
             var design = new EntityDesign(entity);
             var collection = new AssetPartCollection<EntityDesign, Entity>();
             collection.Add(design);
@@ -130,7 +137,7 @@ namespace AkerMcp.StrideAdapter
             using (var tx = undo.CreateTransaction())
             {
                 graph.AddPartToAsset(collection, design, parent, index);
-                undo.SetName(tx, $"Create entity {name}");
+                undo.SetName(tx, undoName);
             }
             return entity;
         }
@@ -166,6 +173,12 @@ namespace AkerMcp.StrideAdapter
 
         // --- editor navigation ---------------------------------------------------
 
+        /// <summary>
+        /// The scene (or prefab) editor the user is working in: the one whose docking
+        /// pane is active, else the one whose tab is in front, else the first one open.
+        /// Taking simply the first, as before, made every tool act on whichever scene
+        /// happened to be opened first when several were open.
+        /// </summary>
         internal static EntityHierarchyEditorViewModel? FindActiveEntityEditor()
         {
             try
@@ -173,6 +186,25 @@ namespace AkerMcp.StrideAdapter
                 var manager = Session?.ServiceProvider.Get<IAssetEditorsManager>();
                 if (manager == null) { Log("no IAssetEditorsManager"); return null; }
 
+                // Game Studio's AssetEditorsManager keeps each editor with its AvalonDock
+                // pane in a private map (stock and source builds alike). The pane says
+                // where the user is: IsActive for the focused one, IsSelected for the tab
+                // in front of its group. Read by reflection: the map is private, and naming
+                // AvalonDock's types would bind us to its version.
+                if (GetFieldUpChain(manager, "assetEditors") is IDictionary panes)
+                {
+                    EntityHierarchyEditorViewModel? inFront = null, first = null;
+                    foreach (DictionaryEntry entry in panes)
+                    {
+                        if (entry.Key is not EntityHierarchyEditorViewModel editor) continue;
+                        first ??= editor;
+                        if (ReadBool(entry.Value, "IsActive")) return editor;
+                        if (inFront == null && ReadBool(entry.Value, "IsSelected")) inFront = editor;
+                    }
+                    if (inFront != null || first != null) return inFront ?? first;
+                }
+
+                // No pane map in this build: fall back to the editor list, in opening order.
                 var editorsProp = manager.GetType().GetProperty("EditorViewModels",
                     BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance);
                 if (editorsProp?.GetValue(manager) is not IEnumerable editors)
@@ -188,6 +220,13 @@ namespace AkerMcp.StrideAdapter
                 return null;
             }
             catch (Exception ex) { Log($"FindActiveEntityEditor failed: {ex.Message}"); return null; }
+        }
+
+        private static bool ReadBool(object? instance, string property)
+        {
+            if (instance == null) return false;
+            try { return instance.GetType().GetProperty(property, BindingFlags.Public | BindingFlags.Instance)?.GetValue(instance) is true; }
+            catch { return false; }
         }
 
         /// <summary>The live editor preview Game of the active scene editor, or null.</summary>
@@ -218,10 +257,7 @@ namespace AkerMcp.StrideAdapter
                     return null;
                 }
 
-                var cs = ehGame.ContentScene; // public; null until the scene finishes loading
-                if (cs != null)
-                    Log($"ContentScene: {cs.Entities.Count} entities, {cs.Children.Count} child scenes");
-                return cs;
+                return ehGame.ContentScene; // public; null until the scene finishes loading
             }
             catch (Exception ex) { Log($"ContentSceneOf failed: {ex.Message}"); return null; }
         }
@@ -248,17 +284,33 @@ namespace AkerMcp.StrideAdapter
             return i < 0 ? ("Transform", path) : (path.Substring(0, i), path.Substring(i + 1));
         }
 
+        // Case-insensitive: "transform.position" and "light.Color" are how a model writes
+        // them, and nothing on an entity differs from another component only by case.
         private static object? ResolveComponent(Entity entity, string selector)
         {
-            if (selector is "Transform" or "TransformComponent")
+            if (string.Equals(selector, "Transform", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(selector, "TransformComponent", StringComparison.OrdinalIgnoreCase))
                 return entity.Transform;
 
             foreach (var c in entity.Components)
             {
                 var n = c.GetType().Name;
-                if (n == selector || n == selector + "Component")
+                if (string.Equals(n, selector, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(n, selector + "Component", StringComparison.OrdinalIgnoreCase))
                     return c;
             }
+            return null;
+        }
+
+        // Exact name first (cheap, and right whenever two members differ only by case),
+        // then case-insensitive.
+        private static IMemberNode? FindMember(IObjectNode node, string name)
+        {
+            var exact = node.TryGetChild(name);
+            if (exact != null) return exact;
+            foreach (var member in node.Members)
+                if (string.Equals(member.Name, name, StringComparison.OrdinalIgnoreCase))
+                    return member;
             return null;
         }
 
@@ -294,15 +346,17 @@ namespace AkerMcp.StrideAdapter
             return null;
         }
 
-        private static void Log(string msg)
+        private static object? GetFieldUpChain(object instance, string name)
         {
-            try
+            for (var t = instance.GetType(); t != null; t = t.BaseType)
             {
-                File.AppendAllText(
-                    Path.Combine(Path.GetTempPath(), "akermcp-stride.log"),
-                    $"{DateTime.Now:HH:mm:ss} [scene-bridge] {msg}{Environment.NewLine}");
+                var field = t.GetField(name,
+                    BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+                if (field != null) return field.GetValue(instance);
             }
-            catch { /* diagnostics must never throw */ }
+            return null;
         }
+
+        private static void Log(string msg) => StrideDiag.Log("scene-bridge", msg);
     }
 }

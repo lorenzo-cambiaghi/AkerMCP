@@ -402,7 +402,7 @@ Every tool carries the four MCP hints (read-only, destructive, idempotent, open-
 | `create_music` | full | Sequence a chiptune loop over the same voice and import it as an audio clip |
 | `add_primitive` | full | Write a vetted gameplay script (2D platformer controller, auto-runner, camera follow, kill zone, score overlay) |
 
-> **Engine support:** `create_sprite` imports + places a sprite on **Unity** and **Godot**; on **Stride** it persists a real `.sdtex` texture asset in the package (via the editor's `SessionViewModel`) and also adds a runtime preview entity for immediate visibility. `create_sound` works on **Unity** and **Godot**; **Stride** has no sound importer yet and says so. `add_primitive` carries Unity variants only for now, and when it cannot serve your engine it names the ones a given primitive exists for. `new_scene`/`open_scene`/`save_scene` work on **Unity** and **Godot** (file-on-disk scenes) and on **Stride** (package-managed `SceneAsset` via the editor). `write_script` works on all three. *(Stride's `create_sprite` + scene creation are verified live in Game Studio.)*
+> **Engine support:** `create_sprite` imports + places a sprite on **Unity** and **Godot**; on **Stride** it creates a sprite sheet asset (`.sdsheet`, honouring pixels-per-unit and pivot) in the package and, when you pass `scene_path` or `position`, adds an entity with a `SpriteComponent` to the open scene through its undoable hierarchy, so it is saved with the scene. `create_sound` works on **Unity** and **Godot**; **Stride** has no sound importer yet and says so. `add_primitive` carries Unity variants only for now, and when it cannot serve your engine it names the ones a given primitive exists for. `new_scene`/`open_scene`/`save_scene` work on **Unity** and **Godot** (file-on-disk scenes) and on **Stride** (package-managed `SceneAsset` via the editor). `write_script` works on all three. *(Stride's scene creation is verified live in Game Studio; its sprite-sheet import and placement are build-verified only so far.)*
 
 **`add_primitive` next to `write_script`**: `write_script` writes the source you hand it, so the file is whatever the model composed. `add_primitive` writes a file the model did not compose. The server keeps five gameplay scripts that already work, picks the variant for the connected engine and sends it down the same write path. Call it with no `id` and it lists the catalog; call it with one and it reports the file it wrote, the public fields you can set, and what to do next.
 
@@ -873,6 +873,9 @@ AkerMCP/
 │       ├── StrideCompilationSupport.cs  `dotnet build` + MSBuild diagnostics
 │       ├── StrideScreenCapture.cs       Scene-view back-buffer capture (Texture.Save)
 │       ├── StrideBuildManager.cs        Platform/build (executable projects)
+│       ├── StrideProcessRunner.cs       `dotnet build` runner (timeout, tree kill) + MSBuild diagnostic parser
+│       ├── StrideUiWait.cs              Awaiting editor tasks on the WPF thread without freezing it
+│       ├── StrideDiag.cs                Size-capped %TEMP%\akermcp-stride.log
 │       └── StrideCodeExecutor.cs        Roslyn-powered C# execution engine
 │   ├── stride-startuphook/             DOTNET_STARTUP_HOOKS bootstrap (binary-install path)
 │   │   └── StartupHook.cs               Registers the adapter once Game Studio loads

@@ -1,10 +1,10 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 using AkerMcp.Shared.Abstraction;
 using Stride.Core.Assets.Editor.ViewModel;
 
@@ -18,18 +18,18 @@ namespace AkerMcp.StrideAdapter
     /// </summary>
     public class StrideCompilationSupport : ICompilationSupport
     {
+        // A game project build that takes longer than this is hung (a locked file, a
+        // prompt nobody sees): its tree is killed and the build reported as failed.
+        private static readonly TimeSpan BuildTimeout = TimeSpan.FromMinutes(3);
+
         private readonly object _lock = new();
         private readonly List<CompileMessage> _messages = new();
-        private volatile bool _isCompiling;
+        private int _isCompiling;
         private bool _lastSucceeded = true;
         private DateTime _lastTime = DateTime.MinValue;
 
         private readonly string? _csprojPath;
         private readonly string _projectDir;
-
-        private static readonly Regex MsBuildLine = new(
-            @"^(?<file>.+?)\((?<line>\d+),(?<col>\d+)\):\s+(?<sev>error|warning)\s+\w+:\s+(?<msg>.+?)(?:\s+\[[^\]]*\])?\s*$",
-            RegexOptions.Compiled);
 
         public StrideCompilationSupport(SessionViewModel session)
         {
@@ -60,25 +60,14 @@ namespace AkerMcp.StrideAdapter
         {
             if (_csprojPath == null)
             {
-                lock (_lock)
-                {
-                    _messages.Clear();
-                    _messages.Add(new CompileMessage
-                    {
-                        Type = CompileMessageType.Error,
-                        Message = "No game .csproj found for the current project; cannot build.",
-                        File = "", Line = 0, Column = 0
-                    });
-                }
-                _lastSucceeded = false;
-                _lastTime = DateTime.Now;
+                Finish(new List<CompileMessage> { Error("No game .csproj found for the current project; cannot build.") }, false);
                 return;
             }
 
-            if (_isCompiling) return;
-            _isCompiling = true;
+            // Two refresh_scripts racing must not start two builds of the same project.
+            if (Interlocked.CompareExchange(ref _isCompiling, 1, 0) != 0) return;
             lock (_lock) _messages.Clear();
-            System.Threading.Tasks.Task.Run(RunBuild);
+            Task.Run(RunBuild);
         }
 
         public CompilationStatus GetCompilationStatus()
@@ -87,7 +76,7 @@ namespace AkerMcp.StrideAdapter
             {
                 return new CompilationStatus
                 {
-                    IsCompiling = _isCompiling,
+                    IsCompiling = Volatile.Read(ref _isCompiling) != 0,
                     IsImporting = false,
                     LastCompileSucceeded = _lastSucceeded,
                     ErrorCount = _messages.Count(m => m.Type == CompileMessageType.Error),
@@ -107,81 +96,66 @@ namespace AkerMcp.StrideAdapter
             lock (_lock) _messages.Clear();
         }
 
-        private void RunBuild()
+        private async Task RunBuild()
         {
             var parsed = new List<CompileMessage>();
             bool success = false;
             try
             {
-                var psi = new ProcessStartInfo
+                var run = await StrideProcessRunner.RunAsync(
+                    "dotnet", new[] { "build", _csprojPath!, "-c", "Debug", "--nologo", "-v", "quiet" },
+                    _projectDir, BuildTimeout).ConfigureAwait(false);
+
+                foreach (var d in MsBuildDiagnostics.Parse(run.StdOut, run.StdErr))
                 {
-                    FileName = "dotnet",
-                    Arguments = $"build \"{_csprojPath}\" -c Debug --nologo -v quiet",
-                    WorkingDirectory = _projectDir,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
+                    parsed.Add(new CompileMessage
+                    {
+                        Type = d.IsError ? CompileMessageType.Error : CompileMessageType.Warning,
+                        Message = d.Text,
+                        File = d.Origin,
+                        Line = d.Line,
+                        Column = d.Column
+                    });
+                }
 
-                using var proc = Process.Start(psi)
-                    ?? throw new InvalidOperationException("Failed to start dotnet.");
+                if (run.TimedOut)
+                    parsed.Add(Error($"'dotnet build' did not finish within {BuildTimeout.TotalMinutes:0} minutes; its process tree was killed."));
+                else if (run.ExitCode != 0 && !parsed.Any(m => m.Type == CompileMessageType.Error))
+                {
+                    // A failure MSBuild did not phrase as a diagnostic: show what it said
+                    // rather than "failed with 0 errors".
+                    var lines = MsBuildDiagnostics.FallbackLines(run);
+                    parsed.Add(Error($"'dotnet build' failed (exit {run.ExitCode})" +
+                                     (lines.Count > 0 ? ":\n" + string.Join("\n", lines) : ".")));
+                }
 
-                string stdout = proc.StandardOutput.ReadToEnd();
-                string stderr = proc.StandardError.ReadToEnd();
-                proc.WaitForExit(180_000);
-
-                ParseDiagnostics(stdout, parsed);
-                ParseDiagnostics(stderr, parsed);
-                success = proc.HasExited && proc.ExitCode == 0
+                success = !run.TimedOut && run.ExitCode == 0
                           && !parsed.Any(m => m.Type == CompileMessageType.Error);
             }
             catch (Exception ex)
             {
-                parsed.Add(new CompileMessage
-                {
-                    Type = CompileMessageType.Error,
-                    Message = $"Failed to run 'dotnet build': {ex.Message}. Is the .NET SDK on PATH?",
-                    File = "", Line = 0, Column = 0
-                });
+                parsed.Add(Error($"Failed to run 'dotnet build': {ex.Message}. Is the .NET SDK on PATH?"));
             }
             finally
             {
-                lock (_lock)
-                {
-                    _messages.Clear();
-                    _messages.AddRange(parsed);
-                }
+                Finish(parsed, success);
+                Volatile.Write(ref _isCompiling, 0);
+            }
+        }
+
+        private void Finish(List<CompileMessage> messages, bool success)
+        {
+            lock (_lock)
+            {
+                _messages.Clear();
+                _messages.AddRange(messages);
                 _lastSucceeded = success;
                 _lastTime = DateTime.Now;
-                _isCompiling = false;
             }
         }
 
-        private static void ParseDiagnostics(string output, List<CompileMessage> into)
-        {
-            if (string.IsNullOrEmpty(output)) return;
-            var seen = new HashSet<string>(into.Select(Key));
-
-            foreach (var raw in output.Split('\n'))
-            {
-                var m = MsBuildLine.Match(raw.Trim());
-                if (!m.Success) continue;
-
-                var msg = new CompileMessage
-                {
-                    Type = m.Groups["sev"].Value == "error" ? CompileMessageType.Error : CompileMessageType.Warning,
-                    Message = m.Groups["msg"].Value.Trim(),
-                    File = m.Groups["file"].Value.Trim(),
-                    Line = int.Parse(m.Groups["line"].Value),
-                    Column = int.Parse(m.Groups["col"].Value)
-                };
-
-                if (seen.Add(Key(msg))) into.Add(msg);
-            }
-        }
-
-        private static string Key(CompileMessage m) => $"{m.File}|{m.Line}|{m.Column}|{m.Message}";
+        private static CompileMessage Error(string message)
+            => new CompileMessage { Type = CompileMessageType.Error, Message = message, File = "", Line = 0, Column = 0 };
 
         private static string? FindCsproj(string dir)
         {

@@ -33,7 +33,7 @@ namespace AkerMcp.StrideAdapter
             // Called on the WPF UI thread after a project is loaded. Capture that
             // dispatcher so scene access marshals back onto the editor thread, then
             // bring up the named-pipe server that the AkerMcp server connects to.
-            _engine?.Stop();
+            _engine?.Shutdown();
             _engine = new StrideEnginePlugin(session, Dispatcher.CurrentDispatcher);
             _engine.Start();
         }

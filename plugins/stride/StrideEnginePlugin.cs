@@ -16,6 +16,7 @@ namespace AkerMcp.StrideAdapter
         private readonly SessionViewModel _session;
         private readonly Dispatcher _uiDispatcher;
         private IMainThreadDispatcher? _dispatcher;
+        private StrideEditorContext? _editorContext;
 
         public StrideEnginePlugin(SessionViewModel session, Dispatcher uiDispatcher)
         {
@@ -32,7 +33,19 @@ namespace AkerMcp.StrideAdapter
         protected override IEngineCapabilities CreateCapabilities() => new StrideCapabilities();
         protected override IMainThreadDispatcher CreateDispatcher() => _dispatcher = new StrideMainThreadDispatcher(_uiDispatcher);
 
-        protected override IEditorContext? CreateEditorContext() => new StrideEditorContext(_session);
+        protected override IEditorContext? CreateEditorContext() => _editorContext = new StrideEditorContext(_session);
+
+        /// <summary>
+        /// Stops the pipe server and releases what the base class does not know about:
+        /// the editor context's hook on Stride's static GlobalLogger.
+        /// </summary>
+        public void Shutdown()
+        {
+            Stop();
+            _editorContext?.Dispose();
+            _editorContext = null;
+        }
+
         protected override ICompilationSupport? CreateCompilationSupport() => new StrideCompilationSupport(_session);
 
         // CreateDispatcher runs before this in the base ctor argument list, so _dispatcher is set.

@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Text.RegularExpressions;
+using System.Threading;
 using AkerMcp.Shared.Abstraction;
 using Stride.Core.Assets;
 using Stride.Core.Assets.Editor.ViewModel;
@@ -22,11 +22,11 @@ namespace AkerMcp.StrideAdapter
     /// </summary>
     public class StrideBuildManager : IBuildManager
     {
-        private readonly SessionViewModel _session;
+        // A player build that takes longer than this is hung: its tree is killed.
+        private static readonly TimeSpan BuildTimeout = TimeSpan.FromMinutes(10);
 
-        private static readonly Regex MsBuildLine = new(
-            @"^(?<file>.+?)\((?<line>\d+),(?<col>\d+)\):\s+(?<sev>error|warning)\s+\w+:\s+(?<msg>.+?)(?:\s+\[[^\]]*\])?\s*$",
-            RegexOptions.Compiled);
+        private readonly SessionViewModel _session;
+        private int _building;
 
         public StrideBuildManager(SessionViewModel session) => _session = session;
 
@@ -85,53 +85,68 @@ namespace AkerMcp.StrideAdapter
                 return new BuildResult { Success = false, Error = "Project path unavailable for this platform." };
 
             var config = request.Development ? "Debug" : "Release";
-            var args = $"build \"{csproj}\" -c {config} --nologo";
+            var args = new List<string> { "build", csproj!, "-c", config, "--nologo" };
             if (!string.IsNullOrEmpty(request.OutputPath))
-                args += $" -o \"{request.OutputPath}\"";
+                args.AddRange(new[] { "-o", request.OutputPath });
+
+            // The wait below pumps the editor's dispatcher, so a second build_player can
+            // arrive while this one runs: two builds of one project fight over obj/.
+            if (Interlocked.CompareExchange(ref _building, 1, 0) != 0)
+                return new BuildResult { Success = false, Error = "A build_player build is already running; wait for it to finish." };
 
             var sw = Stopwatch.StartNew();
-            int exit;
-            string output;
+            ProcessRunResult run;
             try
             {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "dotnet",
-                    Arguments = args,
-                    WorkingDirectory = Path.GetDirectoryName(csproj)!,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-                using var proc = Process.Start(psi)
-                    ?? throw new InvalidOperationException("Failed to start dotnet.");
-                output = proc.StandardOutput.ReadToEnd() + "\n" + proc.StandardError.ReadToEnd();
-                proc.WaitForExit(600_000);
-                exit = proc.HasExited ? proc.ExitCode : -1;
+                var task = StrideProcessRunner.RunAsync("dotnet", args, Path.GetDirectoryName(csproj)!, BuildTimeout);
+                // This runs on the WPF thread (the IPC handler dispatches it there), and a
+                // build takes minutes: wait without freezing Game Studio. The runner owns the
+                // timeout; the margin only covers the kill. If the dispatcher could not be
+                // pumped, the blocking wait below is still safe: the runner never needs
+                // this thread.
+                StrideUiWait.Wait(task, BuildTimeout + TimeSpan.FromSeconds(30));
+                run = task.GetAwaiter().GetResult();
             }
             catch (Exception ex)
             {
-                sw.Stop();
                 return new BuildResult { Success = false, Error = $"Failed to run 'dotnet build': {ex.Message}. Is the .NET SDK on PATH?" };
             }
-            sw.Stop();
+            finally
+            {
+                sw.Stop();
+                Volatile.Write(ref _building, 0);
+            }
 
-            var (errors, warnings, errorText) = ParseDiagnostics(output);
-            bool ok = exit == 0 && errors == 0;
+            var diagnostics = MsBuildDiagnostics.Parse(run.StdOut, run.StdErr);
+            var errorList = diagnostics.Where(d => d.IsError).ToList();
+            int warnings = diagnostics.Count(d => !d.IsError);
+            bool ok = !run.TimedOut && run.ExitCode == 0 && errorList.Count == 0;
             string outPath = !string.IsNullOrEmpty(request.OutputPath)
                 ? request.OutputPath
                 : Path.Combine(Path.GetDirectoryName(csproj)!, "bin", config);
+
+            string? errorText = null;
+            if (!ok)
+            {
+                var lines = errorList.Take(5).Select(d => d.Line > 0 ? $"{d.Origin}({d.Line}): {d.Text}" : $"{d.Origin}: {d.Text}").ToList();
+                if (run.TimedOut)
+                    lines.Insert(0, $"'dotnet build' did not finish within {BuildTimeout.TotalMinutes:0} minutes; its process tree was killed.");
+                else if (lines.Count == 0)
+                    lines.AddRange(MsBuildDiagnostics.FallbackLines(run));   // failed without a recognisable diagnostic
+                errorText = lines.Count > 0 ? string.Join("\n", lines) : $"'dotnet build' exited with code {run.ExitCode}.";
+            }
 
             return new BuildResult
             {
                 Success = ok,
                 OutputPath = ok ? outPath : null,
-                Errors = errors,
+                Errors = errorList.Count,
                 Warnings = warnings,
                 DurationSeconds = sw.Elapsed.TotalSeconds,
-                Summary = ok ? $"Build succeeded ({config}) → {outPath}" : $"Build failed (exit {exit}): {errors} error(s)",
-                Error = ok ? null : errorText
+                Summary = ok ? $"Build succeeded ({config}) → {outPath}"
+                    : run.TimedOut ? "Build timed out and was killed"
+                    : $"Build failed (exit {run.ExitCode}): {errorList.Count} error(s)",
+                Error = errorText
             };
         }
 
@@ -139,25 +154,6 @@ namespace AkerMcp.StrideAdapter
             => ExecutableProjects().FirstOrDefault(p =>
                    string.Equals(p.Platform.ToString(), platform, StringComparison.OrdinalIgnoreCase) ||
                    string.Equals(p.Name, platform, StringComparison.OrdinalIgnoreCase));
-
-        private static (int errors, int warnings, string? errorText) ParseDiagnostics(string output)
-        {
-            int errors = 0, warnings = 0;
-            var firstErrors = new List<string>();
-            foreach (var raw in output.Split('\n'))
-            {
-                var m = MsBuildLine.Match(raw.Trim());
-                if (!m.Success) continue;
-                if (m.Groups["sev"].Value == "error")
-                {
-                    errors++;
-                    if (firstErrors.Count < 5)
-                        firstErrors.Add($"{m.Groups["file"].Value}({m.Groups["line"].Value}): {m.Groups["msg"].Value.Trim()}");
-                }
-                else warnings++;
-            }
-            return (errors, warnings, firstErrors.Count > 0 ? string.Join("\n", firstErrors) : null);
-        }
 
         private static BuildSettingsResult NotFound(string platform) => new BuildSettingsResult
         {

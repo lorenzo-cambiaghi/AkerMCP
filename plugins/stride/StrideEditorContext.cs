@@ -18,17 +18,30 @@ namespace AkerMcp.StrideAdapter
     /// buffer fed from Stride's <see cref="GlobalLogger.GlobalMessageLogged"/> so
     /// get_console_logs surfaces real engine output (like Unity's log hook).
     /// </summary>
-    public class StrideEditorContext : IEditorContext
+    public class StrideEditorContext : IEditorContext, IDisposable
     {
         private readonly SessionViewModel _session;
         private readonly List<LogEntry> _logBuffer = new();
         private readonly object _lock = new();
         private const int MaxLogEntries = 300;
+        private bool _disposed;
 
         public StrideEditorContext(SessionViewModel session)
         {
             _session = session;
             GlobalLogger.GlobalMessageLogged += OnGlobalLog;
+        }
+
+        /// <summary>
+        /// Unhooks the global log. GlobalLogger is static: without this, every session
+        /// opened in the same Game Studio left one more context subscribed, each keeping
+        /// its old session alive and copying every engine message into a dead buffer.
+        /// </summary>
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            GlobalLogger.GlobalMessageLogged -= OnGlobalLog;
         }
 
         public bool IsEditorMode => true;
@@ -75,20 +88,24 @@ namespace AkerMcp.StrideAdapter
 
         private void OnGlobalLog(ILogMessage m)
         {
+            // Debug and Verbose used to fall into Info, so get_console_logs could not tell
+            // engine chatter from real information.
             var level = m.Type switch
             {
                 LogMessageType.Error or LogMessageType.Fatal => LogLevel.Error,
                 LogMessageType.Warning => LogLevel.Warning,
-                _ => LogLevel.Info
+                LogMessageType.Info => LogLevel.Info,
+                _ => LogLevel.Debug
             };
-            Append(level, m.Text);
+            // The exception (type, message, stack) is the part that says where it broke.
+            Append(level, m.Text, m.ExceptionInfo?.ToString());
         }
 
-        private void Append(LogLevel level, string message)
+        private void Append(LogLevel level, string message, string? stackTrace = null)
         {
             lock (_lock)
             {
-                _logBuffer.Add(new LogEntry { Timestamp = DateTime.Now, Level = level, Message = message });
+                _logBuffer.Add(new LogEntry { Timestamp = DateTime.Now, Level = level, Message = message, StackTrace = stackTrace });
                 if (_logBuffer.Count > MaxLogEntries) _logBuffer.RemoveAt(0);
             }
         }
