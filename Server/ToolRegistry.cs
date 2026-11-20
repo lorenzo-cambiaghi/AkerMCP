@@ -650,6 +650,7 @@ namespace AkerMcp.Server
                                     ""expression"": { ""type"": ""string"" },
                                     ""op"": { ""type"": ""string"", ""enum"": [""=="", ""!="", ""<"", ""<="", "">"", "">="", ""approx"", ""truthy"", ""falsy""] },
                                     ""value"": {},
+                                    ""tolerance"": { ""type"": ""number"" },
                                     ""label"": { ""type"": ""string"" }
                                 },
                                 ""required"": [""expression"", ""op""]
@@ -1984,19 +1985,26 @@ namespace AkerMcp.Server
                 || probes.ValueKind != JsonValueKind.Object)
                 return ToolResult.Error("Missing 'probes' object, e.g. { \"probes\": { \"y\": \"Find(\\\"Bird\\\").transform.position.y\" } }.");
 
-            var samples = new List<object>();
+            var samples = await SampleProbes(probes, ct);
+            return ToolResult.Text(JsonSerializer.Serialize(new { samples }, _jsonOptions));
+        }
+
+        /// <summary>The probes of one object — {name: expression} — read together, as {name, value, error} entries.</summary>
+        private async Task<List<object>> SampleProbes(JsonElement probes, CancellationToken ct)
+        {
+            var names = new List<string>();
+            var exprs = new List<string?>();
             foreach (var p in probes.EnumerateObject())
             {
-                if (p.Value.ValueKind != JsonValueKind.String)
-                {
-                    samples.Add(new { name = p.Name, value = (object?)null,
-                                      error = (string?)"a probe is a C# expression, given as a string" });
-                    continue;
-                }
-                var (val, err) = await SampleOne(p.Value.GetString() ?? "", ct);
-                samples.Add(new { name = p.Name, value = val, error = err });
+                names.Add(p.Name);
+                exprs.Add(p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : null);
             }
-            return ToolResult.Text(JsonSerializer.Serialize(new { samples }, _jsonOptions));
+
+            var results = await SampleMany(exprs, ct);
+            var samples = new List<object>();
+            for (int i = 0; i < names.Count; i++)
+                samples.Add(new { name = names[i], value = results[i].value, error = results[i].error });
+            return samples;
         }
 
         private async Task<ToolResult> HandleAssertState(JsonElement? args, CancellationToken ct)
@@ -2024,32 +2032,46 @@ namespace AkerMcp.Server
             var report = new List<object>();
             bool allPass;
 
+            // Read once: what each assertion asks does not change between polls.
+            var asked = items.ConvertAll(it => new
+            {
+                expr = it.TryGetProperty("expression", out var ex) && ex.ValueKind == JsonValueKind.String ? (ex.GetString() ?? "") : "",
+                op = it.TryGetProperty("op", out var o) && o.ValueKind == JsonValueKind.String ? (o.GetString() ?? "==") : "==",
+                expected = it.TryGetProperty("value", out var vv) ? vv : (JsonElement?)null,
+                tolerance = it.TryGetProperty("tolerance", out var tol) && tol.ValueKind == JsonValueKind.Number ? tol.GetDouble() : (double?)null,
+                label = it.TryGetProperty("label", out var lb) && lb.ValueKind == JsonValueKind.String ? lb.GetString() : null,
+            });
+
             while (true)
             {
                 report = new List<object>();
                 allPass = true;
-                foreach (var it in items)
+                var observedNow = await SampleMany(asked.ConvertAll(a => (string?)a.expr), ct);
+                for (int i = 0; i < asked.Count; i++)
                 {
-                    var expr = it.TryGetProperty("expression", out var ex) ? (ex.GetString() ?? "") : "";
-                    var op = it.TryGetProperty("op", out var o) ? (o.GetString() ?? "==") : "==";
-                    JsonElement? expected = it.TryGetProperty("value", out var vv) ? vv : (JsonElement?)null;
-                    var label = it.TryGetProperty("label", out var lb) ? lb.GetString() : null;
-
-                    var (val, err) = await SampleOne(expr, ct);
-                    bool pass = err == null && EvalAssertion(val, op, expected, out _);
+                    var it = asked[i];
+                    var (val, err) = observedNow[i];
+                    // An operator that does not exist is the assertion's error. It used to evaluate to false and
+                    // keep polling to the timeout, which reads exactly like a game that never reached the state.
+                    if (err == null && !KnownOps.Contains((it.op ?? "==").Trim().ToLowerInvariant()))
+                        err = $"unknown op '{it.op}'; use one of {string.Join(", ", KnownOps)}";
+                    bool pass = err == null && EvalAssertion(val, it.op ?? "==", it.expected, it.tolerance);
                     if (!pass) allPass = false;
 
                     report.Add(new
                     {
-                        label,
-                        expression = expr,
-                        op,
-                        expected,
+                        it.label,
+                        expression = it.expr,
+                        it.op,
+                        it.expected,
                         observed = err ?? (val.HasValue ? val.Value.GetRawText() : "(null)"),
                         pass,
                         error = err,
                     });
                 }
+                // Nothing to wait for: polling cannot make an assertion pass that is wrong as written.
+                if (asked.Exists(a => !KnownOps.Contains((a.op ?? "==").Trim().ToLowerInvariant())))
+                    break;
 
                 if (allPass || DateTime.UtcNow >= deadline || ct.IsCancellationRequested) break;
                 await Task.Delay(pollMs, ct).ConfigureAwait(false);
@@ -2058,11 +2080,85 @@ namespace AkerMcp.Server
             return (allPass, report);
         }
 
-        // Evaluate one C# expression in the engine via the execute host and return its JSON value.
-        private async Task<(JsonElement? value, string? error)> SampleOne(string expr, CancellationToken ct)
+        private static readonly string[] KnownOps = { "==", "!=", "<", "<=", ">", ">=", "approx", "truthy", "falsy" };
+
+        // What separates the values of a batch, and marks one that threw. Control characters, so no value a probe
+        // returns as text can be mistaken for either.
+        private const string ProbeSeparator = "\u001e";
+        private const string ProbeErrorMark = "\u0001";
+        private const string ProbeNullMark = "\u0002";
+
+        /// <summary>
+        /// "Find(\"Bird\").transform.position.y;" reads as the expression it is. Models often end a probe with the `;`
+        /// of a statement, and wrapped as `return (object)(expr;);` it was a compile error.
+        /// </summary>
+        private static string CleanProbe(string expr) => expr.Trim().TrimEnd(';').TrimEnd();
+
+        /// <summary>
+        /// Several probes, read in ONE execute: one compile instead of one per probe, and every value from the same
+        /// frame — read one call each, x and y of the same object could come from different frames. A null entry is a
+        /// probe that was not given as a string. If the batch does not compile, each probe is read on its own, so the
+        /// compile error lands on the probe that caused it.
+        /// </summary>
+        private async Task<List<(JsonElement? value, string? error)>> SampleMany(IReadOnlyList<string?> exprs, CancellationToken ct)
         {
-            if (string.IsNullOrWhiteSpace(expr)) return (null, "empty expression");
-            var argsEl = JsonSerializer.SerializeToElement(new { code = "return (object)(" + expr + ");", timeout_ms = 3000 });
+            var results = new List<(JsonElement? value, string? error)>();
+            var live = new List<int>();
+            for (int i = 0; i < exprs.Count; i++)
+            {
+                var e = exprs[i] == null ? null : CleanProbe(exprs[i]!);
+                if (e == null) results.Add((null, "a probe is a C# expression, given as a string"));
+                else if (e.Length == 0) results.Add((null, "empty expression"));
+                else { results.Add((null, null)); live.Add(i); }
+            }
+            if (live.Count == 0) return results;
+            if (live.Count == 1)
+            {
+                results[live[0]] = await SampleOne(exprs[live[0]]!, ct);
+                return results;
+            }
+
+            var code = new System.Text.StringBuilder();
+            code.Append("var __aker = new string[").Append(live.Count).Append("];\n");
+            for (int k = 0; k < live.Count; k++)
+            {
+                // Each value as text in the invariant culture — what a single probe returns — so 0.5 never reads "0,5".
+                code.Append("try { var __v = (object)(").Append(CleanProbe(exprs[live[k]]!)).Append("); __aker[").Append(k)
+                    .Append("] = __v == null ? \"\\u0002\" : System.Convert.ToString(__v, System.Globalization.CultureInfo.InvariantCulture); } ")
+                    .Append("catch (System.Exception __e) { __aker[").Append(k).Append("] = \"\\u0001\" + __e.GetType().Name + \": \" + __e.Message; }\n");
+            }
+            code.Append("return string.Join(\"\\u001e\", __aker);");
+
+            var (joined, error) = await ExecuteProbeCode(code.ToString(), ct);
+            var parts = error == null && joined is { ValueKind: JsonValueKind.String } s
+                ? (s.GetString() ?? "").Split(ProbeSeparator)
+                : null;
+            if (parts == null || parts.Length != live.Count)
+            {
+                foreach (var i in live) results[i] = await SampleOne(exprs[i]!, ct);
+                return results;
+            }
+
+            for (int k = 0; k < live.Count; k++)
+                results[live[k]] = parts[k].StartsWith(ProbeErrorMark, StringComparison.Ordinal)
+                    ? (null, parts[k].Substring(ProbeErrorMark.Length))
+                    : parts[k] == ProbeNullMark
+                        ? (JsonSerializer.SerializeToElement<object?>(null), null)
+                        : (JsonSerializer.SerializeToElement(parts[k]), null);
+            return results;
+        }
+
+        // Evaluate one C# expression in the engine via the execute host and return its JSON value.
+        private Task<(JsonElement? value, string? error)> SampleOne(string expr, CancellationToken ct)
+        {
+            expr = CleanProbe(expr);
+            if (expr.Length == 0) return Task.FromResult<(JsonElement?, string?)>((null, "empty expression"));
+            return ExecuteProbeCode("return (object)(" + expr + ");", ct);
+        }
+
+        private async Task<(JsonElement? value, string? error)> ExecuteProbeCode(string code, CancellationToken ct)
+        {
+            var argsEl = JsonSerializer.SerializeToElement(new { code, timeout_ms = 3000 });
             var res = await _engine.ForwardToolCall(IpcConstants.Methods.Execute, argsEl, ct);
             if (res.IsError) return (null, res.Content.Count > 0 ? res.Content[0].Text : "execute failed");
 
@@ -2082,9 +2178,9 @@ namespace AkerMcp.Server
             catch (Exception ex) { return (null, "parse error: " + ex.Message); }
         }
 
-        private static bool EvalAssertion(JsonElement? observed, string op, JsonElement? expected, out string obsStr)
+        /// <param name="tolerance">For approx: how far apart still counts as equal. Default 1e-3, which is tight for physics.</param>
+        private static bool EvalAssertion(JsonElement? observed, string op, JsonElement? expected, double? tolerance = null)
         {
-            obsStr = observed.HasValue ? observed.Value.GetRawText() : "(null)";
             op = (op ?? "==").Trim().ToLowerInvariant();
 
             if (op == "truthy") return observed.HasValue && IsTruthy(observed.Value);
@@ -2103,7 +2199,7 @@ namespace AkerMcp.Server
                     case "<=": return av <= bv;
                     case ">": return av > bv;
                     case ">=": return av >= bv;
-                    case "approx": return Math.Abs(av - bv) <= 1e-3;
+                    case "approx": return Math.Abs(av - bv) <= Math.Abs(tolerance ?? 1e-3);
                 }
             }
             return false;
@@ -2127,8 +2223,10 @@ namespace AkerMcp.Server
         private static bool TryNum(JsonElement e, out double d)
         {
             if (e.ValueKind == JsonValueKind.Number) return e.TryGetDouble(out d);
+            // Float, not Any: Any allows thousands separators, so "0,5" — a value formatted in a comma-decimal culture —
+            // read as 5 and an assertion on 0.5 failed, or passed, on the wrong number.
             if (e.ValueKind == JsonValueKind.String
-                && double.TryParse(e.GetString(), System.Globalization.NumberStyles.Any,
+                && double.TryParse(e.GetString(), System.Globalization.NumberStyles.Float,
                     System.Globalization.CultureInfo.InvariantCulture, out d))
                 return true;
             d = 0;
@@ -2279,18 +2377,7 @@ namespace AkerMcp.Server
                     }
                     else if (step.TryGetProperty("sample", out var sam) && sam.ValueKind == JsonValueKind.Object)
                     {
-                        var vals = new List<object>();
-                        foreach (var p in sam.EnumerateObject())
-                        {
-                            if (p.Value.ValueKind != JsonValueKind.String)
-                            {
-                                vals.Add(new { name = p.Name, value = (object?)null,
-                                               error = (string?)"a probe is a C# expression, given as a string" });
-                                continue;
-                            }
-                            var (val, err) = await SampleOne(p.Value.GetString() ?? "", ct);
-                            vals.Add(new { name = p.Name, value = val, error = err });
-                        }
+                        var vals = await SampleProbes(sam, ct);
                         samplesLog.Add(new { step = idx, at = Math.Round(sw.Elapsed.TotalSeconds, 1), values = vals });
                         log.AppendLine($"[{sw.Elapsed.TotalSeconds:0.0}s] sample ({vals.Count})");
                     }

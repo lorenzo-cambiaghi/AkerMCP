@@ -835,6 +835,31 @@ namespace AkerMcp.Loopback
             var asr = await Call(reg, "assert_state", new { assertions = new[] { new { expression = "x", op = ">", value = 0 } } });
             Check("assert_state passed:true", Text(asr).Contains("\"passed\":true"), Text(asr));
 
+            // The probes of one call are read in one execute: one compile, and every value from the same frame. A probe
+            // ending in `;` is the expression it obviously is.
+            int before = fake.Executor.Scripts.Count;
+            var two = await Call(reg, "sample_state", new { probes = new { x = "Find(\"Bird\").x", y = "Find(\"Bird\").y;" } });
+            var sent = fake.Executor.Scripts.Skip(before).ToList();
+            Check("two probes are read in one execute", sent.Count == 1 && sent[0].Contains(".x") && sent[0].Contains(".y"),
+                $"{sent.Count} scripts: {string.Join(" | ", sent)}");
+            Check("a probe's trailing ';' is dropped", sent.Count == 1 && !sent[0].Contains(".y;"), sent.FirstOrDefault());
+            Check("each probe of a batch gets its own value", Text(two).Contains("\"name\":\"x\",\"value\":\"1\"") && Text(two).Contains("\"name\":\"y\",\"value\":\"1\""), Text(two));
+
+            // An operator that does not exist is an error now, not a false that polls until the timeout.
+            var swOp = System.Diagnostics.Stopwatch.StartNew();
+            var badOp = await Call(reg, "assert_state", new { assertions = new[] { new { expression = "x", op = "eq", value = 1 } }, timeout_ms = 3000 });
+            Check("an unknown assertion op is reported and not polled", Text(badOp).Contains("unknown op") && Text(badOp).Contains("eq") && swOp.ElapsedMilliseconds < 2000,
+                $"{swOp.ElapsedMilliseconds} ms: {Text(badOp)}");
+            var loose = await Call(reg, "assert_state", new { assertions = new object[] { new { expression = "x", op = "approx", value = 1.05, tolerance = 0.1 } } });
+            Check("approx honours a tolerance", Text(loose).Contains("\"passed\":true"), Text(loose));
+            var tight = await Call(reg, "assert_state", new { assertions = new object[] { new { expression = "x", op = "approx", value = 1.05 } } });
+            Check("approx without a tolerance keeps 1e-3", Text(tight).Contains("\"passed\":false"), Text(tight));
+            // A value formatted with a decimal comma is not read as a thousands separator: "0,5" is not 5.
+            fake.Executor.Value = "0,5";
+            var comma = await Call(reg, "assert_state", new { assertions = new object[] { new { expression = "x", op = ">", value = 4 } } });
+            Check("\"0,5\" is not read as 5", Text(comma).Contains("\"passed\":false"), Text(comma));
+            fake.Executor.Value = "1";
+
             // A playtest step with two actions, or a key that is no action, is refused before play starts; each used
             // to drop the part it did not recognise.
             var twoInOne = await Call(reg, "playtest", new { steps = new object[] { new { wait_ms = 10, sample = new { y = "y" } } } });

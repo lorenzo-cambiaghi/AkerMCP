@@ -223,11 +223,20 @@ namespace AkerMcp.Loopback
     public sealed class FakeCodeExecutor : ICodeExecutor
     {
         public int DelayMs;
+        // What every expression evaluates to, and every script the server sent, newest last.
+        public string Value = "1";
+        public readonly List<string> Scripts = new List<string>();
 
         public async Task<CodeExecutionResult> Execute(string code, int timeoutMs = 5000, CancellationToken ct = default)
         {
+            lock (Scripts) Scripts.Add(code);
             if (DelayMs > 0) await Task.Delay(DelayMs, ct);
-            return new CodeExecutionResult { Success = true, ReturnValue = "1", ElapsedMs = DelayMs };
+            // A batch of probes answers one value per probe, joined the way the server reads them back.
+            var batch = System.Text.RegularExpressions.Regex.Match(code, @"new string\[(\d+)\]");
+            var value = batch.Success
+                ? string.Join("\u001e", Enumerable.Repeat(Value, int.Parse(batch.Groups[1].Value)))
+                : Value;
+            return new CodeExecutionResult { Success = true, ReturnValue = value, ElapsedMs = DelayMs };
         }
     }
 

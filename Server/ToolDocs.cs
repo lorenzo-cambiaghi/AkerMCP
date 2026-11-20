@@ -195,7 +195,7 @@ namespace AkerMcp.Server
 
             ["assert_state"] =
                 "Check runtime conditions during play: each assertion evaluates a C# expression and " +
-                "compares it with op (==, !=, <, <=, >, >=, approx within 1e-3, truthy, falsy) to " +
+                "compares it with op (==, !=, <, <=, >, >=, approx within tolerance, default 1e-3, truthy, falsy) to " +
                 "value, with a label. Polls every poll_ms until all pass or timeout_ms elapses (0 = " +
                 "check once), so 'becomes true' conditions work.",
 
