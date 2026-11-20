@@ -10,11 +10,11 @@
 
 > *Aker (Egyptian: ꜣkr) was an ancient Egyptian earth god, depicted as **two lions seated back-to-back** facing opposite horizons, Sef and Duau (Yesterday and Today), guarding the sun's safe passage through the underworld. In this architecture, Aker is the bridge: one face speaking **JSON-RPC to the LLM**, the other manipulating the **engine's main thread via IPC**.*
 
-AkerMCP is an MCP server that runs on your machine, next to the editor, and lets an AI client (Claude Code, Cursor, Copilot, Antigravity, any stdio MCP client) work inside a running C# game editor: read the scene, change it with undo, run C# on the editor's main thread, take a screenshot, enter play mode and check what happened. One server and one tool set for three engines, Unity, Godot and Stride Game Studio, each behind a small adapter over the same core.
+AkerMCP is an MCP server that runs on your machine, next to the editor, and lets an AI client (Claude Code, Cursor, Copilot, Antigravity, any stdio MCP client) work inside a running C# game editor: read the scene, change it (objects created or deleted are steps in the editor's undo history), run C# on the editor's main thread, take a screenshot, enter play mode and check what happened. One server and one tool set for three engines, Unity, Godot and Stride Game Studio, each behind a small adapter over the same core.
 
 ## What it does
 
-Most engine integrations ship one hand-written tool per operation and break with every engine update. AkerMCP ships forty-two generic tools built on reflection and Roslyn. `inspect` shows what an object is made of, `set_property` changes any property by a dot path with undo, `query` finds objects, `execute` compiles and runs any C# against the live editor (with `using` lines and type declarations hoisted, so a helper class or a MonoBehaviour can be written and attached in one call), `take_screenshot` shows the result. The runtime loop, `enter_play`, `send_input`, `sample_state`, `assert_state` and the one-call `playtest`, runs the game and checks a mechanic against real values instead of pixels. Placeholder art and audio work the same way: the model writes a spec, the server returns a PNG or a WAV. Whatever the editor can do, the model can do, and it can see whether it worked.
+Most engine integrations ship one hand-written tool per operation and break with every engine update. AkerMCP ships forty-two generic tools built on reflection and Roslyn. `inspect` shows what an object is made of, `set_property` changes any property by a dot path, `query` finds objects, `execute` compiles and runs any C# against the live editor (with `using` lines and type declarations hoisted, so a helper class or a MonoBehaviour can be written and attached in one call), `take_screenshot` shows the result. The runtime loop, `enter_play`, `send_input`, `sample_state`, `assert_state` and the one-call `playtest`, runs the game and checks a mechanic against real values instead of pixels. Placeholder art and audio work the same way: the model writes a spec, the server returns a PNG or a WAV. Whatever the editor can do, the model can do, and it can see whether it worked.
 
 ```
 AI: "Set the player's position to (10, 0, 5)"
@@ -28,11 +28,13 @@ AI: "Set the player's position to (10, 0, 5)"
 | Capability | Unity | Godot | Stride |
 |---|:--:|:--:|:--:|
 | Inspect · query · get/set property (incl. nested) | ✅ | ✅ | ✅ |
-| `call_method` · `create` · `delete` (native Undo) | ✅ | ✅ | ✅ |
+| `call_method` · `create` · `delete` | ✅ | ✅ | ✅ |
+| Edits in the editor's own Undo history | ◑ | ◑ | ✅ |
 | `execute`: arbitrary C# via Roslyn | ✅ | ✅ | ✅ |
 | Selection · console logs · recompile/compile-errors | ✅ | ✅ | ✅ |
 | Scene-view screenshot **with editor gizmos** | ✅ | ✅ | ✅ |
-| Platform/build tools (list · switch · build_player) | ✅ | ✅ | ✅ |
+| Platform/build tools (`list_platforms` · `get_platform_settings` · `build_player`) | ✅ | ✅ | ✅ |
+| Build target and settings (`switch_build_target` · `set_platform_settings`) | ✅ | ◑ | ❌ |
 | OS window capture (`list_windows` · `capture_window` · `focus_window`) | ✅ | ✅ | ✅ |
 | Driving a window by hand (`ui_action`: click · drag · scroll · type) | ✅ | ✅ | ✅ |
 | **2D sprites from a JSON shape-spec** (`create_sprite`, rasterized locally by AkerMCP) | ✅ | ✅ | ✅ |
@@ -41,7 +43,7 @@ AI: "Set the player's position to (10, 0, 5)"
 | Scene management (`new_scene` · `open_scene` · `save_scene`) | ✅ | ✅ | ✅ |
 | **Runtime loop** (`enter_play`/`exit_play` · `capture_sequence` · `send_input`) | ✅ | ◑ | ◑ |
 
-Every ✅ is implemented and was verified live in that engine's editor; the fixes v1.6.0 makes inside the adapters (Godot's undo for create and delete among them) compile against each engine and are not all run in its editor yet, and `todo.md` lists which. A ❌ answers NOT_SUPPORTED and names what is missing rather than failing quietly: Stride has no sound importer yet, and the primitive catalog carries Unity variants only. The window tools are the exception to the whole table, since they talk to the operating system, Windows or macOS, and work with no engine connected at all: they are how you see and dismiss a modal dialog that has frozen the editor's main thread. `ui_action` extends that OS-level path from looking to acting — clicking and typing in the pixels of the screenshot it returns. It is verified on Windows; the macOS implementation (Quartz `CGEvent`, plus window geometry and by-title capture that macOS had stubs for until now) is written but has not yet been run on a Mac, and says so rather than pretending otherwise. Linux has neither half.
+Every ✅ is implemented and was verified live in that engine's editor; the fixes v1.6.0 makes inside the adapters (Godot's undo for create and delete among them) compile against each engine and are not all run in its editor yet, and `todo.md` lists which. A ❌ answers with an error that names what is missing rather than failing quietly: Stride has no sound importer yet and no build target or platform settings to change, and the primitive catalog carries Unity variants only. A ◑ is part of the row: Unity and Godot put `create`, `delete` and the objects `create_sprite`/`create_sound` place in the editor's Undo history, but not `set_property` yet, which only Stride records (through its Quantum graph); Godot has no build target to switch, since the platform is picked per export preset, but its presets' settings can be changed; the runtime loop is detailed under [Runtime loop](#runtime-loop). The window tools are the exception to the whole table, since they talk to the operating system, Windows or macOS, and work with no engine connected at all: they are how you see and dismiss a modal dialog that has frozen the editor's main thread. `ui_action` extends that OS-level path from looking to acting — clicking and typing in the pixels of the screenshot it returns. It is verified on Windows; the macOS implementation (Quartz `CGEvent`, plus window geometry and by-title capture that macOS had stubs for until now) is written but has not yet been run on a Mac, and says so rather than pretending otherwise. Linux has neither half.
 
 
 ### What it does that the others do not
@@ -370,7 +372,7 @@ Every tool carries the four MCP hints (read-only, destructive, idempotent, open-
 |------|---------|--------------|
 | `inspect` | core | Components, properties, methods and children of a scene object or of a type; `depth`, `include_methods`, `filter` |
 | `get_property` | core | Read one property by dot path (`position`, `Rigidbody.mass`, `MeshRenderer.material.color.r`) |
-| `set_property` | core | Set one property by dot path, with undo; structs as JSON objects |
+| `set_property` | core | Set one property by dot path; structs as JSON objects. Undoable on Stride; on Unity and Godot not yet |
 | `call_method` | core | Invoke a method on a scene object or a static member of a type; string arguments, converted |
 | `query` | core | Find objects by type, name glob or regex, tag or property values |
 | `create` | core | Add an object with a type, name, optional parent and initial properties, with undo |

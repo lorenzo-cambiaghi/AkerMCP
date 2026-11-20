@@ -70,6 +70,13 @@ not run inside an editor. First smoke test on each, in order of risk:
 
 ## After the November 2026 review: not built, and why
 
+- **Unity `set_property` undo, and the dirty mark.** No `Undo.RecordObject`, no
+  `EditorUtility.SetDirty`, no `PrefabUtility.RecordPrefabInstancePropertyModifications`: an
+  edit is not in Ctrl+Z, nothing marks the object changed, and on a prefab instance in edit mode
+  it is lost when the scene reloads. Record the object that owns the leaf (the Material for
+  `material.color`, not the renderer). Confirmed in the review and not done: it fell between the
+  two changes that touched Unity. The most visible gap of the two engines, since `create` and
+  `delete` are already undoable.
 - **Godot `set_property` undo.** `EditorUndoRedoManager` takes (object, method): a Godot-bound
   property goes through `AddDoProperty`/`AddUndoProperty`, a nested path through `set_indexed`,
   a C#-only property needs a small `[Tool]` GodotObject that applies a captured setter.
