@@ -81,16 +81,14 @@ namespace AkerMcp.GodotAdapter
             _resolver.Set(_node, propertyPath, value);
         }
 
-        public object? CallMethod(string methodName, object?[]? args)
-        {
-            var method = _node.GetType().GetMethod(methodName,
-                BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-            if (method != null)
-                return new AkerMcp.Shared.Reflection.MethodInvoker().Invoke(_node, methodName, args);
+        private static readonly AkerMcp.Shared.Reflection.MethodInvoker Invoker = new();
 
-            throw new PropertyPathException(
-                $"Method '{methodName}' not found on '{Name}' ({TypeName})");
-        }
+        /// <summary>
+        /// The overload is chosen once, by the invoker. The pre-check here used GetMethod(name, IgnoreCase), which throws
+        /// AmbiguousMatchException on any overloaded name: Node.GetNode (it has GetNode&lt;T&gt; beside it), Call, LookAt.
+        /// </summary>
+        public object? CallMethod(string methodName, object?[]? args)
+            => Invoker.Invoke(_node, methodName, args);
 
         public IEnumerable<ComponentInfo> GetComponents()
         {

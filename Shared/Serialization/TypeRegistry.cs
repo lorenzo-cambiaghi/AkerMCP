@@ -12,6 +12,7 @@ namespace AkerMcp.Shared.Serialization
         private readonly ConcurrentDictionary<string, Type> _aliases = new ConcurrentDictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<Type, Func<object, Dictionary<string, object?>>> _serializers = new ConcurrentDictionary<Type, Func<object, Dictionary<string, object?>>>();
         private readonly ConcurrentDictionary<Type, Func<Dictionary<string, object?>, object>> _deserializers = new ConcurrentDictionary<Type, Func<Dictionary<string, object?>, object>>();
+        private readonly ConcurrentDictionary<Type, bool> _referenceOnly = new ConcurrentDictionary<Type, bool>();
 
         public void RegisterAlias(string alias, Type type)
         {
@@ -35,6 +36,24 @@ namespace AkerMcp.Shared.Serialization
 
         public bool HasCustomSerializer(Type type) => _serializers.ContainsKey(type);
         public bool HasCustomDeserializer(Type type) => _deserializers.ContainsKey(type);
+
+        /// <summary>
+        /// Declares <paramref name="baseType"/> and everything derived from it as objects that live in the engine — Unity's
+        /// UnityEngine.Object, Godot's GodotObject. A JSON value never builds one (System.Text.Json would run
+        /// <c>new GameObject()</c> and leave a stray object in the scene, and overload resolution tries every candidate),
+        /// and one is written by reading its members, not through System.Text.Json, which runs every getter.
+        /// </summary>
+        public void RegisterReferenceOnly(Type baseType)
+        {
+            _referenceOnly[baseType] = true;
+        }
+
+        public bool IsReferenceOnly(Type type)
+        {
+            foreach (var baseType in _referenceOnly.Keys)
+                if (baseType.IsAssignableFrom(type)) return true;
+            return false;
+        }
 
         public Dictionary<string, object?>? TrySerialize(object value)
         {

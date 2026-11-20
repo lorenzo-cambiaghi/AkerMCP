@@ -164,7 +164,7 @@ namespace AkerMcp.Server
                     ""properties"": {
                         ""target"": { ""type"": ""string"", ""description"": ""Scene path or fully qualified type name"" },
                         ""method"": { ""type"": ""string"", ""description"": ""Method name"" },
-                        ""args"": { ""type"": ""array"", ""items"": { ""type"": ""string"" }, ""description"": ""Method arguments in order (as strings)"" }
+                        ""args"": { ""type"": ""array"", ""items"": {}, ""description"": ""Method arguments in order, any JSON"" }
                     },
                     ""required"": [""target"", ""method""]
                 }"),

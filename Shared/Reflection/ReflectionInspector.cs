@@ -102,6 +102,21 @@ namespace AkerMcp.Shared.Reflection
                 });
             }
 
+            // A struct's data is its public fields: inspecting Vector3 or Color as a type listed no x/y/z or r/g/b/a at all,
+            // only the derived properties (normalized, magnitude), so the members set_property takes could not be discovered.
+            foreach (var field in type.GetFields(BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (filter != null && !Regex.IsMatch(field.Name, filter, RegexOptions.IgnoreCase)) continue;
+
+                props.Add(new PropertyDescriptor
+                {
+                    Name = field.Name,
+                    TypeName = FormatTypeName(field.FieldType),
+                    CanRead = true,
+                    CanWrite = !field.IsInitOnly
+                });
+            }
+
             return props;
         }
 

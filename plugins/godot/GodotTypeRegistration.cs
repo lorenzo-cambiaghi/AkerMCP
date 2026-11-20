@@ -20,6 +20,12 @@ namespace AkerMcp.GodotAdapter
             if (_registered) return;
             _registered = true;
 
+            // A node or a resource is never built from JSON: the serializer would run new Node() and hand the call an
+            // orphan (AddChild given an object would add a blank child), and call_method tries the conversion on every
+            // overload. StringName and NodePath are not GodotObjects: they come from a string, through their implicit
+            // operators.
+            registry.RegisterReferenceOnly(typeof(GodotObject));
+
             registry.RegisterCustomSerializer<Vector2>(
                 v => new Dictionary<string, object?> { ["x"] = v.X, ["y"] = v.Y },
                 d => new Vector2(F(d, "x"), F(d, "y"))

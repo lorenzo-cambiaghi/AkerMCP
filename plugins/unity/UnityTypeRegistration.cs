@@ -16,6 +16,11 @@ namespace AkerMcp.Unity
             if (_registered) return;
             _registered = true;
 
+            // A GameObject, a component or an asset is never built from JSON: the serializer would run new GameObject()
+            // (a stray object in the scene) or new MonoBehaviour() (Unity refuses it with a warning), and call_method tries
+            // the conversion on every overload. It is written by reading its members, without the getters that copy.
+            registry.RegisterReferenceOnly(typeof(UnityEngine.Object));
+
             // Vector2
             registry.RegisterCustomSerializer<Vector2>(
                 v => new Dictionary<string, object?> { ["x"] = v.x, ["y"] = v.y },

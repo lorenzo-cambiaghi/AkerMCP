@@ -68,24 +68,62 @@ namespace AkerMcp.StrideAdapter
         }
 
         public void SetProperty(string propertyPath, object? value)
-            => StrideSceneBridge.SetEntityProperty(_entity.Id, propertyPath, value);
+            => StrideSceneBridge.SetEntityProperty(_entity.Id, propertyPath, Typed(propertyPath, value));
 
+        /// <summary>
+        /// The value as the member's type when it arrives untyped. set_property hands a value over as its JSON text when the
+        /// entity does not declare the path ("Position" and "Model.X" name a component's member), and the bridge coerces
+        /// with Convert.ChangeType, which reads primitives only: a vector or an enum given that way never arrived. The
+        /// component is resolved as the bridge resolves it.
+        /// </summary>
+        private object? Typed(string propertyPath, object? value)
+        {
+            if (!(value is string) && !(value is System.Text.Json.JsonElement)) return value;
+
+            int dot = propertyPath.IndexOf('.');
+            var selector = dot < 0 ? "Transform" : propertyPath.Substring(0, dot);
+            var member = dot < 0 ? propertyPath : propertyPath.Substring(dot + 1);
+
+            object? component = selector is "Transform" or "TransformComponent" ? _entity.Transform : null;
+            if (component == null)
+                foreach (var candidate in _entity.Components)
+                {
+                    var name = candidate.GetType().Name;
+                    if (name == selector || name == selector + "Component") { component = candidate; break; }
+                }
+
+            var type = component == null ? null : _resolver.GetTargetType(component.GetType(), member);
+            return type == null ? value : PropertyPathResolver.ConvertValue(value, type);
+        }
+
+        // Fully qualified: net10 has a System.Reflection.MethodInvoker of its own.
+        private static readonly AkerMcp.Shared.Reflection.MethodInvoker Invoker = new();
+
+        /// <summary>
+        /// The method on the first component with an overload the arguments fit (in Stride most callable behaviour lives on
+        /// components), then on the entity; or, written "ModelComponent.Method" (or "Model.Method"), on that component
+        /// only. The overload is chosen once, by the invoker: the pre-check here used GetMethod(name, IgnoreCase), which
+        /// throws AmbiguousMatchException on any overloaded name.
+        /// </summary>
         public object? CallMethod(string methodName, object?[]? args)
         {
-            const BindingFlags flags = BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase;
-            var invoker = new AkerMcp.Shared.Reflection.MethodInvoker();
+            int dot = methodName.IndexOf('.');
+            if (dot > 0 && dot < methodName.Length - 1 && methodName.IndexOf('.', dot + 1) < 0)
+            {
+                var prefix = methodName.Substring(0, dot);
+                foreach (var component in _entity.Components)
+                {
+                    var typeName = component.GetType().Name;
+                    if (string.Equals(typeName, prefix, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(typeName, prefix + "Component", StringComparison.OrdinalIgnoreCase))
+                        return Invoker.Invoke(new object[] { component }, methodName.Substring(dot + 1), args);
+                }
+            }
 
-            // Try the entity itself, then any component that exposes the method
-            // (in Stride most callable behaviour lives on components).
-            if (_entity.GetType().GetMethod(methodName, flags) != null)
-                return invoker.Invoke(_entity, methodName, args);
-
-            foreach (var component in _entity.Components)
-                if (component.GetType().GetMethod(methodName, flags) != null)
-                    return invoker.Invoke(component, methodName, args);
-
-            throw new PropertyPathException(
-                $"Method '{methodName}' not found on '{Name}' or its components.");
+            var targets = new List<object>();
+            foreach (var component in _entity.Components) targets.Add(component);
+            targets.Add(_entity);
+            return Invoker.Invoke(targets, methodName, args);
         }
 
         public IEnumerable<ComponentInfo> GetComponents()

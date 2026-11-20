@@ -160,28 +160,24 @@ namespace AkerMcp.Unity
                 $"Cannot set property '{propertyPath}' on '{Name}' — not found on any component");
         }
 
+        private static readonly MethodInvoker Invoker = new MethodInvoker();
+
+        /// <summary>
+        /// The method on the first component with an overload the arguments fit, then on the GameObject; or, written
+        /// "Rigidbody.AddForce", on that component only — the prefix set_property takes. The overload is chosen once, by the
+        /// invoker: the pre-check here used GetMethod(name, IgnoreCase), which throws AmbiguousMatchException on any
+        /// overloaded name (AddForce, Translate, Rotate, Animator.Play, AudioSource.Play), so none of them could be called.
+        /// </summary>
         public object? CallMethod(string methodName, object?[]? args)
         {
-            var invoker = new MethodInvoker();
+            if (TrySplitComponentPrefix(methodName, out var named, out var member) && member.IndexOf('.') < 0)
+                return Invoker.Invoke(new object[] { named }, member, args);
 
-            // Try each component
+            var targets = new List<object>();
             foreach (var component in _go.GetComponents<Component>())
-            {
-                if (component == null) continue;
-                var method = component.GetType().GetMethod(methodName,
-                    BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                if (method != null)
-                    return invoker.Invoke(component, methodName, args);
-            }
-
-            // Try on GameObject itself
-            var goMethod = _go.GetType().GetMethod(methodName,
-                BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-            if (goMethod != null)
-                return invoker.Invoke(_go, methodName, args);
-
-            throw new PropertyPathException(
-                $"Method '{methodName}' not found on '{Name}' or any of its components");
+                if (component != null) targets.Add(component);
+            targets.Add(_go);
+            return Invoker.Invoke(targets, methodName, args);
         }
 
         public IEnumerable<ComponentInfo> GetComponents()
@@ -375,13 +371,11 @@ namespace AkerMcp.Unity
             int bracket = firstSegment.IndexOf('[');
             if (bracket >= 0) firstSegment = firstSegment.Substring(0, bracket);
             if (firstSegment.Length == 0) return false;
+            // Through the cache's lookup: GetProperty(name, IgnoreCase) threw AmbiguousMatchException on a component with
+            // two members differing only in case (Projector's orthographicSize and the obsolete orthoGraphicSize).
             var type = component.GetType();
-            var prop = type.GetProperty(firstSegment,
-                BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-            if (prop != null) return true;
-            var field = type.GetField(firstSegment,
-                BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-            return field != null;
+            return ReflectionCache.Instance.GetProperty(type, firstSegment) != null
+                || ReflectionCache.Instance.GetField(type, firstSegment) != null;
         }
     }
 }

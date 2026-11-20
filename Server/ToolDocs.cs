@@ -62,9 +62,9 @@ namespace AkerMcp.Server
                 "objects use one execute script instead.",
 
             ["call_method"] =
-                "Invoke a method on a scene object ('/Player', 'SetActive', ['false']) or a static " +
-                "member of a fully qualified type ('UnityEngine.Application', 'get_dataPath'). " +
-                "Arguments are strings, converted to the parameter types.",
+                "Invoke a method on a scene object (/Player, SetActive, [false]; Rigidbody.AddForce names the " +
+                "component) or a static member of a fully qualified type (UnityEngine.Application, " +
+                "get_dataPath). Arguments are JSON (a vector as {x,y,z}, an enum by name), matched to an overload.",
 
             ["create"] =
                 "Add an object or node to the scene, with undo: type (engine type name), name, " +
