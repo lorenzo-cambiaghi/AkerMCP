@@ -17,7 +17,8 @@ namespace AkerMcp.Client
         private CancellationTokenSource? _cts;
         private Task? _pipeServerTask;
         private bool _disposed;
-        private bool _running;
+        // Read by the pipe threads, written by Start/Stop on the editor's thread.
+        private volatile bool _running;
         private readonly List<Task> _activeConnections = new List<Task>();
         private readonly object _connectionsLock = new object();
 
@@ -62,11 +63,12 @@ namespace AkerMcp.Client
         public void Start()
         {
             if (_running) return;
-            _running = true;
 
+            // Everything is built before anything is announced, and _running goes true only once it all exists. It
+            // used to go true first: an adapter whose Create* threw left a plugin that said it was running, could not
+            // be started again, and was unreachable until the next domain reload.
             var capabilities = CreateCapabilities();
-            _discovery = new PluginDiscovery(capabilities.EngineName, capabilities.EngineVersion);
-            Config.PipeName = _discovery.PipeName;
+            var editorContext = CreateEditorContext();
 
             _handler = new IpcRequestHandler(
                 CreateSceneGraph(),
@@ -74,7 +76,7 @@ namespace AkerMcp.Client
                 CreateDispatcher(),
                 Config,
                 CreateAssetManager(),
-                CreateEditorContext(),
+                editorContext,
                 CreateCompilationSupport(),
                 CreateCodeExecutor(),
                 CreateScreenCapture(),
@@ -86,28 +88,50 @@ namespace AkerMcp.Client
                 CreateSoundImporter(),
                 CreateAgentConsent());
 
+            _discovery = new PluginDiscovery(capabilities.EngineName, capabilities.EngineVersion,
+                ProjectPathOf(editorContext));
+            Config.PipeName = _discovery.PipeName;
+
             _cts = new CancellationTokenSource();
+            _running = true;
 
             _pipeServerTask = Task.Run(() => RunPipeServer(_cts.Token));
             Log($"AkerMcp Client v{AkerMcp.Shared.Ipc.IpcConstants.ProtocolVersion} started. Pipe: {_discovery.PipeName}");
         }
 
+        /// <summary>
+        /// The open project, for the lock file. Start runs on the editor's main thread in every engine, which is where
+        /// the editors answer this; an editor that cannot answer yet is announced without a project.
+        /// </summary>
+        private static string? ProjectPathOf(IEditorContext? editorContext)
+        {
+            try { return editorContext?.GetProjectPath(); }
+            catch { return null; }
+        }
+
         public void Stop()
         {
             if (!_running) return;
-            _running = false;
+
+            NamedPipeServerStream? listening;
+            NamedPipeServerStream[] pipes;
+            lock (_connectionsLock)
+            {
+                // Under the same lock the pipe thread takes to publish a pipe: either it published the pipe before
+                // this point and the pipe is closed here, or it sees _running false and closes the pipe itself. Before,
+                // a pipe created in between was missed by both, and on Mono it leaked until the domain unloaded.
+                _running = false;
+                listening = _listeningPipe;
+                _listeningPipe = null;
+                pipes = _activePipes.ToArray();
+                _activePipes.Clear();
+            }
 
             try { _cts?.Cancel(); } catch { }
 
             // Forza la chiusura delle pipe per sbloccare WaitForConnectionAsync e
             // le ReceiveRequest in corso (la cancellazione via token non basta su Mono).
-            try { Interlocked.Exchange(ref _listeningPipe, null)?.Dispose(); } catch { }
-            NamedPipeServerStream[] pipes;
-            lock (_connectionsLock)
-            {
-                pipes = _activePipes.ToArray();
-                _activePipes.Clear();
-            }
+            try { listening?.Dispose(); } catch { }
             foreach (var pipe in pipes)
             {
                 try { pipe.Dispose(); } catch { }
@@ -143,7 +167,11 @@ namespace AkerMcp.Client
                         NamedPipeServerStream.MaxAllowedServerInstances,
                         PipeTransmissionMode.Byte,
                         PipeOptions.Asynchronous);
-                    _listeningPipe = pipeServer;
+                    lock (_connectionsLock)
+                    {
+                        if (!_running) break; // Stop() ran meanwhile: the finally disposes the pipe
+                        _listeningPipe = pipeServer;
+                    }
 
                     Log("Waiting for MCP server connection...");
                     await pipeServer.WaitForConnectionAsync(ct).ConfigureAwait(false);
@@ -151,18 +179,15 @@ namespace AkerMcp.Client
 
                     // Passa proprietà al task di gestione e rimetti subito in ascolto
                     var connectedPipe = pipeServer;
-                    pipeServer = null; // impedisce il dispose nel finally
-                    _listeningPipe = null;
-
-                    var connectionTask = Task.Run(() =>
-                        HandleSingleConnection(connectedPipe, ct));
-
                     lock (_connectionsLock)
                     {
+                        _listeningPipe = null;
+                        if (!_running) break; // the finally disposes it: Stop() has already swept the list
+                        pipeServer = null; // impedisce il dispose nel finally
+                        _activePipes.Add(connectedPipe);
                         // Rimuovi task completati
                         _activeConnections.RemoveAll(t => t.IsCompleted);
-                        _activeConnections.Add(connectionTask);
-                        _activePipes.Add(connectedPipe);
+                        _activeConnections.Add(Task.Run(() => HandleSingleConnection(connectedPipe, ct)));
                     }
                 }
                 catch (OperationCanceledException) { break; }
@@ -185,9 +210,13 @@ namespace AkerMcp.Client
             }
         }
 
-        private async Task HandleSingleConnection(NamedPipeServerStream pipe, CancellationToken ct)
+        private async Task HandleSingleConnection(NamedPipeServerStream pipe, CancellationToken pluginCt)
         {
             IpcChannel? channel = null;
+            // Ends with this connection: the requests still running for a server that has gone (a refresh_scripts
+            // polling for 150 s) stop when it leaves, instead of when the plugin does.
+            var connection = CancellationTokenSource.CreateLinkedTokenSource(pluginCt);
+            var ct = connection.Token;
             try
             {
                 channel = new IpcChannel(pipe);
@@ -220,6 +249,8 @@ namespace AkerMcp.Client
             }
             finally
             {
+                // Cancelled, not disposed: the requests still holding the token may read it after this point.
+                try { connection.Cancel(); } catch { }
                 lock (_connectionsLock) { _activePipes.Remove(pipe); }
                 try { channel?.Dispose(); } catch { }
                 try { pipe.Dispose(); } catch { }
@@ -232,7 +263,18 @@ namespace AkerMcp.Client
             try
             {
                 var response = await _handler!.HandleRequest(request, ct).ConfigureAwait(false);
-                await channel.SendResponse(response, ct).ConfigureAwait(false);
+                try
+                {
+                    await channel.SendResponse(response, ct).ConfigureAwait(false);
+                }
+                catch (IpcFrameTooLargeException tooLarge)
+                {
+                    // Answered with an error the caller can act on, instead of no answer at all: the server would
+                    // have waited out its deadline and reported a timeout.
+                    await channel.SendResponse(IpcResponse.Fail(request.Id,
+                        $"The result of '{request.Method}' is too large to send: {tooLarge.Message} " +
+                        "Ask for less (a narrower query, a smaller capture, a shorter return value)."), ct).ConfigureAwait(false);
+                }
             }
             catch (ObjectDisposedException)
             {

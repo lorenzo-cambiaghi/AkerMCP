@@ -1,7 +1,6 @@
 using System;
 using System.Diagnostics;
 using System.IO;
-using System.Text.Json;
 using AkerMcp.Shared.Ipc;
 
 namespace AkerMcp.Client
@@ -13,86 +12,47 @@ namespace AkerMcp.Client
 
         public string PipeName { get; }
 
-        public PluginDiscovery(string engineName, string engineVersion)
+        /// <param name="projectPath">
+        /// The open project (a folder, or a solution file on Stride), written in the lock so that the server can tell
+        /// two editors of the same engine apart and be pinned to one of them. Null when the engine cannot say.
+        /// </param>
+        public PluginDiscovery(string engineName, string engineVersion, string? projectPath = null)
         {
-            var current = Process.GetCurrentProcess();
+            using var current = Process.GetCurrentProcess();
             var pid = current.Id;
             PipeName = $"{IpcConstants.PipePrefix}{engineName.ToLowerInvariant()}-{pid}";
 
-            var discoveryDir = Path.Combine(Path.GetTempPath(), IpcConstants.DiscoveryDirectory);
+            var discoveryDir = LockFileStore.Directory;
             Directory.CreateDirectory(discoveryDir);
 
-            // Purge stale lock files from dead processes
-            PurgeStaleLockFiles(discoveryDir);
+            // Purge stale lock files from dead processes.
+            LockFileStore.ReadLive();
 
             _lockFilePath = Path.Combine(discoveryDir, $"{engineName.ToLowerInvariant()}-{pid}.lock");
 
-            // startTime must be the *process* start time (not "now") so that the
-            // PID-recycling guard in IsLockOwnerAlive works on subsequent reads.
-            var info = new
+            LockFileStore.Write(_lockFilePath, new EngineLockInfo
             {
-                pipe = PipeName,
-                engine = engineName,
-                version = engineVersion,
-                protocolVersion = IpcConstants.ProtocolVersion,
-                pid = pid,
-                startTime = current.StartTime.ToUniversalTime().ToString("o")
-            };
-
-            File.WriteAllText(_lockFilePath, JsonSerializer.Serialize(info));
+                Pipe = PipeName,
+                Engine = engineName,
+                Version = engineVersion,
+                ProtocolVersion = IpcConstants.ProtocolVersion,
+                Pid = pid,
+                // The *process* start time (not "now"), so that the PID-recycling guard works on later reads.
+                StartTime = current.StartTime.ToUniversalTime().ToString("o"),
+                Project = ProjectName(projectPath),
+                ProjectPath = string.IsNullOrWhiteSpace(projectPath) ? null : projectPath,
+            });
         }
 
-        private static void PurgeStaleLockFiles(string discoveryDir)
+        /// <summary>"MyGame" for "C:/Projects/MyGame", "C:/Projects/MyGame/" and "C:/Projects/MyGame/MyGame.sln".</summary>
+        public static string? ProjectName(string? projectPath)
         {
-            try
-            {
-                foreach (var lockFile in Directory.GetFiles(discoveryDir, "*.lock"))
-                {
-                    try
-                    {
-                        var content = File.ReadAllText(lockFile);
-                        var info = JsonSerializer.Deserialize<JsonElement>(content);
-                        if (!IsLockOwnerAlive(info))
-                            File.Delete(lockFile);
-                    }
-                    catch
-                    {
-                        try { File.Delete(lockFile); } catch { }
-                    }
-                }
-            }
-            catch { /* Discovery dir access error, skip */ }
-        }
-
-        private static bool IsLockOwnerAlive(JsonElement info)
-        {
-            if (!info.TryGetProperty("pid", out var pidElem)) return false;
-            var pid = pidElem.GetInt32();
-
-            Process process;
-            try { process = Process.GetProcessById(pid); }
-            catch { return false; }
-
-            try
-            {
-                if (process.HasExited) return false;
-
-                // Guard against PID recycling: compare process start time with the
-                // one recorded in the lock file. Tolerate small clock-skew (2s).
-                if (info.TryGetProperty("startTime", out var startElem) &&
-                    DateTime.TryParse(startElem.GetString(), null,
-                        System.Globalization.DateTimeStyles.RoundtripKind, out var lockStart))
-                {
-                    var processStart = process.StartTime.ToUniversalTime();
-                    if (Math.Abs((lockStart - processStart).TotalSeconds) > 2)
-                        return false;
-                }
-                return true;
-            }
-            finally
-            {
-                process.Dispose();
-            }
+            if (string.IsNullOrWhiteSpace(projectPath)) return null;
+            var trimmed = projectPath!.TrimEnd('/', '\\');
+            var name = Path.HasExtension(trimmed) && !Directory.Exists(trimmed)
+                ? Path.GetFileNameWithoutExtension(trimmed)
+                : Path.GetFileName(trimmed);
+            return string.IsNullOrEmpty(name) ? null : name;
         }
 
         public void Dispose()

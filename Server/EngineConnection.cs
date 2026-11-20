@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.IO.Pipes;
 using System.Text.Json;
@@ -8,20 +9,54 @@ using System.Threading;
 using System.Threading.Tasks;
 using AkerMcp.Shared.Ipc;
 using AkerMcp.Shared.Protocol;
-using AkerMcp.Shared.Serialization;
-using MessagePack;
 
 namespace AkerMcp.Server
 {
     public class EngineConnection : IDisposable
     {
-        private IpcChannel? _channel;
+        /// <summary>
+        /// One established pipe and everything that belongs to it. Held in a single reference, so "connected" and
+        /// "connected to whom" can never disagree, and so a task can only ever tear down the connection it was
+        /// started for: a listener or a heartbeat that outlives its pipe used to call a Disconnect() that closed
+        /// whichever connection was current — by then, possibly the next one.
+        /// </summary>
+        private sealed class Connection
+        {
+            private int _closed;
+
+            public Connection(IpcChannel channel, EngineIdentity engine)
+            {
+                Channel = channel;
+                Engine = engine;
+            }
+
+            public IpcChannel Channel { get; }
+            public EngineIdentity Engine { get; }
+            public CancellationTokenSource Lifetime { get; } = new CancellationTokenSource();
+            public ConcurrentDictionary<int, TaskCompletionSource<IpcResponse>> Pending { get; } =
+                new ConcurrentDictionary<int, TaskCompletionSource<IpcResponse>>();
+
+            public bool IsClosed => Volatile.Read(ref _closed) != 0;
+
+            /// <summary>Idempotent. The token source is cancelled, not disposed: the tasks bound to it still read it.</summary>
+            public void Close()
+            {
+                if (Interlocked.Exchange(ref _closed, 1) != 0) return;
+                try { Lifetime.Cancel(); } catch { }
+                try { Channel.Dispose(); } catch { }
+                foreach (var pending in Pending.Values)
+                    pending.TrySetCanceled();
+                Pending.Clear();
+            }
+        }
+
+        private Connection? _connection;
         private int _nextRequestId;
-        private readonly ConcurrentDictionary<int, TaskCompletionSource<IpcResponse>> _pendingRequests
-            = new ConcurrentDictionary<int, TaskCompletionSource<IpcResponse>>();
-        private readonly GenericSerializer _serializer = new GenericSerializer();
-        private CancellationTokenSource? _listenerCts;
         private bool _disposed;
+
+        // One connection attempt at a time. The background retry loop and engine_status could both find the server
+        // disconnected and both connect: one pipe leaked, with an orphaned listener and heartbeat of its own.
+        private readonly SemaphoreSlim _connectLock = new SemaphoreSlim(1, 1);
 
         // Heartbeat: catches "zombie" connections where the pipe is technically open
         // but the engine main thread is frozen (no responses ever come back).
@@ -32,6 +67,8 @@ namespace AkerMcp.Server
         // recompilation) and the background retry loop reconnects within ~2-10s.
         // Tool calls arriving in that window wait instead of failing immediately.
         private const int ReconnectGraceMs = 20_000;
+
+        private const int ResourceReadTimeoutMs = 10_000;
 
         /// <summary>
         /// How long a forwarded call waits for the engine's answer when the tool brings no timeout of its own. A
@@ -62,22 +99,25 @@ namespace AkerMcp.Server
         // distinguish "connection dropped mid-call" from ordinary tool errors.
         public const string EngineDisconnectedPrefix = "[ENGINE_DISCONNECTED]";
 
-        public bool IsConnected => _channel != null;
+        private Connection? Current => Volatile.Read(ref _connection);
 
-        /// <summary>Who answered: engine, version, pid, pipe. Null when nothing is connected.</summary>
-        public EngineIdentity? ConnectedEngine { get; private set; }
+        public bool IsConnected => Current != null;
+
+        /// <summary>Who answered: engine, version, pid, pipe, project. Null when nothing is connected.</summary>
+        public EngineIdentity? ConnectedEngine => Current?.Engine;
 
         /// <summary>
-        /// The engine name this server is pinned to (case-insensitive), or null for "whoever answers
-        /// first". Seeded from <c>AKER_MCP_ENGINE</c> and settable at runtime through the
-        /// <c>engine_status</c> tool.
+        /// What this server is pinned to, or null for "whoever answers first": an engine name ("unity"), a process
+        /// id ("12345") or a project name ("MyGame"), all case-insensitive. Seeded from <c>AKER_MCP_ENGINE</c> and
+        /// settable at runtime through the <c>engine_status</c> tool.
         /// <para>
         /// ⚠️ Pinning exists because the alternative is silent: with two editors running, the losing
         /// one is not refused — it is simply never chosen, and the caller has no way to tell. Worse,
         /// the choice can CHANGE mid-session, because a Unity domain reload drops the pipe and the
         /// reconnect starts the scan over. Observed in the field: after a script recompile the server
         /// switched to an animation editor that happened to sort first, and every `execute` kept
-        /// compiling — inside the other process, where the engine's own types do not exist.
+        /// compiling — inside the other process, where the engine's own types do not exist. A pin by
+        /// engine name alone cannot choose between two editors of the same engine; pid and project can.
         /// </para>
         /// </summary>
         public string? PinnedEngine { get; set; } =
@@ -91,12 +131,21 @@ namespace AkerMcp.Server
             public string Pipe { get; set; } = "";
             public int Pid { get; set; }
             public string ProtocolVersion { get; set; } = "";
+            public string? Project { get; set; }
+            public string? ProjectPath { get; set; }
 
-            public bool Is(string? name)
-                => name != null && string.Equals(Engine, name, StringComparison.OrdinalIgnoreCase);
+            /// <summary>Whether a pin names this engine: by engine name, by pid, or by project name.</summary>
+            public bool Is(string? pin)
+            {
+                if (string.IsNullOrWhiteSpace(pin)) return false;
+                var p = pin!.Trim();
+                return string.Equals(Engine, p, StringComparison.OrdinalIgnoreCase)
+                    || (int.TryParse(p, NumberStyles.None, CultureInfo.InvariantCulture, out var pid) && pid == Pid)
+                    || (Project != null && string.Equals(Project, p, StringComparison.OrdinalIgnoreCase));
+            }
 
             public override string ToString()
-                => $"{Engine} {Version} (pid {Pid})";
+                => Project != null ? $"{Engine} {Version} (pid {Pid}, project {Project})" : $"{Engine} {Version} (pid {Pid})";
         }
 
         /// <summary>
@@ -105,32 +154,16 @@ namespace AkerMcp.Server
         /// </summary>
         public static List<EngineIdentity> DiscoverEngines()
         {
-            var found = new List<EngineIdentity>();
-            var discoveryDir = Path.Combine(Path.GetTempPath(), IpcConstants.DiscoveryDirectory);
-            if (!Directory.Exists(discoveryDir)) return found;
-
-            PurgeStaleLockFiles(discoveryDir);
-
-            foreach (var lockFile in Directory.GetFiles(discoveryDir, "*.lock"))
+            var found = LockFileStore.ReadLive(StdioTransport.LogInfo).ConvertAll(info => new EngineIdentity
             {
-                try
-                {
-                    var info = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(lockFile));
-                    if (!info.TryGetProperty("pipe", out var pipeElement)) continue;
-                    if (pipeElement.GetString() is not { Length: > 0 } pipeName) continue;
-
-                    found.Add(new EngineIdentity
-                    {
-                        Pipe = pipeName,
-                        Engine = info.TryGetProperty("engine", out var e) ? e.GetString() ?? "Unknown" : "Unknown",
-                        Version = info.TryGetProperty("version", out var v) ? v.GetString() ?? "" : "",
-                        Pid = info.TryGetProperty("pid", out var p) && p.TryGetInt32(out int pid) ? pid : 0,
-                        ProtocolVersion = info.TryGetProperty("protocolVersion", out var pv)
-                            ? pv.GetString() ?? "" : "",
-                    });
-                }
-                catch { /* corrupt lock file, skip */ }
-            }
+                Pipe = info.Pipe,
+                Engine = string.IsNullOrEmpty(info.Engine) ? "Unknown" : info.Engine,
+                Version = info.Version ?? "",
+                Pid = info.Pid,
+                ProtocolVersion = info.ProtocolVersion ?? "",
+                Project = string.IsNullOrWhiteSpace(info.Project) ? null : info.Project,
+                ProjectPath = string.IsNullOrWhiteSpace(info.ProjectPath) ? null : info.ProjectPath,
+            });
 
             // Stable order, and NOT the filesystem's: "whoever sorts first alphabetically" is an
             // accident of naming, and it silently decided which editor an agent was talking to.
@@ -153,12 +186,12 @@ namespace AkerMcp.Server
             return IsConnected;
         }
 
-        public async Task<bool> TryConnect(string pipeName, int timeoutMs = 5000, CancellationToken ct = default)
+        private async Task<Connection?> Open(EngineIdentity candidate, int timeoutMs, CancellationToken ct)
         {
             NamedPipeClientStream? client = null;
             try
             {
-                client = new NamedPipeClientStream(".", pipeName,
+                client = new NamedPipeClientStream(".", candidate.Pipe,
                     PipeDirection.InOut, PipeOptions.Asynchronous);
 
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -166,84 +199,104 @@ namespace AkerMcp.Server
 
                 await client.ConnectAsync(cts.Token).ConfigureAwait(false);
 
-                // Disconnect() uses Interlocked.Exchange and nulls these fields, so
-                // a previous connection's cleanup never races with this assignment.
-                var newCts = new CancellationTokenSource();
-                var newChannel = new IpcChannel(client);
+                var connection = new Connection(new IpcChannel(client), candidate);
                 client = null; // ownership transferred to IpcChannel; do not dispose in catch
-                _listenerCts = newCts;
-                _channel = newChannel;
-
-                // Pass the channel by value so each task is bound to ITS connection.
-                // Even if the field is later swapped to a new channel, an old task
-                // can never accidentally read from / write to it.
-                var listenerToken = newCts.Token;
-                _ = Task.Run(() => ListenForResponses(newChannel, listenerToken));
-                _ = Task.Run(() => RunHeartbeat(newChannel, listenerToken));
-
-                StdioTransport.LogInfo($"Connected to engine plugin via pipe: {pipeName}");
-                return true;
+                StdioTransport.LogInfo($"Connected to engine plugin via pipe: {candidate.Pipe}");
+                return connection;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                try { client?.Dispose(); } catch { }
+                throw;
             }
             catch (Exception ex)
             {
                 // Avoid leaking the pipe handle on failed ConnectAsync.
                 try { client?.Dispose(); } catch { }
                 StdioTransport.LogError($"Failed to connect to engine: {ex.Message}");
-                return false;
+                return null;
             }
         }
 
         public async Task<bool> TryDiscoverAndConnect(CancellationToken ct = default)
         {
-            var candidates = DiscoverEngines();
-            if (candidates.Count == 0)
+            await _connectLock.WaitAsync(ct).ConfigureAwait(false);
+            try
             {
-                StdioTransport.LogInfo("No engine plugin discovered.");
-                return false;
-            }
-
-            // ⚠️ The pin is honoured on EVERY reconnect, not just the first one. A Unity domain reload
-            // drops the pipe and this method runs again — which is exactly when the target used to
-            // change under the caller's feet.
-            if (PinnedEngine != null)
-            {
-                var matching = candidates.FindAll(c => c.Is(PinnedEngine));
-                if (matching.Count == 0)
+                // Someone else connected while this call waited for the lock. Kept only if it is still the right
+                // target: the pin may have changed since.
+                var current = Current;
+                if (current != null)
                 {
-                    StdioTransport.LogInfo(
-                        $"Pinned to '{PinnedEngine}' but only [{DescribeAll(candidates)}] are running: " +
-                        "staying disconnected rather than talking to the wrong one.");
+                    if (PinnedEngine == null || current.Engine.Is(PinnedEngine)) return true;
+                    Teardown(current);
+                }
+
+                var candidates = DiscoverEngines();
+                if (candidates.Count == 0)
+                {
+                    StdioTransport.LogInfo("No engine plugin discovered.");
                     return false;
                 }
-                candidates = matching;
+
+                // ⚠️ The pin is honoured on EVERY reconnect, not just the first one. A Unity domain reload
+                // drops the pipe and this method runs again — which is exactly when the target used to
+                // change under the caller's feet.
+                if (PinnedEngine != null)
+                {
+                    var matching = candidates.FindAll(c => c.Is(PinnedEngine));
+                    if (matching.Count == 0)
+                    {
+                        StdioTransport.LogInfo(
+                            $"Pinned to '{PinnedEngine}' but only [{DescribeAll(candidates)}] are running: " +
+                            "staying disconnected rather than talking to the wrong one.");
+                        return false;
+                    }
+                    if (matching.Count > 1)
+                        StdioTransport.LogInfo(
+                            $"Pinned to '{PinnedEngine}', which matches [{DescribeAll(matching)}]: taking the first. " +
+                            "Pin by pid or project to choose.");
+                    candidates = matching;
+                }
+                else if (candidates.Count > 1)
+                {
+                    StdioTransport.LogInfo(
+                        $"{candidates.Count} engines available [{DescribeAll(candidates)}] and none pinned: " +
+                        "taking the first. Pin one with AKER_MCP_ENGINE or the engine_status tool.");
+                }
+
+                foreach (var candidate in candidates)
+                {
+                    StdioTransport.LogInfo($"Attempting connection to pipe: {candidate.Pipe}");
+
+                    var connection = await Open(candidate, 5000, ct).ConfigureAwait(false);
+                    if (connection == null) continue;
+
+                    Volatile.Write(ref _connection, connection);
+
+                    // Each task is bound to ITS connection: whatever it does when it ends, it does to that one.
+                    var lifetime = connection.Lifetime.Token;
+                    _ = Task.Run(() => ListenForResponses(connection, lifetime));
+                    _ = Task.Run(() => RunHeartbeat(connection, lifetime));
+
+                    StdioTransport.LogInfo(
+                        $"Connected to {candidate} via {candidate.Pipe} (Client Protocol: v{candidate.ProtocolVersion})");
+
+                    var skew = DescribeVersionSkew(candidate.ProtocolVersion, IpcConstants.ProtocolVersion);
+                    if (skew.breaking) StdioTransport.LogError(skew.message!);
+                    else if (skew.message != null) StdioTransport.LogInfo(skew.message);
+
+                    OnConnected?.Invoke();
+                    return true;
+                }
+
+                StdioTransport.LogInfo("No engine plugin available after discovery scan.");
+                return false;
             }
-            else if (candidates.Count > 1)
+            finally
             {
-                StdioTransport.LogInfo(
-                    $"{candidates.Count} engines available [{DescribeAll(candidates)}] and none pinned: " +
-                    "taking the first. Pin one with AKER_MCP_ENGINE or the engine_status tool.");
+                _connectLock.Release();
             }
-
-            foreach (var candidate in candidates)
-            {
-                StdioTransport.LogInfo($"Attempting connection to pipe: {candidate.Pipe}");
-
-                if (!await TryConnect(candidate.Pipe, 5000, ct).ConfigureAwait(false)) continue;
-
-                ConnectedEngine = candidate;
-                StdioTransport.LogInfo(
-                    $"Connected to {candidate} via {candidate.Pipe} (Client Protocol: v{candidate.ProtocolVersion})");
-
-                var skew = DescribeVersionSkew(candidate.ProtocolVersion, IpcConstants.ProtocolVersion);
-                if (skew.breaking) StdioTransport.LogError(skew.message!);
-                else if (skew.message != null) StdioTransport.LogInfo(skew.message);
-
-                OnConnected?.Invoke();
-                return true;
-            }
-
-            StdioTransport.LogInfo("No engine plugin available after discovery scan.");
-            return false;
         }
 
         /// <summary>Raised once a plugin is connected, so per-session state can be cleared.</summary>
@@ -292,128 +345,60 @@ namespace AkerMcp.Server
         private static string DescribeAll(List<EngineIdentity> engines)
             => string.Join(", ", engines.ConvertAll(e => e.ToString()));
 
-        private static void PurgeStaleLockFiles(string discoveryDir)
+        /// <summary>"30s", "1.5s", "0.25s": a sub-second deadline used to print as "0s".</summary>
+        private static string Seconds(int ms)
+            => (ms / 1000.0).ToString("0.##", CultureInfo.InvariantCulture) + "s";
+
+        /// <summary>
+        /// The one round trip every forwarding method makes: wait out a reconnect if asked, send, wait for the answer
+        /// within the deadline. There used to be five copies of it, and they had drifted — only some knew about a
+        /// disposed channel, none bounded the write.
+        /// </summary>
+        private async Task<(IpcResponse? response, string? error)> RoundTrip(
+            IpcRequest request, string label, int deadlineMs, bool waitForReconnect, CancellationToken ct)
         {
-            foreach (var lockFile in Directory.GetFiles(discoveryDir, "*.lock"))
+            var connection = Current;
+            if (connection == null)
+            {
+                if (!waitForReconnect)
+                    return (null, $"{EngineDisconnectedPrefix} No engine connected.");
+                // Most common cause: Unity is mid domain-reload. Give the retry loop a chance instead of failing the
+                // call (and burning a model round-trip on a transient state).
+                if (!await WaitForConnection(ReconnectGraceMs, ct).ConfigureAwait(false))
+                    return (null,
+                        $"{EngineDisconnectedPrefix} No engine connected (waited {Seconds(ReconnectGraceMs)}). " +
+                        "If Unity is compiling, retry shortly; otherwise check that the AkerMcp plugin is running in the editor.");
+                connection = Current;
+                if (connection == null)
+                    return (null, $"{EngineDisconnectedPrefix} Engine connection dropped again — retry shortly.");
+            }
+
+            request.Id = Interlocked.Increment(ref _nextRequestId);
+            var tcs = new TaskCompletionSource<IpcResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            connection.Pending[request.Id] = tcs;
+
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            deadline.CancelAfter(deadlineMs);
+            try
             {
                 try
                 {
-                    var content = File.ReadAllText(lockFile);
-                    var info = JsonSerializer.Deserialize<JsonElement>(content);
-
-                    if (!IsLockOwnerAlive(info, out var reason))
-                    {
-                        StdioTransport.LogInfo($"Removing stale lock file: {Path.GetFileName(lockFile)} ({reason})");
-                        File.Delete(lockFile);
-                    }
+                    // Within the deadline too: a write to a pipe nobody reads (an engine stopped in a debugger) used
+                    // to wait forever, and with it the whole server.
+                    await connection.Channel.SendRequest(request, deadline.Token).ConfigureAwait(false);
                 }
-                catch
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                 {
-                    // Corrupt file, remove it
-                    try { File.Delete(lockFile); } catch { }
-                }
-            }
-        }
-
-        private static bool IsLockOwnerAlive(JsonElement info, out string reason)
-        {
-            reason = "unknown";
-            if (!info.TryGetProperty("pid", out var pidElement))
-            {
-                reason = "missing pid field";
-                return false;
-            }
-
-            var pid = pidElement.GetInt32();
-            System.Diagnostics.Process process;
-            try { process = System.Diagnostics.Process.GetProcessById(pid); }
-            catch
-            {
-                reason = $"PID {pid} is dead";
-                return false;
-            }
-
-            try
-            {
-                if (process.HasExited)
-                {
-                    reason = $"PID {pid} has exited";
-                    return false;
+                    // A frame may be half written: the pipe cannot carry another one.
+                    Teardown(connection);
+                    return (null,
+                        $"{EngineDisconnectedPrefix} The engine did not take '{label}' within {Seconds(deadlineMs)}: " +
+                        "it is not reading its pipe (a debugger break, a frozen editor). The connection was dropped " +
+                        "and is made again automatically.");
                 }
 
-                // Guard against PID recycling: compare process start time with the one
-                // recorded in the lock file. Tolerate small clock-skew (2s).
-                if (info.TryGetProperty("startTime", out var startElement) &&
-                    DateTime.TryParse(startElement.GetString(), null,
-                        System.Globalization.DateTimeStyles.RoundtripKind, out var lockStart))
-                {
-                    var processStart = process.StartTime.ToUniversalTime();
-                    if (System.Math.Abs((lockStart - processStart).TotalSeconds) > 2)
-                    {
-                        reason = $"PID {pid} was recycled (start time mismatch)";
-                        return false;
-                    }
-                }
-                return true;
-            }
-            finally
-            {
-                process.Dispose();
-            }
-        }
-
-        public async Task<ToolResult> ForwardToolCall(string method, JsonElement? arguments, CancellationToken ct,
-            int? timeoutMs = null)
-        {
-            int deadlineMs = timeoutMs ?? DefaultRequestTimeoutMs;
-            var channel = _channel;
-            if (channel == null)
-            {
-                // Most common cause: Unity is mid domain-reload. Give the retry
-                // loop a chance instead of failing the call (and burning a
-                // model round-trip on a transient state).
-                if (!await WaitForConnection(ReconnectGraceMs, ct).ConfigureAwait(false))
-                    return ToolResult.Error(
-                        $"{EngineDisconnectedPrefix} No engine connected (waited {ReconnectGraceMs / 1000}s). " +
-                        "If Unity is compiling, retry shortly; otherwise check that the AkerMcp plugin is running in the editor.");
-                channel = _channel;
-                if (channel == null)
-                    return ToolResult.Error($"{EngineDisconnectedPrefix} Engine connection dropped again — retry shortly.");
-            }
-
-            var payload = arguments.HasValue
-                ? System.Text.Encoding.UTF8.GetBytes(arguments.Value.GetRawText())
-                : null;
-
-            var requestId = Interlocked.Increment(ref _nextRequestId);
-            var request = new IpcRequest
-            {
-                Id = requestId,
-                Method = method,
-                Payload = payload
-            };
-
-            var tcs = new TaskCompletionSource<IpcResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _pendingRequests[requestId] = tcs;
-
-            try
-            {
-                await channel.SendRequest(request, ct).ConfigureAwait(false);
-
-                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                cts.CancelAfter(deadlineMs);
-                using var reg = cts.Token.Register(() => tcs.TrySetCanceled());
-
-                var response = await tcs.Task.ConfigureAwait(false);
-
-                if (!response.Success)
-                    return ToolResult.Error(response.Error ?? "Unknown engine error");
-
-                var resultText = response.Payload != null
-                    ? System.Text.Encoding.UTF8.GetString(response.Payload)
-                    : "OK";
-
-                return ToolResult.Text(resultText);
+                using var reg = deadline.Token.Register(() => tcs.TrySetCanceled());
+                return (await tcs.Task.ConfigureAwait(false), null);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -421,22 +406,49 @@ namespace AkerMcp.Server
             }
             catch (OperationCanceledException)
             {
-                // Either the per-call timeout fired or Disconnect() cancelled the
-                // pending request. Disambiguate so the model gets an actionable error.
-                if (!IsConnected)
-                    return ToolResult.Error(
-                        $"{EngineDisconnectedPrefix} Engine disconnected while '{method}' was in flight " +
+                // Either the per-call timeout fired or the connection closed and cancelled the pending request.
+                // Disambiguate so the model gets an actionable error.
+                if (connection.IsClosed)
+                    return (null,
+                        $"{EngineDisconnectedPrefix} Engine disconnected while '{label}' was in flight " +
                         "(usually a Unity domain reload after script recompilation). It reconnects automatically — retry shortly.");
-                return ToolResult.Error($"Tool '{method}' timed out after {deadlineMs / 1000}s (engine still connected).");
+                return (null, $"Tool '{label}' timed out after {Seconds(deadlineMs)} (engine still connected).");
             }
-            catch (IOException ex)
+            catch (Exception ex) when (ex is IOException || ex is ObjectDisposedException)
             {
-                return ToolResult.Error($"{EngineDisconnectedPrefix} Pipe error during '{method}': {ex.Message}. Retry shortly.");
+                // ObjectDisposedException: the send overlapped the connection closing. It used to surface as "Cannot
+                // access a disposed object" without the prefix, and the reload handling in refresh_scripts and
+                // enter_play did not recognise it.
+                return (null, $"{EngineDisconnectedPrefix} Pipe error during '{label}': {ex.Message}. Retry shortly.");
             }
             finally
             {
-                _pendingRequests.TryRemove(requestId, out _);
+                connection.Pending.TryRemove(request.Id, out _);
             }
+        }
+
+        private static byte[]? Utf8(JsonElement? arguments)
+            => arguments is { ValueKind: not JsonValueKind.Undefined } a
+                ? System.Text.Encoding.UTF8.GetBytes(a.GetRawText())
+                : null;
+
+        private static ToolResult AsToolResult((IpcResponse? response, string? error) answer)
+        {
+            if (answer.error != null) return ToolResult.Error(answer.error);
+            var response = answer.response!;
+            if (!response.Success)
+                return ToolResult.Error(response.Error ?? "Unknown engine error");
+            return ToolResult.Text(response.Payload != null
+                ? System.Text.Encoding.UTF8.GetString(response.Payload)
+                : "OK");
+        }
+
+        public async Task<ToolResult> ForwardToolCall(string method, JsonElement? arguments, CancellationToken ct,
+            int? timeoutMs = null)
+        {
+            var request = new IpcRequest { Method = method, Payload = Utf8(arguments) };
+            return AsToolResult(await RoundTrip(request, method, timeoutMs ?? DefaultRequestTimeoutMs,
+                waitForReconnect: true, ct).ConfigureAwait(false));
         }
 
         /// <summary>
@@ -448,66 +460,14 @@ namespace AkerMcp.Server
             string metadataJson, byte[] binary, CancellationToken ct,
             int? timeoutMs = null)
         {
-            int deadlineMs = timeoutMs ?? DefaultRequestTimeoutMs;
-            var channel = _channel;
-            if (channel == null)
-            {
-                if (!await WaitForConnection(ReconnectGraceMs, ct).ConfigureAwait(false))
-                    return ToolResult.Error($"{EngineDisconnectedPrefix} No engine connected. Retry shortly.");
-                channel = _channel;
-                if (channel == null)
-                    return ToolResult.Error($"{EngineDisconnectedPrefix} Engine connection dropped — retry shortly.");
-            }
-
-            var requestId = Interlocked.Increment(ref _nextRequestId);
             var request = new IpcRequest
             {
-                Id = requestId,
                 Method = IpcConstants.Methods.ImportSprite,
                 Payload = System.Text.Encoding.UTF8.GetBytes(metadataJson),
                 Binary = binary
             };
-
-            var tcs = new TaskCompletionSource<IpcResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _pendingRequests[requestId] = tcs;
-
-            try
-            {
-                await channel.SendRequest(request, ct).ConfigureAwait(false);
-
-                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                cts.CancelAfter(deadlineMs);
-                using var reg = cts.Token.Register(() => tcs.TrySetCanceled());
-
-                var response = await tcs.Task.ConfigureAwait(false);
-
-                if (!response.Success)
-                    return ToolResult.Error(response.Error ?? "Unknown engine error");
-
-                var resultText = response.Payload != null
-                    ? System.Text.Encoding.UTF8.GetString(response.Payload)
-                    : "OK";
-                return ToolResult.Text(resultText);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (OperationCanceledException)
-            {
-                if (!IsConnected)
-                    return ToolResult.Error(
-                        $"{EngineDisconnectedPrefix} Engine disconnected while importing sprite. Retry shortly.");
-                return ToolResult.Error($"import_sprite timed out after {deadlineMs / 1000}s (engine still connected).");
-            }
-            catch (IOException ex)
-            {
-                return ToolResult.Error($"{EngineDisconnectedPrefix} Pipe error during import_sprite: {ex.Message}. Retry shortly.");
-            }
-            finally
-            {
-                _pendingRequests.TryRemove(requestId, out _);
-            }
+            return AsToolResult(await RoundTrip(request, IpcConstants.Methods.ImportSprite,
+                timeoutMs ?? DefaultRequestTimeoutMs, waitForReconnect: true, ct).ConfigureAwait(false));
         }
 
         /// <summary>
@@ -518,198 +478,57 @@ namespace AkerMcp.Server
             string metadataJson, byte[] binary, CancellationToken ct,
             int? timeoutMs = null)
         {
-            int deadlineMs = timeoutMs ?? DefaultRequestTimeoutMs;
-            var channel = _channel;
-            if (channel == null)
-            {
-                if (!await WaitForConnection(ReconnectGraceMs, ct).ConfigureAwait(false))
-                    return ToolResult.Error($"{EngineDisconnectedPrefix} No engine connected. Retry shortly.");
-                channel = _channel;
-                if (channel == null)
-                    return ToolResult.Error($"{EngineDisconnectedPrefix} Engine connection dropped — retry shortly.");
-            }
-
-            var requestId = Interlocked.Increment(ref _nextRequestId);
             var request = new IpcRequest
             {
-                Id = requestId,
                 Method = IpcConstants.Methods.ImportSound,
                 Payload = System.Text.Encoding.UTF8.GetBytes(metadataJson),
                 Binary = binary
             };
-
-            var tcs = new TaskCompletionSource<IpcResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _pendingRequests[requestId] = tcs;
-
-            try
-            {
-                await channel.SendRequest(request, ct).ConfigureAwait(false);
-
-                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                cts.CancelAfter(deadlineMs);
-                using var reg = cts.Token.Register(() => tcs.TrySetCanceled());
-
-                var response = await tcs.Task.ConfigureAwait(false);
-
-                if (!response.Success)
-                    return ToolResult.Error(response.Error ?? "Unknown engine error");
-
-                var resultText = response.Payload != null
-                    ? System.Text.Encoding.UTF8.GetString(response.Payload)
-                    : "OK";
-                return ToolResult.Text(resultText);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (OperationCanceledException)
-            {
-                if (!IsConnected)
-                    return ToolResult.Error(
-                        $"{EngineDisconnectedPrefix} Engine disconnected while importing sound. Retry shortly.");
-                return ToolResult.Error($"import_sound timed out after {deadlineMs / 1000}s (engine still connected).");
-            }
-            catch (IOException ex)
-            {
-                return ToolResult.Error($"{EngineDisconnectedPrefix} Pipe error during import_sound: {ex.Message}. Retry shortly.");
-            }
-            finally
-            {
-                _pendingRequests.TryRemove(requestId, out _);
-            }
+            return AsToolResult(await RoundTrip(request, IpcConstants.Methods.ImportSound,
+                timeoutMs ?? DefaultRequestTimeoutMs, waitForReconnect: true, ct).ConfigureAwait(false));
         }
 
         public async Task<BinaryToolCallResult> ForwardBinaryToolCall(
             string method, JsonElement? arguments, CancellationToken ct)
         {
-            var channel = _channel;
-            if (channel == null)
-            {
-                if (!await WaitForConnection(ReconnectGraceMs, ct).ConfigureAwait(false))
-                    return new BinaryToolCallResult { Error = "No engine connected. If Unity is compiling, retry shortly." };
-                channel = _channel;
-                if (channel == null)
-                    return new BinaryToolCallResult { Error = "Engine connection dropped — retry shortly." };
-            }
+            var request = new IpcRequest { Method = method, Payload = Utf8(arguments) };
+            var (response, error) = await RoundTrip(request, method, DefaultRequestTimeoutMs,
+                waitForReconnect: true, ct).ConfigureAwait(false);
 
-            var payload = arguments.HasValue
-                ? System.Text.Encoding.UTF8.GetBytes(arguments.Value.GetRawText())
-                : null;
-
-            var requestId = Interlocked.Increment(ref _nextRequestId);
-            var request = new IpcRequest
-            {
-                Id = requestId,
-                Method = method,
-                Payload = payload
-            };
-
-            var tcs = new TaskCompletionSource<IpcResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _pendingRequests[requestId] = tcs;
-
-            try
-            {
-                await channel.SendRequest(request, ct).ConfigureAwait(false);
-
-                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                cts.CancelAfter(DefaultRequestTimeoutMs);
-                using var reg = cts.Token.Register(() => tcs.TrySetCanceled());
-
-                var response = await tcs.Task.ConfigureAwait(false);
-
-                if (!response.Success)
-                {
-                    return new BinaryToolCallResult
-                    {
-                        ErrorCode = response.ErrorCode,
-                        Error = response.Error
-                    };
-                }
-
-                return new BinaryToolCallResult
-                {
-                    Bytes = response.Payload,
-                    ContentType = response.ContentType
-                };
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw; // caller cancelled — propagate
-            }
-            catch (OperationCanceledException)
-            {
-                if (!IsConnected)
-                    return new BinaryToolCallResult
-                    {
-                        Error = $"{EngineDisconnectedPrefix} Engine disconnected while '{method}' was in flight " +
-                                "(usually a Unity domain reload after script recompilation). It reconnects automatically — retry shortly."
-                    };
-                return new BinaryToolCallResult
-                {
-                    Error = $"'{method}' timed out after {DefaultRequestTimeoutMs / 1000}s (engine still connected)."
-                };
-            }
-            catch (IOException ex)
-            {
-                return new BinaryToolCallResult
-                {
-                    Error = $"{EngineDisconnectedPrefix} Pipe error during '{method}': {ex.Message}. Retry shortly."
-                };
-            }
-            finally
-            {
-                _pendingRequests.TryRemove(requestId, out _);
-            }
+            if (error != null) return new BinaryToolCallResult { Error = error };
+            if (!response!.Success)
+                return new BinaryToolCallResult { ErrorCode = response.ErrorCode, Error = response.Error };
+            return new BinaryToolCallResult { Bytes = response.Payload, ContentType = response.ContentType };
         }
 
-        public async Task<string> ForwardResourceRead(string method, CancellationToken ct)
+        /// <summary>
+        /// A read-only engine query whose answer is text. A failure comes back as text starting with "Error:" — what
+        /// the callers test for — including a timeout, which used to escape as a TaskCanceledException.
+        /// </summary>
+        /// <param name="waitForReconnect">
+        /// Wait out a reconnect, as tool calls do. Off by default: the resource reads and the window lookups behind an
+        /// OS-level fallback would rather answer at once.
+        /// </param>
+        public async Task<string> ForwardResourceRead(string method, CancellationToken ct, bool waitForReconnect = false)
         {
-            var channel = _channel;
-            if (channel == null)
-                return "(No engine connected)";
+            var (response, error) = await RoundTrip(new IpcRequest { Method = method }, method,
+                ResourceReadTimeoutMs, waitForReconnect, ct).ConfigureAwait(false);
 
-            var requestId = Interlocked.Increment(ref _nextRequestId);
-            var request = new IpcRequest
-            {
-                Id = requestId,
-                Method = method
-            };
-
-            var tcs = new TaskCompletionSource<IpcResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _pendingRequests[requestId] = tcs;
-
-            try
-            {
-                await channel.SendRequest(request, ct).ConfigureAwait(false);
-
-                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                cts.CancelAfter(10000);
-                using var reg = cts.Token.Register(() => tcs.TrySetCanceled());
-
-                var response = await tcs.Task.ConfigureAwait(false);
-
-                if (!response.Success)
-                    return $"Error: {response.Error}";
-
-                return response.Payload != null
-                    ? System.Text.Encoding.UTF8.GetString(response.Payload)
-                    : "";
-            }
-            finally
-            {
-                _pendingRequests.TryRemove(requestId, out _);
-            }
+            if (error != null) return $"Error: {error}";
+            if (!response!.Success) return $"Error: {response.Error}";
+            return response.Payload != null
+                ? System.Text.Encoding.UTF8.GetString(response.Payload)
+                : "";
         }
 
-        private async Task ListenForResponses(IpcChannel channel, CancellationToken ct)
+        private async Task ListenForResponses(Connection connection, CancellationToken ct)
         {
             try
             {
                 while (!ct.IsCancellationRequested)
                 {
-                    var response = await channel.ReceiveResponse(ct).ConfigureAwait(false);
-                    if (_pendingRequests.TryGetValue(response.Id, out var tcs))
+                    var response = await connection.Channel.ReceiveResponse(ct).ConfigureAwait(false);
+                    if (connection.Pending.TryGetValue(response.Id, out var tcs))
                     {
                         tcs.TrySetResult(response);
                     }
@@ -722,7 +541,7 @@ namespace AkerMcp.Server
             }
             catch (ObjectDisposedException)
             {
-                // Channel was disposed by Disconnect() racing on another thread.
+                // The channel was closed on another thread.
             }
             catch (Exception ex)
             {
@@ -730,11 +549,11 @@ namespace AkerMcp.Server
             }
             finally
             {
-                Disconnect();
+                Teardown(connection);
             }
         }
 
-        private async Task RunHeartbeat(IpcChannel channel, CancellationToken ct)
+        private async Task RunHeartbeat(Connection connection, CancellationToken ct)
         {
             while (!ct.IsCancellationRequested)
             {
@@ -743,19 +562,22 @@ namespace AkerMcp.Server
 
                 var pingId = Interlocked.Increment(ref _nextRequestId);
                 var tcs = new TaskCompletionSource<IpcResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
-                _pendingRequests[pingId] = tcs;
+                connection.Pending[pingId] = tcs;
 
                 try
                 {
-                    await channel.SendRequest(new IpcRequest
-                    {
-                        Id = pingId,
-                        Method = IpcConstants.Methods.Ping
-                    }, ct).ConfigureAwait(false);
-
+                    // One deadline for the write and the answer: a ping that cannot even be written is as much a
+                    // zombie as one that is never answered.
                     using var pingCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                     pingCts.CancelAfter(HeartbeatTimeoutMs);
                     using var reg = pingCts.Token.Register(() => tcs.TrySetCanceled());
+
+                    await connection.Channel.SendRequest(new IpcRequest
+                    {
+                        Id = pingId,
+                        Method = IpcConstants.Methods.Ping
+                    }, pingCts.Token).ConfigureAwait(false);
+
                     await tcs.Task.ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -765,21 +587,24 @@ namespace AkerMcp.Server
                 catch (Exception ex)
                 {
                     StdioTransport.LogInfo($"Heartbeat failed — dropping zombie connection: {ex.GetType().Name}: {ex.Message}");
-                    Disconnect();
+                    Teardown(connection);
                     return;
                 }
                 finally
                 {
-                    _pendingRequests.TryRemove(pingId, out _);
+                    connection.Pending.TryRemove(pingId, out _);
                 }
             }
         }
 
-        private void CancelPendingRequests()
+        /// <summary>
+        /// Closes this connection, and clears it as the current one only if it still is: a task of an old connection
+        /// can no longer drop the one that replaced it.
+        /// </summary>
+        private void Teardown(Connection connection)
         {
-            foreach (var pending in _pendingRequests.Values)
-                pending.TrySetCanceled();
-            _pendingRequests.Clear();
+            Interlocked.CompareExchange(ref _connection, null, connection);
+            connection.Close();
         }
 
         /// <summary>
@@ -789,18 +614,7 @@ namespace AkerMcp.Server
         /// </summary>
         public void Disconnect()
         {
-            // Atomic claim: exactly one caller wins each pair, so a stale Disconnect
-            // (e.g. listener finally running after heartbeat already tore down)
-            // cannot accidentally cancel a freshly-created next connection.
-            var oldCts = Interlocked.Exchange(ref _listenerCts, null);
-            var oldChannel = Interlocked.Exchange(ref _channel, null);
-
-            try { oldCts?.Cancel(); } catch { }
-            try { oldChannel?.Dispose(); } catch { }
-            try { oldCts?.Dispose(); } catch { }
-
-            ConnectedEngine = null;
-            CancelPendingRequests();
+            if (Current is { } connection) Teardown(connection);
         }
 
         public class BinaryToolCallResult

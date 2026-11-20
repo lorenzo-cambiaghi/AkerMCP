@@ -348,6 +348,14 @@ namespace AkerMcp.Loopback
             // A value that does not fit is an error, never a zero; reads go through the shared twin; deadlines; log levels.
             await Mechanisms.Run((name, a) => Call(reg, name, a), Check);
 
+            // The stdio loop, the discovery directory, the main-thread queue and the pipe's frame limit.
+            await ServerMechanisms.Run(Check);
+
+            // `arguments` is optional in tools/call. Without it, every forwarded tool used to fail on an element that
+            // claimed a value it did not have.
+            var bare = await reg.CallTool(JsonSerializer.SerializeToElement(new { name = "get_selection" }), CancellationToken.None);
+            Check("a forwarded tool called without `arguments` still reaches the engine", !bare.IsError, Text(bare));
+
             // execute waits as long as the caller asked. The server used to give up at its fixed request deadline (30 s)
             // whatever timeout_ms said: a longer script answered "timed out after 30s" while the engine was still working.
             // The deadline is shortened here so the bench does not wait thirty real seconds; the ratio is the same.

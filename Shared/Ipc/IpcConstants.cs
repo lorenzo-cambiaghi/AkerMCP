@@ -4,6 +4,8 @@ namespace AkerMcp.Shared.Ipc
     {
         public const string PipePrefix = "aker-mcp-";
         public const string DiscoveryDirectory = "aker-mcp";
+        // The largest message either side writes or accepts. A reply over it is answered with an error instead.
+        public const int MaxFrameBytes = 64 * 1024 * 1024;
         // Bump the MINOR on an addition an older peer can ignore, the MAJOR on a change that
         // breaks one. The server compares only the major (EngineConnection.DescribeVersionSkew):
         // a plugin one minor behind speaks a subset, which is what "optional capability" has
