@@ -38,8 +38,8 @@ The second thing a unit test will not tell you: a dropdown is a window of its ow
 window capture renders the interface with its menus missing. `shot` is for looking.
 
 ```
-dotnet run --project tools/AkerMcp.UiProbe -- coords "SkelForge"
-dotnet run --project tools/AkerMcp.UiProbe -- shot   "SkelForge" out.jpg
+dotnet run --project tools/AkerMcp.UiProbe -- coords "Unity"
+dotnet run --project tools/AkerMcp.UiProbe -- shot   "Unity" out.jpg
 dotnet run --project tools/AkerMcp.UiProbe -- run    calls.json
 ```
 
@@ -62,7 +62,7 @@ Images land next to the file as `run-1.jpg`, `run-2.jpg`, …
 
 ```json
 [
-  {"name": "ui_action", "arguments": {"action": "screenshot", "window_title": "SkelForge"}},
+  {"name": "ui_action", "arguments": {"action": "screenshot", "window_title": "Unity"}},
   {"name": "ui_action", "arguments": {"steps": [
       {"action": "left_click", "x": 135, "y": 171},
       {"action": "type", "text": "player"}

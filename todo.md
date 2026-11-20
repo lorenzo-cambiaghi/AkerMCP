@@ -54,7 +54,7 @@ not run inside an editor. First smoke test on each, in order of risk:
 
 - [ ] **Unity: the DLLs moved to `Editor/Plugins`.** An existing install must have its old
       `Plugins` folder moved, metas included — copied alongside, Unity sees every assembly twice.
-      That includes the hand-made copy in WaveFunctionCollapse. `copy-dlls` migrates the sample.
+      That includes a copy of the plugin placed in a project by hand; `copy-dlls` migrates the sample.
 - [ ] **Unity: execute's reference and snippet caches**, `#line` numbers, bare expressions; the
       scene manager refusing a save without a path and an open over unsaved changes.
 - [ ] **Godot: undo** for create, delete and placed sprites/sounds; `save_scene` through the
@@ -64,7 +64,7 @@ not run inside an editor. First smoke test on each, in order of risk:
       all. The new one reads it from `.godot/mono/temp/bin`; whether 4.4 loads the same way is
       unverified.
 - [ ] **Stride: a Launcher install.** Its assemblies live one per NuGet package, so the installer
-      now gathers them; only a fake layout built from the fork's 4.4 packages was tried.
+      now gathers them; only a fake layout built from a local Stride 4.4 build's packages was tried.
 - [ ] **Stride: placed sprites** are real entities now, referencing the sheet through
       `AttachedReferenceManager.CreateProxyObject`.
 

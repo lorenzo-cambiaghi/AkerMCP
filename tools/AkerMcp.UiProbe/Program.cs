@@ -20,8 +20,8 @@ namespace AkerMcp.UiProbe
     ///
     /// Run it against any window — the editor, a text editor, anything with a title:
     ///
-    ///   dotnet run --project tools/AkerMcp.UiProbe -- coords "SkelForge"
-    ///   dotnet run --project tools/AkerMcp.UiProbe -- shot   "SkelForge" out.jpg
+    ///   dotnet run --project tools/AkerMcp.UiProbe -- coords "Unity"
+    ///   dotnet run --project tools/AkerMcp.UiProbe -- shot   "Unity" out.jpg
     ///   dotnet run --project tools/AkerMcp.UiProbe -- run    calls.json
     /// </summary>
     public static class Program
