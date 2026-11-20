@@ -10,7 +10,7 @@
 
 > *Aker (Egyptian: ꜣkr) was an ancient Egyptian earth god, depicted as **two lions seated back-to-back** facing opposite horizons, Sef and Duau (Yesterday and Today), guarding the sun's safe passage through the underworld. In this architecture, Aker is the bridge: one face speaking **JSON-RPC to the LLM**, the other manipulating the **engine's main thread via IPC**.*
 
-AkerMCP is an MCP server that lets an AI client (Claude Code, Cursor, Copilot, Antigravity, any stdio MCP client) work inside a running C# game editor: read the scene, change it with undo, run C# on the editor's main thread, take a screenshot, enter play mode and check what happened. One server and one tool set for three engines, Unity, Godot and Stride Game Studio, each behind a small adapter over the same core.
+AkerMCP is an MCP server that runs on your machine, next to the editor, and lets an AI client (Claude Code, Cursor, Copilot, Antigravity, any stdio MCP client) work inside a running C# game editor: read the scene, change it with undo, run C# on the editor's main thread, take a screenshot, enter play mode and check what happened. One server and one tool set for three engines, Unity, Godot and Stride Game Studio, each behind a small adapter over the same core.
 
 ## What it does
 
@@ -35,8 +35,8 @@ AI: "Set the player's position to (10, 0, 5)"
 | Platform/build tools (list · switch · build_player) | ✅ | ✅ | ✅ |
 | OS window capture (`list_windows` · `capture_window` · `focus_window`) | ✅ | ✅ | ✅ |
 | Driving a window by hand (`ui_action`: click · drag · scroll · type) | ✅ | ✅ | ✅ |
-| **2D sprites from a JSON shape-spec** (`create_sprite`, rasterized server-side) | ✅ | ✅ | ✅ |
-| **Placeholder audio** (`create_sound` sfxr voice · `create_music` chiptune tracker, both synthesized server-side) | ✅ | ✅ | ❌ |
+| **2D sprites from a JSON shape-spec** (`create_sprite`, rasterized locally by AkerMCP) | ✅ | ✅ | ✅ |
+| **Placeholder audio** (`create_sound` sfxr voice · `create_music` chiptune tracker, both synthesized locally by AkerMCP) | ✅ | ✅ | ❌ |
 | Gameplay primitive scripts (`add_primitive`) | ✅ | ❌ | ❌ |
 | Scene management (`new_scene` · `open_scene` · `save_scene`) | ✅ | ✅ | ✅ |
 | **Runtime loop** (`enter_play`/`exit_play` · `capture_sequence` · `send_input`) | ✅ | ◑ | ◑ |
@@ -48,9 +48,9 @@ Every ✅ is implemented and was verified live in that engine's editor; the fixe
 
 The other MCP servers for game engines are tied to one engine each: unity-mcp and Unity-MCP to Unity, godot-mcp to Godot. Here one tool set covers Unity, Godot and Stride from a shared core, so what you learn driving Unity works unchanged in the other two, and Stride Game Studio is supported at all.
 
-`execute` hoists `using` lines and type declarations, so a MonoBehaviour can be written, compiled and attached in one call instead of three. `playtest` drives input and evaluates C# assertions server-side at exact moments on the timeline, which is the only way to catch a transient as short as the top of a jump arc: separate tool calls arrive whenever the round trip lets them, and by then the frame is gone.
+`execute` hoists `using` lines and type declarations, so a MonoBehaviour can be written, compiled and attached in one call instead of three. `playtest` drives input and evaluates C# assertions at exact moments on the timeline, all inside one call, which is the only way to catch a transient as short as the top of a jump arc: separate tool calls arrive whenever the round trip lets them, and by then the frame is gone.
 
-Then there is the asset gap. A model writes code, not pixels. `create_sprite` closes it: the model describes the shape in JSON, with ellipses, rectangles, polygons and SVG path data, plus linear gradients and per-shape opacity, and the server rasterises that to an RGBA PNG at 4x supersampling before the plugin imports it as a sprite. The vector never reaches the editor, so Godot and Stride need no SVG support of their own to get the same placeholder Unity gets. The prototype stops waiting for someone to draw the bird.
+Then there is the asset gap. A model writes code, not pixels. `create_sprite` closes it: the model describes the shape in JSON, with ellipses, rectangles, polygons and SVG path data, plus linear gradients and per-shape opacity, and AkerMCP rasterises that on your machine to an RGBA PNG at 4x supersampling before the plugin imports it as a sprite. The vector never reaches the editor, so Godot and Stride need no SVG support of their own to get the same placeholder Unity gets. The prototype stops waiting for someone to draw the bird.
 
 **And it stops waiting for someone to record the gunshot.** `create_sound` is a full sfxr voice — pitched noise, a resonant low-pass, duty cycle, arpeggio, punch, retrigger — and `create_music` is a tracker over that same voice, so a melody inherits the filters instead of reimplementing them. Both hand the engine a finished WAV. Chiptune rather than General MIDI on purpose: the small GM SoundFont everyone reaches for first is GPL, and its samples end up inside the audio produced, which for a tool whose output lands in someone else's game is the wrong thing to inherit. Square waves cost nothing, carry no licence, and are the idiom a prototype is expected to sound like.
 
@@ -89,7 +89,7 @@ The same request in Stride Game Studio. `execute` duplicated a sphere into a rin
 ### Under the hood
 
 - A shared .NET Standard 2.1 core holds the tool logic; each engine adds an adapter that implements the engine interfaces (scene graph, editor context, code executor, play mode, input, capture). A fourth engine is another adapter; the server and the tools do not change.
-- The standalone server talks JSON-RPC over stdio to the client and MessagePack over a named pipe to the plugin inside the editor, which runs every request on the engine's main thread.
+- Everything runs on your machine. The server is a local process that your AI client starts and talks to over stdin/stdout (JSON-RPC); it reaches the plugin inside the editor over a local named pipe (MessagePack), and the plugin runs every request on the engine's main thread. Sprites, sounds and music are generated by that process, offline: no cloud service, no account. The one download is the optional SoundFont behind `"engine": "soundfont"`, fetched once and cached.
 - A reflection-based type system converts JSON to engine structs (`Vector3`, `Color`, `Bounds`, ...) case-insensitively, the same way for all three engines.
 - Screenshots come from the editor's own render buffer with gizmos; when an adapter cannot, an OS-level capture (Windows `PrintWindow`, macOS Quartz) takes over without stealing focus.
 - The server answers the MCP handshake in well under a second, connected engine or not, and sends the model its usage instructions with the tool list. See [How the model learns to use it](#how-the-model-learns-to-use-it).
@@ -397,7 +397,7 @@ Every tool carries the four MCP hints (read-only, destructive, idempotent, open-
 | `new_scene` | standard | A fresh scene, 2D by default, optionally saved to an asset path |
 | `open_scene` | standard | Open a scene by its engine asset path |
 | `save_scene` | standard | Save the edited scene in place or to a path |
-| `create_sprite` | full | Author a flat, geometric shape-spec; the server rasterises it to a PNG and imports it as a sprite on any engine |
+| `create_sprite` | full | Author a flat, geometric shape-spec; AkerMCP rasterises it locally to a PNG and imports it as a sprite on any engine |
 | `create_sound` | full | Synthesise a short sfxr-style sound and import it as an audio clip ([samples](https://lorenzo-cambiaghi.github.io/AkerMCP/audio-samples.html)) |
 | `create_music` | full | Sequence a chiptune loop over the same voice and import it as an audio clip |
 | `add_primitive` | full | Write a vetted gameplay script (2D platformer controller, auto-runner, camera follow, kill zone, score overlay) |
@@ -467,7 +467,7 @@ So: `add_primitive` for the piece every 2D prototype needs and nobody wants rewr
 
 > Engine differences are handled gracefully: e.g. Godot and Stride have no global active target, so `switch_build_target` reports that and you pass the platform directly to `build_player`.
 
-### Windows on the server's machine
+### Windows on your machine
 
 | Tool | Profile | What it does |
 |------|---------|--------------|
@@ -679,7 +679,7 @@ When a property name is ambiguous (e.g. `enabled` exists on multiple components)
 
 | URI | Description |
 |-----|-------------|
-| `aker://guide` | The usage playbook as markdown: workflow, property paths, `execute` rules, screenshots, recovery. Served by the server, no engine needed |
+| `aker://guide` | The usage playbook as markdown: workflow, property paths, `execute` rules, screenshots, recovery. Answered by AkerMCP itself, no engine needed |
 | `scene://hierarchy` | Full scene tree with components listed per object |
 | `project://info` | Engine name/version, project path, active scene |
 | `editor://logs` | Recent console entries |

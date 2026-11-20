@@ -177,7 +177,7 @@ namespace AkerMcp.AudioSamples
         {
             p.Append($"<h2>{title}</h2>\n");
             p.Append($"<p class=\"lead\">Every sample below was produced by <code>{tool}</code> from the spec beside it. " +
-                     "No recordings, no asset packs: the server renders the WAV and hands it to the engine.</p>\n");
+                     "No recordings, no asset packs, no online service: AkerMCP synthesizes the WAV on your machine and hands it to the engine.</p>\n");
             p.Append("<div class=\"grid\">\n");
             foreach (var s in all)
             {
