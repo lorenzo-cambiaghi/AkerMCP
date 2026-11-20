@@ -76,7 +76,7 @@ Background music for a level is one call. Four bars of A minor, a token per eigh
 
 The melody rests where the bass walks to the next chord, which is what keeps a short loop from nagging after the third pass. One pass through the score is enough — `"loop": true` leaves the repeating to the engine, which is both smaller and seamless; the score's own `repeat` is for when you want the piece itself to be longer. Add `"engine": "soundfont"` and swap the instrument names — `ocarina`, `strings`, `acoustic_bass` — and those same notes come back played rather than bleeped. Both versions are on the page below.
 
-**▶ [Listen to what it generates](docs/audio-samples.html)** — that level theme both ways, gunshots, lasers, footsteps and half a dozen other pieces, each next to the spec that produced it. (Open the page from a checkout or GitHub Pages; GitHub strips `<audio>` from markdown, which is why the samples are not embedded here.)
+**▶ [Listen to what it generates](https://lorenzo-cambiaghi.github.io/AkerMCP/audio-samples.html)** — that level theme both ways, gunshots, lasers, footsteps and half a dozen other pieces, each next to the spec that produced it. (GitHub strips `<audio>` from markdown and shows an HTML file in the repository as source, so the samples play on that page, served by GitHub Pages; `docs/audio-samples.html` plays the same from a checkout.)
 
 Pair it with [LynxMCP](https://github.com/lorenzo-cambiaghi/LynxMCP) for code search over the project and its library docs: Aker is the hands, Lynx the memory.
 
@@ -398,7 +398,7 @@ Every tool carries the four MCP hints (read-only, destructive, idempotent, open-
 | `open_scene` | standard | Open a scene by its engine asset path |
 | `save_scene` | standard | Save the edited scene in place or to a path |
 | `create_sprite` | full | Author a flat, geometric shape-spec; the server rasterises it to a PNG and imports it as a sprite on any engine |
-| `create_sound` | full | Synthesise a short sfxr-style sound and import it as an audio clip ([samples](docs/audio-samples.html)) |
+| `create_sound` | full | Synthesise a short sfxr-style sound and import it as an audio clip ([samples](https://lorenzo-cambiaghi.github.io/AkerMCP/audio-samples.html)) |
 | `create_music` | full | Sequence a chiptune loop over the same voice and import it as an audio clip |
 | `add_primitive` | full | Write a vetted gameplay script (2D platformer controller, auto-runner, camera follow, kill zone, score overlay) |
 
