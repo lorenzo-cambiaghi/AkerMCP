@@ -105,21 +105,21 @@ namespace AkerMcp.Server
                 "it to a PNG and imports it as a sprite on any engine, optionally placed at scene_path. " +
                 "Spec: {\"width\":64,\"height\":64,\"background\":null,\"shapes\":[...]} drawn in order. " +
                 "Shapes: ellipse (cx,cy,rx,ry), rect (x,y,w,h,rx), polygon (points [[x,y],...]), line " +
-                "(points), path (d: M L Q C Z). Each takes fill and/or stroke, strokeWidth, opacity 0..1; " +
-                "a paint is a hex colour or {\"gradient\":\"linear\",\"x1\":0,\"y1\":0,\"x2\":0,\"y2\":64," +
-                "\"stops\":[{\"offset\":0,\"color\":\"#fff\"},{\"offset\":1,\"color\":\"#888\"}]}. Keep " +
-                "silhouettes clean: recognisable beats detailed.",
+                "(points), path (d: M L H V Q C Z). Each takes fill and/or stroke (neither: filled black), " +
+                "strokeWidth, opacity 0..1; a colour is hex, a CSS name, rgb() or \"none\", " +
+                "a paint a colour or {\"gradient\":\"linear\",\"x1\":0,\"y1\":0,\"x2\":0,\"y2\":64," +
+                "\"stops\":[{\"offset\":0,\"color\":\"#fff\"},{\"offset\":1,\"color\":\"#888\"}]}.",
 
             ["create_music"] =
                 "Write a short loop and import it as an audio clip: bpm, steps_per_beat (default 4 = " +
                 "sixteenths), repeat, and channels of instrument + notes. Notes are space-separated " +
                 "tokens, one step each: C4 E4 G4 for pitches, . for a rest, - to hold the note before " +
-                "it, C4*4 for a four-step note. Instruments: lead, bass, pad, arp, pluck, drums (tokens " +
+                "it, C4*4 for a four-step note (max 64). Instruments: lead, bass, pad, arp, pluck, drums (tokens " +
                 "k s h o). Channels are mixed and normalised. Example: " +
                 "{\"bpm\":120,\"channels\":[{\"instrument\":\"lead\",\"notes\":\"C4 E4 G4 C5 - - . .\"}," +
                 "{\"instrument\":\"bass\",\"notes\":\"C3*4 G2*4\"},{\"instrument\":\"drums\",\"notes\":\"k . h . s . h .\"}]}. " +
                 "engine=soundfont plays the same score on sampled General MIDI instruments (piano, " +
-                "strings, trumpet, flute, harp, choir, or a program number). For a one-shot effect " +
+                "strings, trumpet, flute, harp, choir, or a program number; 15 channels + drums). For a one-shot effect " +
                 "use create_sound.",
 
             ["create_sound"] =

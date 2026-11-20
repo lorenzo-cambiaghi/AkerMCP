@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using MeltySynth;
 
 // The loopback suite checks the SoundFont timeline without the 151 MB font: the event order is
@@ -97,12 +99,32 @@ namespace AkerMcp.Server
         /// <summary>The drum alphabet on this engine, for the same error.</summary>
         public static ICollection<string> DrumTokens => DrumKeys.Keys;
 
+        /// <summary>
+        /// MIDI's sixteen channels less channel 10 (index 9), which General MIDI keeps for drums.
+        /// Every drum part shares that one, so only the melodic parts count against this.
+        /// </summary>
+        public const int MaxMelodicParts = 15;
+
+        /// <summary>
+        /// The parsed font, kept between calls. Building a synthesiser from the path re-read and
+        /// re-parsed all 151 MB on every create_music, so a model iterating on a tune paid the
+        /// parse each time it listened. MeltySynth's SoundFont is immutable once loaded and a
+        /// Synthesizer only reads it, so one instance serves every render.
+        ///
+        /// It is let go after ten idle minutes, because it is ~150 MB of samples in a server that
+        /// otherwise lives in a few tens: tunes are written in bursts — render, listen, change a
+        /// bar, render again — and a burst stays inside that window, while a session that wrote
+        /// its music an hour ago should not still be carrying an orchestra.
+        /// </summary>
+        internal static readonly ParsedFileCache<SoundFont> Fonts =
+            new ParsedFileCache<SoundFont>(path => new SoundFont(path)) { IdleRelease = TimeSpan.FromMinutes(10) };
+
         public static byte[] Render(string soundFontPath, MusicSequencer.Score score)
         {
             var setups = new List<ChannelSetup>();
             var events = Timeline(score, setups);
 
-            var synthesizer = new Synthesizer(soundFontPath, score.SampleRate);
+            var synthesizer = new Synthesizer(Fonts.Get(soundFontPath), score.SampleRate);
             foreach (var setup in setups)
             {
                 if (setup.Program is int program) synthesizer.ProcessMidiMessage(setup.MidiChannel, 0xC0, program, 0);
@@ -162,13 +184,31 @@ namespace AkerMcp.Server
             var events = new List<NoteEvent>();
             int midiChannel = 0;
             int drumHold = Math.Min(score.StepSamples, (int)(0.12 * score.SampleRate));
+            bool drumsSetUp = false;
 
             foreach (var channel in score.Channels)
             {
                 // Channel 9 is percussion in General MIDI and nothing else may use it; melodic
                 // parts take the remaining channels in order and skip over it.
                 int ch = channel.IsDrums ? 9 : NextMelodicChannel(ref midiChannel);
-                setups?.Add(new ChannelSetup(ch, channel.IsDrums ? null : ProgramFor(channel.Instrument), channel.Volume));
+
+                // A melodic part has a channel of its own, so its volume is the channel's volume
+                // controller. Drum parts all share channel 9, and setting its controller per part
+                // let the last one decide for all — a quiet hat line under a loud kick made the
+                // kick quiet too. So channel 9 stays at full volume and each drum part scales the
+                // velocity of its own hits. MeltySynth applies the same square law to velocity as
+                // to the volume controller (measured: velocity 44 of 110 and CC7 51 of 127 both
+                // give 0.17 of the level), so the part comes out as loud as a melodic part would.
+                int velocity = channel.IsDrums ? (int)Math.Round(DrumVelocity * channel.Volume) : MelodicVelocity;
+                if (!channel.IsDrums)
+                    setups?.Add(new ChannelSetup(ch, ProgramFor(channel.Instrument), channel.Volume));
+                else if (!drumsSetUp)
+                {
+                    setups?.Add(new ChannelSetup(9, null, 1.0));
+                    drumsSetUp = true;
+                }
+                // Velocity 0 is a note-off in MIDI, not a quiet note: a silent drum part plays nothing.
+                if (velocity <= 0) continue;
 
                 var steps = channel.Steps;
                 for (int pass = 0; pass < score.RepeatCount; pass++)
@@ -190,7 +230,7 @@ namespace AkerMcp.Server
                         int held = channel.IsDrums ? drumHold : (int)(step.Length * score.StepSamples * 0.98);
                         int end = start + Math.Max(1, held);
 
-                        events.Add(new NoteEvent(start, true, ch, key, channel.IsDrums ? 110 : 96));
+                        events.Add(new NoteEvent(start, true, ch, key, velocity));
                         events.Add(new NoteEvent(end, false, ch, key, 0));
                     }
                 }
@@ -204,10 +244,17 @@ namespace AkerMcp.Server
             return events;
         }
 
+        private const int MelodicVelocity = 96;
+        private const int DrumVelocity = 110;
+
         private static int NextMelodicChannel(ref int next)
         {
             if (next == 9) next = 10;          // never hand out the percussion channel
-            if (next > 15) next = 0;
+            // Score.Parse refuses a score with more melodic parts than this, so getting here is
+            // a bug; wrapping to channel 0, as this did, silently re-voiced the first part.
+            if (next > 15)
+                throw new InvalidOperationException(
+                    $"More than {MaxMelodicParts} melodic parts reached the SoundFont timeline.");
             return next++;
         }
 
@@ -224,5 +271,95 @@ namespace AkerMcp.Server
         /// <summary>Frequency back to a MIDI key, so note parsing stays in one place.</summary>
         private static int KeyOf(double frequency)
             => Math.Clamp((int)Math.Round(69 + 12 * Math.Log2(frequency / 440.0)), 0, 127);
+    }
+
+    /// <summary>
+    /// One file, parsed once and kept while it is in use. Keyed by the full path, the last write
+    /// time and the length, so a font replaced on disk — a new AKER_MCP_SOUNDFONT, the download
+    /// landing over an old copy — is read again rather than served stale.
+    ///
+    /// <para>One slot, not a dictionary: the value is a whole SoundFont, and two of them would be
+    /// twice the memory for a case — switching fonts back and forth — nobody has. A new file
+    /// drops the old value before parsing, so the two are never held together.</para>
+    /// </summary>
+    internal sealed class ParsedFileCache<T> where T : class
+    {
+        private readonly Func<string, T> _load;
+        private readonly object _sync = new object();
+        private string? _path;
+        private DateTime _stamp;
+        private long _length;
+        private T? _value;
+        private DateTime _lastUse;
+        private Timer? _release;
+
+        public ParsedFileCache(Func<string, T> load) { _load = load; }
+
+        /// <summary>How long the value is kept without a call; zero or less keeps it for good.</summary>
+        public TimeSpan IdleRelease { get; set; } = Timeout.InfiniteTimeSpan;
+
+        /// <summary>How many times the file has been parsed, for the suite.</summary>
+        public int Loads { get; private set; }
+
+        public bool IsLoaded { get { lock (_sync) return _value != null; } }
+
+        public T Get(string path)
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists) throw new FileNotFoundException($"No such file: {path}", path);
+            var full = info.FullName;
+            var stamp = info.LastWriteTimeUtc;
+            var length = info.Length;
+
+            // The parse runs under the lock on purpose: two calls arriving together must not
+            // each read 151 MB, and the second is better off waiting for the first's result.
+            lock (_sync)
+            {
+                bool same = _value != null && _stamp == stamp && _length == length
+                            && string.Equals(_path, full, OperatingSystem.IsWindows()
+                                ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+                if (!same)
+                {
+                    _value = null;               // let the old one go before the new one is built
+                    _value = _load(full);
+                    Loads++;
+                    _path = full;
+                    _stamp = stamp;
+                    _length = length;
+                }
+                _lastUse = DateTime.UtcNow;
+                ArmRelease();
+                return _value!;
+            }
+        }
+
+        private void ArmRelease()
+        {
+            if (IdleRelease <= TimeSpan.Zero) return;
+            _release ??= new Timer(_ => ReleaseIfIdle(), null, Timeout.Infinite, Timeout.Infinite);
+            _release.Change(IdleRelease, Timeout.InfiniteTimeSpan);
+        }
+
+        private void ReleaseIfIdle()
+        {
+            lock (_sync)
+            {
+                if (_value == null) return;
+                var idle = DateTime.UtcNow - _lastUse;
+                if (idle < IdleRelease)
+                {
+                    // A call landed while the timer was firing: wait out the rest of its window.
+                    _release?.Change(IdleRelease - idle, Timeout.InfiniteTimeSpan);
+                    return;
+                }
+                _value = null;
+                _path = null;
+            }
+            // Dropping the reference alone gives nothing back: the samples sit on the large
+            // object heap until the next full collection, and an idle server can go hours
+            // without one. Releasing is the point, so the collection is asked for here, once
+            // per idle period at most.
+            GC.Collect();
+        }
     }
 }

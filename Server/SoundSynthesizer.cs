@@ -52,7 +52,7 @@ namespace AkerMcp.Server
             int sampleRate = Clamp((int)ReadNum(spec, "sample_rate", 44100), 8000, 48000);
             sampleRateOut = sampleRate;
 
-            string wave = ReadStr(spec, "wave", "square").ToLowerInvariant();
+            var wave = ParseWave(ReadStr(spec, "wave", "square"));
             double baseFreq = ReadNum(spec, "freq", 440);
             double freqSweep = ReadNum(spec, "freq_sweep", 0);      // Hz added per second
             double vibDepth = ReadNum(spec, "vibrato_depth", 0);    // 0..1 fraction of freq
@@ -153,16 +153,15 @@ namespace AkerMcp.Server
 
                 // A completed cycle refills the noise table: this is the resampling that
                 // turns white noise into a pitched one.
-                if (wave == "noise" && Math.Floor(phase) != Math.Floor(prevPhase))
+                if (wave == Wave.Noise && Math.Floor(phase) != Math.Floor(prevPhase))
                     for (int n = 0; n < noiseTable.Length; n++) noiseTable[n] = rng.NextDouble() * 2 - 1;
 
                 double sample = wave switch
                 {
-                    "sine" => Math.Sin(2 * Math.PI * ph),
-                    "square" => ph < dutyNow ? 1.0 : -1.0,
-                    "saw" => 2.0 * ph - 1.0,
-                    "triangle" => 4.0 * Math.Abs(ph - 0.5) - 1.0,
-                    "noise" => noiseTable[(int)(ph * noiseTable.Length) % noiseTable.Length],
+                    Wave.Sine => Math.Sin(2 * Math.PI * ph),
+                    Wave.Saw => 2.0 * ph - 1.0,
+                    Wave.Triangle => 4.0 * Math.Abs(ph - 0.5) - 1.0,
+                    Wave.Noise => noiseTable[(int)(ph * noiseTable.Length) % noiseTable.Length],
                     _ => ph < dutyNow ? 1.0 : -1.0,
                 };
 
@@ -235,6 +234,24 @@ namespace AkerMcp.Server
 
             return samples;
         }
+
+        private enum Wave { Square, Saw, Sine, Triangle, Noise }
+
+        /// <summary>
+        /// The oscillator a spec names. An unknown name is an error, never a square: "sawtooth"
+        /// — the word every synth manual uses — fell through to the default and came out
+        /// byte-identical to a square wave, with nothing in the answer to say it had not been heard.
+        /// </summary>
+        private static Wave ParseWave(string name) => name.Trim().ToLowerInvariant() switch
+        {
+            "square" => Wave.Square,
+            "saw" or "sawtooth" => Wave.Saw,
+            "sine" => Wave.Sine,
+            "triangle" => Wave.Triangle,
+            "noise" => Wave.Noise,
+            _ => throw new ArgumentException(
+                $"Unknown wave '{name}'. Use square, saw (or sawtooth), sine, triangle or noise."),
+        };
 
         internal static byte[] WriteWav(short[] samples, int sampleRate)
         {

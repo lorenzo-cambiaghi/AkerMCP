@@ -192,7 +192,7 @@ namespace AkerMcp.Server
 
                 var channels = new List<Channel>();
                 var problems = new List<string>();
-                bool unknownInstrument = false, badNotes = false, badDrums = false;
+                bool unknownInstrument = false, badNotes = false, badDrums = false, longNotes = false;
                 if (spec.ValueKind == JsonValueKind.Object
                     && spec.TryGetProperty("channels", out var chans) && chans.ValueKind == JsonValueKind.Array)
                 {
@@ -209,13 +209,21 @@ namespace AkerMcp.Server
                             unknownInstrument = true;
                         }
 
-                        var steps = ParseSteps(ReadStr(c, "notes", ""), maxSteps, sampleRate);
+                        var overlong = new List<string>();
+                        var steps = ParseSteps(ReadStr(c, "notes", ""), maxSteps, sampleRate, overlong);
                         var bad = steps.Where(s => !s.IsRest && !s.Held && !IsPlayable(engine, isDrums, s.Token))
                                        .Select(s => $"'{s.Token}'").Distinct().Take(6).ToList();
                         if (bad.Count > 0)
                         {
                             problems.Add($"channel {index} ({instrument}): unrecognised {string.Join(", ", bad)}");
                             if (isDrums) badDrums = true; else badNotes = true;
+                        }
+                        if (overlong.Count > 0)
+                        {
+                            problems.Add($"channel {index} ({instrument}): " +
+                                         $"{string.Join(", ", overlong.Distinct().Take(6).Select(t => $"'{t}'"))} " +
+                                         $"longer than {MaxNoteSteps} steps");
+                            longNotes = true;
                         }
 
                         channels.Add(new Channel(instrument, isDrums, steps, Clamp(ReadNum(c, "volume", 1.0), 0, 1)));
@@ -226,10 +234,20 @@ namespace AkerMcp.Server
                         "A score needs at least one channel: " +
                         "{\"channels\":[{\"instrument\":\"lead\",\"notes\":\"C4 E4 G4 C5\"}]}");
 
+                // MIDI has sixteen channels and General MIDI keeps one for percussion. A sixteenth
+                // melodic part used to wrap round to channel 0 and take over the first part's
+                // instrument and volume; the drums share channel 10 without that problem.
+                int melodic = channels.Count(c => !c.IsDrums);
+                if (engine == Engine.SoundFont && melodic > SoundFontRenderer.MaxMelodicParts)
+                    problems.Add($"{melodic} melodic channels, and the soundfont engine plays at most " +
+                                 $"{SoundFontRenderer.MaxMelodicParts} (MIDI's sixteen, less the one General MIDI " +
+                                 "keeps for drums); drum channels do not count");
+
                 if (problems.Count > 0)
                     throw new ArgumentException(
                         "The score has problems: " + string.Join("; ", problems) + "." +
-                        Help(engine, unknownInstrument, badNotes, badDrums));
+                        Help(engine, unknownInstrument, badNotes, badDrums) +
+                        (longNotes ? $" A token lasts at most {MaxNoteSteps} steps ('C4*{MaxNoteSteps}'); hold it longer with '-' after it." : ""));
 
                 int longest = channels.Max(c => c.Steps.Count);
                 if (longest == 0) throw new ArgumentException("Every channel is empty.");
@@ -298,7 +316,10 @@ namespace AkerMcp.Server
                 : Array.IndexOf(ChiptuneDrumTokens, lower) >= 0;
         }
 
-        private static List<Step> ParseSteps(string notes, long maxSteps, int sampleRate)
+        /// <summary>The longest note one token may ask for with '*'; '-' after it holds it longer.</summary>
+        internal const int MaxNoteSteps = 64;
+
+        private static List<Step> ParseSteps(string notes, long maxSteps, int sampleRate, List<string> overlong)
         {
             var result = new List<Step>();
             if (string.IsNullOrWhiteSpace(notes)) return result;
@@ -335,7 +356,11 @@ namespace AkerMcp.Server
                 if (star > 0 && int.TryParse(token.AsSpan(star + 1), NumberStyles.None,
                                              CultureInfo.InvariantCulture, out var n) && n > 0)
                 {
-                    length = Math.Min(n, 64);
+                    // Over the cap is an error, not a shorter note: "C4*100" used to last 64 steps,
+                    // and everything after it in that part came in 36 steps early, out of time
+                    // with the other parts, without a word.
+                    if (n > MaxNoteSteps) overlong.Add(token);
+                    length = Math.Min(n, MaxNoteSteps);
                     token = token.Substring(0, star);
                 }
 
@@ -391,10 +416,15 @@ namespace AkerMcp.Server
             // like a row of separate beeps.
             double dur = seconds * 1.05;
 
+            // Every instrument sounds the note it is written as, bass included: C3 is 130.8 Hz,
+            // as TryNoteToFrequency documents, and the SoundFont engine plays it on key 48. The
+            // chiptune bass used to halve the frequency, so switching engine moved the bass line
+            // an octave, and the low lines the samples write (G1, C2) came out at 25-33 Hz, a
+            // nearly pure tone below what laptop speakers reproduce.
             string voice = channel.Instrument switch
             {
                 "bass" =>
-                    $"{{\"wave\":\"triangle\",\"freq\":{F(freq / 2)},\"attack\":0.005,\"sustain\":{F(dur * 0.5)}," +
+                    $"{{\"wave\":\"triangle\",\"freq\":{F(freq)},\"attack\":0.005,\"sustain\":{F(dur * 0.5)}," +
                     $"\"decay\":{F(dur * 0.5)},\"lowpass\":1200,\"volume\":0.9}}",
                 "pad" or "chord" =>
                     $"{{\"wave\":\"triangle\",\"freq\":{F(freq)},\"attack\":{F(dur * 0.3)},\"sustain\":{F(dur * 0.4)}," +

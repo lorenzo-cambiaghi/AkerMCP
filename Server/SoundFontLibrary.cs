@@ -259,10 +259,19 @@ namespace AkerMcp.Server
                     return new FileStream(CachePath + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite,
                                           FileShare.None, 1, FileOptions.DeleteOnClose);
                 }
-                catch (IOException) when (DateTime.UtcNow < deadline)
+                // The other holder letting go is not one error but two. While it holds the file,
+                // opening it is a sharing violation (IOException); in the instant it closes, a
+                // DeleteOnClose file is delete-pending and Windows answers access denied
+                // (UnauthorizedAccessException) instead — which escaped this loop and turned the
+                // moment of release into a failed download.
+                catch (Exception ex) when ((ex is IOException || ex is UnauthorizedAccessException)
+                                           && DateTime.UtcNow < deadline)
                 {
                     await Task.Delay(200).ConfigureAwait(false);
                 }
+                // Still denied after ten seconds is not a release in progress but a cache folder
+                // this process may not write, so that one is left to propagate: the answer then
+                // says access was denied instead of blaming another server's download.
                 catch (IOException)
                 {
                     return null;
