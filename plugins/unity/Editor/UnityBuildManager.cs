@@ -183,6 +183,22 @@ namespace AkerMcp.Unity
             var sum = report.summary;
             bool ok = sum.result == BuildResultStatus.Succeeded;
 
+            // The counts alone said a build failed with 3 errors and not which: the text was only in the editor's
+            // Console, out of the caller's reach. The steps carry every message the build logged.
+            var (errors, warnings) = CollectMessages(report);
+
+            var summary = $"{sum.result}: {sum.totalErrors} errors, {sum.totalWarnings} warnings";
+            if (warnings.Count > 0)
+                summary += "\nWarnings:\n" + FormatMessages(warnings, MaxWarningsReported);
+
+            string? error = null;
+            if (!ok)
+            {
+                error = $"Build {sum.result} with {sum.totalErrors} error(s).";
+                if (errors.Count > 0)
+                    error += "\n" + FormatMessages(errors, MaxErrorsReported);
+            }
+
             return new BuildResult
             {
                 Success = ok,
@@ -191,9 +207,50 @@ namespace AkerMcp.Unity
                 Warnings = sum.totalWarnings,
                 SizeBytes = (long)sum.totalSize,
                 DurationSeconds = sum.totalTime.TotalSeconds,
-                Summary = $"{sum.result}: {sum.totalErrors} errors, {sum.totalWarnings} warnings",
-                Error = ok ? null : $"Build {sum.result} with {sum.totalErrors} error(s)."
+                Summary = summary,
+                Error = error
             };
+        }
+
+        private const int MaxErrorsReported = 20;
+        private const int MaxWarningsReported = 5;
+        private const int MaxMessageChars = 600;
+
+        // Errors (Exception and Assert count as errors) and warnings of every build step, in order, each text once:
+        // a compile error is often logged by more than one step.
+        private static (List<string> errors, List<string> warnings) CollectMessages(UnityEditor.Build.Reporting.BuildReport report)
+        {
+            var errors = new List<string>();
+            var warnings = new List<string>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var step in report.steps)
+            {
+                foreach (var message in step.messages)
+                {
+                    var text = (message.content ?? "").Trim();
+                    if (text.Length == 0 || !seen.Add(text)) continue;
+                    if (text.Length > MaxMessageChars) text = text.Substring(0, MaxMessageChars) + "…";
+
+                    switch (message.type)
+                    {
+                        case UnityEngine.LogType.Error:
+                        case UnityEngine.LogType.Exception:
+                        case UnityEngine.LogType.Assert:
+                            errors.Add(text);
+                            break;
+                        case UnityEngine.LogType.Warning:
+                            warnings.Add(text);
+                            break;
+                    }
+                }
+            }
+            return (errors, warnings);
+        }
+
+        private static string FormatMessages(List<string> messages, int max)
+        {
+            var text = string.Join("\n", messages.Take(max).Select(m => "- " + m.Replace("\n", "\n  ")));
+            return messages.Count > max ? text + $"\n(+{messages.Count - max} more)" : text;
         }
 
         private static bool TryResolve(string platform, out Target target)
