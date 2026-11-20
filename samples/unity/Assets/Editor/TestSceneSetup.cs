@@ -21,14 +21,19 @@ namespace AkerMcp.Unity.Editor
             playerCamera.transform.localRotation = Quaternion.Euler(15, 0, 0);
             Undo.RegisterCreatedObjectUndo(playerCamera, "Create PlayerCamera");
 
-            // Enemies at different positions
+            // Enemies at different positions, sharing one red material. Not `renderer.material`: in edit mode
+            // that clones the material on every call and Unity warns it is leaking materials into the scene.
+            Material enemyMaterial = null;
             for (int i = 0; i < 3; i++)
             {
                 var enemy = GameObject.CreatePrimitive(PrimitiveType.Cube);
                 enemy.name = $"Enemy_{i + 1}";
                 enemy.transform.position = new Vector3(i * 3 - 3, 0.5f, 5);
                 enemy.AddComponent<Rigidbody>();
-                enemy.GetComponent<Renderer>().material.color = Color.red;
+                var renderer = enemy.GetComponent<Renderer>();
+                if (enemyMaterial == null)
+                    enemyMaterial = new Material(renderer.sharedMaterial) { name = "Enemy", color = Color.red };
+                renderer.sharedMaterial = enemyMaterial;
                 Undo.RegisterCreatedObjectUndo(enemy, $"Create Enemy_{i + 1}");
             }
 

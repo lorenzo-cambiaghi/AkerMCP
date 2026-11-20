@@ -128,7 +128,7 @@ Two steps: **(1)** install the adapter for your engine, Unity, Godot or Stride (
 1. Go to the [latest GitHub Release](https://github.com/lorenzo-cambiaghi/AkerMCP/releases/latest) and download `AkerMCP.unitypackage`.
 2. Open your Unity project and double-click the package to import it.
    *(This package already contains all necessary C# scripts, dependencies, and Roslyn compilers).*
-3. **(Optional)** Open the menu **AkerMcp → Setup Test Scene** to create a ready-to-test scene.
+3. **(Optional)** In the bundled sample project (`samples/unity`), the menu **AkerMcp → Setup Test Scene** creates a ready-to-test scene. The package itself adds no menu to your project besides **Window → AkerMcp**.
 4. Open **Window → AkerMcp** and click **Start AkerMcp Plugin**. You should see a green **Running** status.
    *(Tip: The plugin must be running before you start the server. The server discovers it automatically via a lock file).*
 

@@ -10,7 +10,9 @@ echo =======================================================
 echo.
 echo [1/4] Ensuring sample plugin junction and DLLs are up to date...
 REM The .unitypackage is exported from samples\unity, whose Assets\AkerMcp is a
-REM junction to the canonical plugin (plugins\unity\AkerMcp). Make sure it exists.
+REM junction to the canonical plugin (plugins\unity). Make sure it exists. copy-dlls
+REM puts the DLLs in plugins\unity\Editor\Plugins, so the package imports them as
+REM editor-only, and moves away any left in the old plugins\unity\Plugins.
 call "%~dp0setup-samples.bat"
 if errorlevel 1 goto :error
 call "%~dp0copy-dlls.bat"

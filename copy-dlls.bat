@@ -3,8 +3,30 @@ setlocal
 REM Run from the repo root regardless of the caller's working directory
 cd /d "%~dp0"
 
-set DEST=plugins\unity\Plugins
+REM Under an Editor folder: Unity imports a DLL there for the editor only. They used to sit in
+REM plugins\unity\Plugins, where a DLL with no importer settings is imported for EVERY platform, and
+REM each player build shipped ~11 MB of editor-only assemblies (Roslyn, System.Text.Json, MessagePack).
+set DEST=plugins\unity\Editor\Plugins
+set OLD=plugins\unity\Plugins
+
+REM An older run left the DLLs in %OLD%: move them, .meta included so the GUIDs survive. Copying fresh
+REM ones next to them instead would leave two copies of every assembly, which Unity refuses to load.
+if exist "%OLD%\*.dll" (
+    if not exist "%DEST%" mkdir "%DEST%"
+    echo Moving the DLLs of a previous run from %OLD% to %DEST%...
+    move /Y "%OLD%\*.dll" "%DEST%\" >nul
+    if exist "%OLD%\*.dll.meta" move /Y "%OLD%\*.dll.meta" "%DEST%\" >nul
+)
+if exist "%OLD%" rmdir "%OLD%" 2>nul
+if not exist "%OLD%" if exist "%OLD%.meta" del /Q "%OLD%.meta"
+
 if not exist "%DEST%" mkdir "%DEST%"
+
+REM execute compiles with CSharpCompilation directly and no longer needs Roslyn's scripting layer.
+for %%F in (Microsoft.CodeAnalysis.Scripting Microsoft.CodeAnalysis.CSharp.Scripting) do (
+    if exist "%DEST%\%%F.dll" del /Q "%DEST%\%%F.dll"
+    if exist "%DEST%\%%F.dll.meta" del /Q "%DEST%\%%F.dll.meta"
+)
 
 echo Building...
 dotnet clean -c Release --nologo
@@ -51,8 +73,6 @@ if defined UNITY_MONO if exist "%UNITY_MONO%" (
     echo Copying Roslyn DLLs from Unity Mono...
     copy /Y "%UNITY_MONO%\Microsoft.CodeAnalysis.dll"                 "%DEST%\" >nul
     copy /Y "%UNITY_MONO%\Microsoft.CodeAnalysis.CSharp.dll"          "%DEST%\" >nul
-    copy /Y "%UNITY_MONO%\Microsoft.CodeAnalysis.Scripting.dll"       "%DEST%\" >nul
-    copy /Y "%UNITY_MONO%\Microsoft.CodeAnalysis.CSharp.Scripting.dll" "%DEST%\" >nul
     copy /Y "%UNITY_MONO%\System.Reflection.Metadata.dll"             "%DEST%\" >nul
 ) else (
     echo WARNING: Unity Mono path not found.

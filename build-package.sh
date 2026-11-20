@@ -8,7 +8,9 @@ echo ""
 
 echo "[1/4] Ensuring sample plugin symlink and DLLs are up to date..."
 # The .unitypackage is exported from samples/unity, whose Assets/AkerMcp is a
-# symlink to the canonical plugin (plugins/unity). Make sure it exists.
+# symlink to the canonical plugin (plugins/unity). Make sure it exists. copy-dlls
+# puts the DLLs in plugins/unity/Editor/Plugins, so the package imports them as
+# editor-only, and moves away any left in the old plugins/unity/Plugins.
 ./setup-samples.sh
 ./copy-dlls.sh
 

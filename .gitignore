@@ -70,7 +70,10 @@ samples/unity/MemoryCaptures/
 samples/unity/Recordings/
 samples/unity/obj/
 
-# Unity plugin DLLs (built from source, not vendored)
+# Unity plugin DLLs (built from source, not vendored). Under Editor/ so Unity keeps them out of player builds.
+plugins/unity/Editor/Plugins/*.dll
+plugins/unity/Editor/Plugins/*.dll.meta
+# Where older copy-dlls runs put them: still ignored until the next run moves them.
 plugins/unity/Plugins/*.dll
 plugins/unity/Plugins/*.dll.meta
 

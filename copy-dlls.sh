@@ -1,8 +1,28 @@
 #!/bin/bash
 set -e
 
-DEST="plugins/unity/Plugins"
+# Under an Editor folder: Unity imports a DLL there for the editor only. They used to sit in
+# plugins/unity/Plugins, where a DLL with no importer settings is imported for EVERY platform, and
+# each player build shipped ~11 MB of editor-only assemblies (Roslyn, System.Text.Json, MessagePack).
+DEST="plugins/unity/Editor/Plugins"
+OLD="plugins/unity/Plugins"
+
+# An older run left the DLLs in $OLD: move them, .meta included so the GUIDs survive. Copying fresh
+# ones next to them instead would leave two copies of every assembly, which Unity refuses to load.
+if ls "$OLD"/*.dll >/dev/null 2>&1; then
+    mkdir -p "$DEST"
+    echo "Moving the DLLs of a previous run from $OLD to $DEST..."
+    mv -f "$OLD"/*.dll "$DEST/"
+    if ls "$OLD"/*.dll.meta >/dev/null 2>&1; then mv -f "$OLD"/*.dll.meta "$DEST/"; fi
+fi
+if [ -d "$OLD" ]; then rmdir "$OLD" 2>/dev/null || true; fi
+if [ ! -d "$OLD" ]; then rm -f "$OLD.meta"; fi
+
 mkdir -p "$DEST"
+
+# execute compiles with CSharpCompilation directly and no longer needs Roslyn's scripting layer.
+rm -f "$DEST/Microsoft.CodeAnalysis.Scripting.dll" "$DEST/Microsoft.CodeAnalysis.Scripting.dll.meta" \
+      "$DEST/Microsoft.CodeAnalysis.CSharp.Scripting.dll" "$DEST/Microsoft.CodeAnalysis.CSharp.Scripting.dll.meta"
 
 echo "Building..."
 dotnet clean -c Release --nologo
@@ -33,8 +53,6 @@ if [ -d "$UNITY_MONO" ]; then
     echo "Copying Roslyn DLLs from Unity Mono..."
     cp "$UNITY_MONO/Microsoft.CodeAnalysis.dll"                 "$DEST/"
     cp "$UNITY_MONO/Microsoft.CodeAnalysis.CSharp.dll"          "$DEST/"
-    cp "$UNITY_MONO/Microsoft.CodeAnalysis.Scripting.dll"       "$DEST/"
-    cp "$UNITY_MONO/Microsoft.CodeAnalysis.CSharp.Scripting.dll" "$DEST/"
     cp "$UNITY_MONO/System.Reflection.Metadata.dll"             "$DEST/"
 else
     echo "WARNING: Unity Mono path not found at $UNITY_MONO"
