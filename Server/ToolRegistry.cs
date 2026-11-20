@@ -942,15 +942,31 @@ namespace AkerMcp.Server
                 // Nothing has been seen of this window yet, so there is no image whose pixels
                 // the coordinates could refer to. Take one now: it costs a capture, and the
                 // alternative is acting on coordinates that mean nothing.
-                var (_, fresh, note, err) = CaptureWindowAnchored(title!);
+                var (freshJpeg, fresh, note, err) = CaptureWindowAnchored(title!);
                 if (fresh == null)
                     return ToolResult.Error(err ?? note ?? $"Cannot anchor to window '{title}'.");
                 anchor = fresh;
                 if (anyActsOnScreen)
-                    return ToolResult.Error(
-                        $"No screenshot of '{anchor.WindowTitle}' had been taken yet, so image " +
-                        "coordinates had no meaning. It is anchored now — call ui_action with " +
-                        "action 'screenshot', read the image, then repeat this action.");
+                    // The picture goes back with the refusal: it is the one the coordinates must be read from, and
+                    // without it the next turn was spent asking for exactly this screenshot.
+                    return ImageResult(freshJpeg,
+                        $"No screenshot of '{anchor.WindowTitle}' had been taken yet, so image coordinates had no " +
+                        "meaning. It is anchored now: this is the screenshot — read the coordinates from it and " +
+                        "repeat the action.\n" + anchor.Describe(), isError: true);
+                // A call that only looks has just looked: the image taken to anchor is its answer, without the
+                // settle and the second capture that followed.
+                if (freshJpeg != null && steps.TrueForAll(s => ActionOf(s) == "screenshot")
+                    && ReadBool(args ?? default, "screenshot", true))
+                    return ImageResult(freshJpeg, anchor.Describe(), isError: false);
+            }
+            else if (!anyActsOnScreen && steps.TrueForAll(s => ActionOf(s) == "screenshot" && ReadNumber(s, "settle_ms") == null)
+                     && ReadNumber(args, "settle_ms") == null && ReadBool(args ?? default, "screenshot", true))
+            {
+                // Only a look, at a window already anchored: nothing to settle before it, unless a settle was asked for.
+                var (onlyJpeg, onlyAnchor, onlyNote, onlyErr) = CaptureWindowAnchored(title!);
+                return onlyJpeg == null
+                    ? ToolResult.Error($"Screenshot of '{title}' failed: {onlyErr}")
+                    : ImageResult(onlyJpeg, onlyAnchor?.Describe() ?? onlyNote ?? "", isError: false);
             }
 
             var log = new List<string>();
@@ -1045,6 +1061,13 @@ namespace AkerMcp.Server
             return new ToolResult { Content = content };
         }
 
+        private static ToolResult ImageResult(byte[]? jpeg, string text, bool isError)
+        {
+            var content = new List<ContentItem> { ContentItem.FromText(text) };
+            if (jpeg != null) content.Add(ContentItem.FromImage(Convert.ToBase64String(jpeg), "image/jpeg"));
+            return new ToolResult { Content = content, IsError = isError };
+        }
+
         private static string ActionOf(JsonElement? step)
             => (ReadString(step, "action") ?? "").Trim().ToLowerInvariant();
 
@@ -1062,6 +1085,14 @@ namespace AkerMcp.Server
             if (args is JsonElement a && a.ValueKind == JsonValueKind.Object
                 && a.TryGetProperty("steps", out var list) && list.ValueKind == JsonValueKind.Array)
             {
+                // Both at once is ambiguous, and the top-level action used to be dropped without a word.
+                if (a.TryGetProperty("action", out var single) && single.ValueKind == JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(single.GetString()))
+                {
+                    error = "Give either 'action' (one step) or 'steps' (a sequence), not both: put the action " +
+                            "into 'steps' where it belongs in the order.";
+                    return steps;
+                }
                 foreach (var item in list.EnumerateArray())
                 {
                     if (item.ValueKind != JsonValueKind.Object)

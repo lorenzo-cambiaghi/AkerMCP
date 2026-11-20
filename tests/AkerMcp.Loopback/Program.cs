@@ -869,6 +869,10 @@ namespace AkerMcp.Loopback
             var manyCaptures = await Call(reg, "playtest", new { steps = Enumerable.Repeat<object>(new { capture = true }, 9).ToArray() });
             Check("a playtest with more captures than the cap is refused", manyCaptures.IsError && Text(manyCaptures).Contains("capture steps"), Text(manyCaptures));
 
+            // ui_action with both a single action and a sequence used to run the sequence and drop the action.
+            var both = await Call(reg, "ui_action", new { action = "left_click", x = 1, y = 1, steps = new object[] { new { action = "wait" } } });
+            Check("ui_action refuses 'action' and 'steps' together", both.IsError && Text(both).Contains("not both"), Text(both));
+
             var pt = await Call(reg, "playtest", new
             {
                 steps = new object[]
