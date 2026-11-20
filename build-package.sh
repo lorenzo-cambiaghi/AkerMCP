@@ -69,24 +69,37 @@ BUILD_DIR="$(pwd)/Build"
 mkdir -p "$BUILD_DIR"
 mv "$OUTPUT_PATH" "$BUILD_DIR/"
 
-echo "  - Godot addon (aker_mcp)"
+echo "  - Godot addon (aker_mcp + the AkerMcp core it builds against)"
 # Canonical source is flat (plugins/godot/*); stage it under aker_mcp/ for distribution.
 rm -f "$BUILD_DIR/AkerMcp.Godot-addon.zip"
 rm -rf "$BUILD_DIR/_godot_stage"
 mkdir -p "$BUILD_DIR/_godot_stage/aker_mcp"
 cp -r plugins/godot/. "$BUILD_DIR/_godot_stage/aker_mcp/"
 rm -rf "$BUILD_DIR/_godot_stage/aker_mcp/.godot"
+# The addon compiles against AkerMcp.Shared/AkerMcp.Client. Shipping only the addon left a
+# download-only user with ProjectReferences to files they did not have, so the two projects
+# travel inside it, under core/ (Client references ../Shared, so they stay siblings). The
+# .gdignore keeps the Godot editor from scanning that source as project scripts; the game's
+# .csproj excludes it from its own compile (see README "1b. Godot Setup").
+mkdir -p "$BUILD_DIR/_godot_stage/aker_mcp/core"
+for proj in Shared Client; do
+    cp -r "$proj" "$BUILD_DIR/_godot_stage/aker_mcp/core/$proj"
+    rm -rf "$BUILD_DIR/_godot_stage/aker_mcp/core/$proj/bin" "$BUILD_DIR/_godot_stage/aker_mcp/core/$proj/obj"
+    find "$BUILD_DIR/_godot_stage/aker_mcp/core/$proj" -name .DS_Store -delete
+done
+touch "$BUILD_DIR/_godot_stage/aker_mcp/core/.gdignore"
 (cd "$BUILD_DIR/_godot_stage" && zip -r "$BUILD_DIR/AkerMcp.Godot-addon.zip" aker_mcp > /dev/null)
 rm -rf "$BUILD_DIR/_godot_stage"
 
-echo "  - Stride adapter source (build against your Game Studio; see README \"1c. Stride Setup\")"
+echo "  - Stride adapter source + install scripts (build against your Game Studio; see README \"1c. Stride Setup\")"
+# Same tree as build-package.bat, repo-relative: the adapter's .csproj references
+# ../../Shared and ../../Client by path, and the installer builds the hook and the
+# launcher too, so all of them ship (sources only, no bin/obj).
 rm -f "$BUILD_DIR/AkerMcp.Stride-source.zip"
-rm -rf "$BUILD_DIR/_stride_stage"
-mkdir -p "$BUILD_DIR/_stride_stage/stride"
-cp -r plugins/stride/. "$BUILD_DIR/_stride_stage/stride/"
-rm -rf "$BUILD_DIR/_stride_stage/stride/bin" "$BUILD_DIR/_stride_stage/stride/obj"
-(cd "$BUILD_DIR/_stride_stage" && zip -r "$BUILD_DIR/AkerMcp.Stride-source.zip" stride > /dev/null)
-rm -rf "$BUILD_DIR/_stride_stage"
+zip -r "$BUILD_DIR/AkerMcp.Stride-source.zip" \
+    plugins/stride plugins/stride-startuphook plugins/stride-launcher Shared Client \
+    install-stride-wrapper.ps1 setup-stride.ps1 LICENSE \
+    -x '*/bin/*' '*/obj/*' > /dev/null
 
 echo "  - Windows (win-x64)"
 dotnet publish Server/AkerMcp.Server.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o "$BUILD_DIR/Server-win-x64" --nologo > /dev/null

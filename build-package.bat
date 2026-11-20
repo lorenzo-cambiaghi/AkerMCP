@@ -83,19 +83,31 @@ echo [4/4] Publishing standalone Server binaries...
 if not exist "%~dp0Build" mkdir "%~dp0Build"
 move /Y "%~dp0AkerMCP.unitypackage" "%~dp0Build\" >nul
 
-echo   - Godot addon (aker_mcp)
+echo   - Godot addon (aker_mcp + the AkerMcp core it builds against)
 REM The canonical source is now flat (plugins\godot\*). The distributed addon
 REM must still be a top-level "aker_mcp\" folder, so stage a copy under that name.
 if exist "%~dp0Build\_godot_stage" rmdir /s /q "%~dp0Build\_godot_stage"
 mkdir "%~dp0Build\_godot_stage\aker_mcp"
 xcopy "%~dp0plugins\godot\*" "%~dp0Build\_godot_stage\aker_mcp\" /E /I /Y /Q >nul
 if errorlevel 1 goto :error
+REM The addon compiles against AkerMcp.Shared/AkerMcp.Client. Shipping only the addon left a
+REM download-only user with ProjectReferences to files they did not have, so the two projects
+REM travel inside it, under core\ (Client references ..\Shared, so they stay siblings). The
+REM .gdignore keeps the Godot editor from scanning that source as project scripts; the game's
+REM .csproj excludes it from its own compile (see README "1b. Godot Setup").
+robocopy "%~dp0Shared" "%~dp0Build\_godot_stage\aker_mcp\core\Shared" /E /XD bin obj /XF .DS_Store /NFL /NDL /NJH /NJS /NP >nul
+if errorlevel 8 goto :error
+robocopy "%~dp0Client" "%~dp0Build\_godot_stage\aker_mcp\core\Client" /E /XD bin obj /XF .DS_Store /NFL /NDL /NJH /NJS /NP >nul
+if errorlevel 8 goto :error
+type nul > "%~dp0Build\_godot_stage\aker_mcp\core\.gdignore"
 tar -a -c -f "%~dp0Build\AkerMcp.Godot-addon.zip" --exclude=*/.godot/* -C "%~dp0Build\_godot_stage" aker_mcp
 if errorlevel 1 goto :error
 rmdir /s /q "%~dp0Build\_godot_stage"
 
 echo   - Stride adapter source + install scripts (build against your Game Studio; see README "1c. Stride Setup")
-tar -a -c -f "%~dp0Build\AkerMcp.Stride-source.zip" --exclude=*/bin/* --exclude=*/obj/* -C "%~dp0." plugins/stride plugins/stride-startuphook plugins/stride-launcher install-stride-wrapper.ps1 setup-stride.ps1
+REM Shared\ and Client\ go in too: the adapter's .csproj references them by path
+REM (..\..\Shared, ..\..\Client), and without them install-stride-wrapper.ps1 fails.
+tar -a -c -f "%~dp0Build\AkerMcp.Stride-source.zip" --exclude=*/bin/* --exclude=*/obj/* --exclude=*/bin --exclude=*/obj -C "%~dp0." plugins/stride plugins/stride-startuphook plugins/stride-launcher Shared Client install-stride-wrapper.ps1 setup-stride.ps1 LICENSE
 if errorlevel 1 goto :error
 
 echo   - Windows (win-x64)

@@ -319,15 +319,15 @@ dotnet publish Shared/AkerMcp.Shared.csproj -c Release -o .publish
 ### Step 2: Unity plugin setup
 If you are modifying the source code and want to push changes to your own Unity project:
 1. Copy this repo's `plugins/unity` folder into your own Unity project as `Assets/AkerMcp`.
-2. Create `Assets/AkerMcp/Plugins/` and copy all `.dll` files from `.publish/` and `Client/bin/Release/netstandard2.1/`.
-3. Copy the Unity Roslyn Compilers (`Microsoft.CodeAnalysis.dll`, etc.) from your Unity Editor installation (`.../Editor/Data/MonoBleedingEdge/lib/mono/4.5/`) into the `Plugins/` folder.
+2. Create `Assets/AkerMcp/Editor/Plugins/` and copy all `.dll` files from `.publish/` and `Client/bin/Release/netstandard2.1/`. The folder must sit under `Editor/`: there Unity imports the DLLs for the editor only, so player builds don't carry them. If an older install has them in `Assets/AkerMcp/Plugins/`, move them (with their `.meta` files) rather than copying a second set: Unity refuses two assemblies with the same name.
+3. Copy the Unity Roslyn compiler (`Microsoft.CodeAnalysis.dll`, `Microsoft.CodeAnalysis.CSharp.dll`, `System.Reflection.Metadata.dll`) from your Unity Editor installation (`.../Editor/Data/MonoBleedingEdge/lib/mono/4.5/`) into the same `Editor/Plugins/` folder.
 
 If you just want to run the included sample, run `./setup-samples.sh` (or `setup-samples.bat` on Windows) once to link the plugin into `samples/unity`, then `./copy-dlls.sh` (or `copy-dlls.bat`) to build and copy all dependencies. Open `samples/unity` in Unity.
 
 ### Packaging a Release
 On Windows, `.\publish-release.ps1 -Version v1.2.3` does the whole release in one command: builds the packages (Unity must be closed), tags the commit, creates the [GitHub Release](https://github.com/lorenzo-cambiaghi/AkerMCP/releases) and uploads the five artifacts via the GitHub API (auth via `GITHUB_TOKEN` or the stored git credential). Use `-DryRun` to preview, `-SkipBuild` to reuse existing `Build/` output.
 
-The six release artifacts are: `AkerMCP.unitypackage` (Unity plugin), `AkerMcp.Godot-addon.zip` (Godot addon; extract into your project's `addons/`), `AkerMcp.Stride-source.zip` (Stride adapter **source** + `install-stride-wrapper.ps1`; build it against your Game Studio per [1c. Stride Setup](#1c-stride-setup); it is not a prebuilt binary because it links your specific Stride editor assemblies), and the three standalone server builds (`AkerMcp.Server-{win,osx,linux}-x64.zip`).
+The six release artifacts are: `AkerMCP.unitypackage` (Unity plugin), `AkerMcp.Godot-addon.zip` (Godot addon, with the AkerMcp core source it builds against under `aker_mcp/core/`; extract into your project's `addons/` and reference it per [1b. Godot Setup](#1b-godot-setup)), `AkerMcp.Stride-source.zip` (Stride adapter **source**, with the startup hook, the launcher, the `Shared/` and `Client/` sources it builds from, and `install-stride-wrapper.ps1`; build it against your Game Studio per [1c. Stride Setup](#1c-stride-setup); it is not a prebuilt binary because it links your specific Stride editor assemblies), and the three standalone server builds (`AkerMcp.Server-{win,osx,linux}-x64.zip`).
 
 Alternatively, run `build-package.bat` (Windows) or `./build-package.sh` (Mac/Linux) to only produce the artifacts in the local `Build/` folder (gitignored), then upload them as release assets manually. Binaries are distributed via Releases, not committed to the repository.
 
