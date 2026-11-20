@@ -70,10 +70,22 @@ public class PlatformerController2D : MonoBehaviour
     void Update()
     {
         float x = Input.GetAxisRaw(""Horizontal"");
-        _rb.velocity = new Vector2(x * moveSpeed, _rb.velocity.y);
+        Velocity = new Vector2(x * moveSpeed, Velocity.y);
         bool grounded = _groundContacts > 0;
         if (grounded && (Input.GetKeyDown(jumpKey) || Input.GetMouseButtonDown(0)))
-            _rb.velocity = new Vector2(_rb.velocity.x, jumpForce);
+            Velocity = new Vector2(Velocity.x, jumpForce);
+    }
+
+    // Unity 6 renamed Rigidbody2D.velocity to linearVelocity; the old name is obsolete (warning CS0618).
+    Vector2 Velocity
+    {
+#if UNITY_6000_0_OR_NEWER
+        get => _rb.linearVelocity;
+        set => _rb.linearVelocity = value;
+#else
+        get => _rb.velocity;
+        set => _rb.velocity = value;
+#endif
     }
 
     void OnCollisionEnter2D(Collision2D c) { if (c.collider.CompareTag(groundTag)) _groundContacts++; }
@@ -110,14 +122,26 @@ public class AutoRunner2D : MonoBehaviour
 
     void FixedUpdate()
     {
-        _rb.velocity = new Vector2(forwardSpeed, _rb.velocity.y);
+        Velocity = new Vector2(forwardSpeed, Velocity.y);
     }
 
     void Update()
     {
         bool grounded = _groundContacts > 0;
         if (grounded && (Input.GetKeyDown(jumpKey) || Input.GetMouseButtonDown(0)))
-            _rb.velocity = new Vector2(_rb.velocity.x, jumpForce);
+            Velocity = new Vector2(Velocity.x, jumpForce);
+    }
+
+    // Unity 6 renamed Rigidbody2D.velocity to linearVelocity; the old name is obsolete (warning CS0618).
+    Vector2 Velocity
+    {
+#if UNITY_6000_0_OR_NEWER
+        get => _rb.linearVelocity;
+        set => _rb.linearVelocity = value;
+#else
+        get => _rb.velocity;
+        set => _rb.velocity = value;
+#endif
     }
 
     void OnCollisionEnter2D(Collision2D c) { if (c.collider.CompareTag(groundTag)) _groundContacts++; }
@@ -170,7 +194,24 @@ public class Killzone2D : MonoBehaviour
     void Hit(string t)
     {
         if (t == deadlyTag && reloadOnDeath)
-            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+            Reload();
+    }
+
+    // A scene missing from Build Settings has buildIndex -1, and LoadScene refuses it by index and by name alike.
+    // A prototype scene usually is not listed, so in the editor it is reloaded by its path; a player only contains
+    // listed scenes, where the index works.
+    static void Reload()
+    {
+        var scene = SceneManager.GetActiveScene();
+#if UNITY_EDITOR
+        if (!string.IsNullOrEmpty(scene.path))
+        {
+            UnityEditor.SceneManagement.EditorSceneManager.LoadSceneInPlayMode(
+                scene.path, new LoadSceneParameters(LoadSceneMode.Single));
+            return;
+        }
+#endif
+        SceneManager.LoadScene(scene.buildIndex);
     }
 }
 " }
@@ -192,10 +233,15 @@ public class ScoreOverlay : MonoBehaviour
     void Awake() { Instance = this; }
     public void AddScore(int n = 1) { score += n; }
 
+    // Built once: OnGUI runs several times a frame, and a new GUIStyle each time is garbage every frame.
+    // GUI.skin is only readable inside OnGUI, hence the lazy creation there.
+    GUIStyle _style;
+
     void OnGUI()
     {
-        var style = new GUIStyle(GUI.skin.label) { fontSize = 28, alignment = TextAnchor.UpperCenter };
-        GUI.Label(new Rect(0, 12, Screen.width, 40), label + "": "" + score, style);
+        if (_style == null)
+            _style = new GUIStyle(GUI.skin.label) { fontSize = 28, alignment = TextAnchor.UpperCenter };
+        GUI.Label(new Rect(0, 12, Screen.width, 40), label + "": "" + score, _style);
     }
 }
 " }
