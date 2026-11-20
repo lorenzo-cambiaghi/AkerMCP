@@ -34,7 +34,6 @@ namespace AkerMcp.Server
             if (s.Contains("unity")) return "unity";
             if (s.Contains("godot")) return "godot";
             if (s.Contains("stride")) return "stride";
-            if (s.Contains("skelforge")) return "skelforge";
             return null;
         }
 

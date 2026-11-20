@@ -603,8 +603,8 @@ namespace AkerMcp.Client
 
             // Scalars go on as the CLR values every ISceneNode has always received (string, double, bool, null), and an
             // object or array as its JsonElement; the invoker converts each to the parameter it lands on. Kept that way
-            // for adapters outside this repository: SkelForge's operations coerce with Convert.ToSingle and friends, which
-            // a JsonElement does not satisfy. What used to fail happened after this point — a vector given as an object
+            // for adapters outside this repository, which may coerce an argument with Convert.ToSingle and friends: a
+            // JsonElement does not satisfy those. What used to fail happened after this point — a vector given as an object
             // reached the method as text, a StringName parameter (Godot's AnimationPlayer.Play("walk")) had no conversion
             // from a string, an enum could not be given by name, "0.5" was parsed in the editor's culture.
             if (args.TryGetProperty("args", out var argsArray) && argsArray.ValueKind == JsonValueKind.Array)

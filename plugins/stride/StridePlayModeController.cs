@@ -9,7 +9,7 @@ namespace AkerMcp.StrideAdapter
     /// "running the game" launches a separate built executable (via the toolbar), which
     /// isn't controllable from here. So this reports play control as not-applicable with
     /// clear guidance rather than pretending — build_player then run the produced exe, or
-    /// use the Unity/Godot/SkelForge adapters for the interactive runtime loop.
+    /// use the Unity or Godot adapter for the interactive runtime loop.
     /// </summary>
     public sealed class StridePlayModeController : IPlayModeController
     {
