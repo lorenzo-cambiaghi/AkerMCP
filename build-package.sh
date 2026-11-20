@@ -99,7 +99,7 @@ rm -f "$BUILD_DIR/AkerMcp.Stride-source.zip"
 zip -r "$BUILD_DIR/AkerMcp.Stride-source.zip" \
     plugins/stride plugins/stride-startuphook plugins/stride-launcher Shared Client \
     install-stride-wrapper.ps1 setup-stride.ps1 LICENSE \
-    -x '*/bin/*' '*/obj/*' > /dev/null
+    -x '*/bin/*' '*/obj/*' '*.DS_Store' > /dev/null
 
 echo "  - Windows (win-x64)"
 dotnet publish Server/AkerMcp.Server.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o "$BUILD_DIR/Server-win-x64" --nologo > /dev/null
