@@ -1825,6 +1825,13 @@ namespace AkerMcp.Server
                     if (ReadJsonBool(text, "supported", defaultValue: true))
                         return engineResult; // engine handled it in-process
                 }
+                else if (engineResult.Content.Count > 0
+                         && engineResult.Content[0].Text?.Contains("(engine still connected)") == true)
+                {
+                    // Timed out, not refused: the in-process input is still queued behind a busy main thread and lands
+                    // when it frees up. Typing the same keys at OS level now would deliver them twice.
+                    return engineResult;
+                }
             }
 
             // Strategy 2: OS-level fallback (focus the target window, then SendInput). Same
@@ -1878,6 +1885,9 @@ namespace AkerMcp.Server
                     "(a title substring, as list_windows shows it).");
             if (!capture.FocusWindowByTitle(focusTitle!, out var focusErr))
                 return ToolResult.Error($"Input not sent: could not focus '{focusTitle}': {focusErr}");
+            // The same pause ui_action makes: activation is asynchronous (on macOS it goes through System Events), and
+            // the first events used to reach the window that was in front before.
+            await Task.Delay(FocusSettleMs, ct).ConfigureAwait(false);
             var focusNote = $" (focused '{focusTitle}')";
 
             if (coords == "image")
