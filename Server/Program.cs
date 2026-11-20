@@ -8,8 +8,10 @@ namespace AkerMcp.Server
     {
         static async Task<int> Main(string[] args)
         {
-            // Resolve the tool profile before anything is opened: a bad name is a
-            // configuration error, answered with exit code 2 and nothing to clean up.
+            // Resolve the command line and the tool profile before anything is opened: a bad
+            // name or an unknown flag is a configuration error, answered with exit code 2 and
+            // nothing to clean up. An unknown flag used to be ignored, and a `--profile` with no
+            // value silently meant the default profile.
             string profile;
             try
             {
@@ -39,9 +41,6 @@ namespace AkerMcp.Server
                 $"AkerMcp Server v{ServerVersion.Product} starting " +
                 $"(IPC protocol {AkerMcp.Shared.Ipc.IpcConstants.ProtocolVersion})...");
 
-            await engine.TryDiscoverAndConnect(cts.Token);
-            var retryTask = Task.Run(() => RetryEngineConnection(engine, cts.Token));
-
             var toolRegistry = new ToolRegistry(engine);
             var (kept, dropped) = toolRegistry.ApplyProfile(
                 profile,
@@ -52,6 +51,12 @@ namespace AkerMcp.Server
                 (dropped.Count > 0 ? $", not loaded: {string.Join(", ", dropped)}" : ""));
             var resourceRegistry = new ResourceRegistry(engine);
             var server = new McpServer(transport, toolRegistry, resourceRegistry);
+
+            // In the background, after the registry has subscribed to OnConnected: the first
+            // discovery used to run before the MCP loop started, so `initialize` waited up to five
+            // seconds for each plugin that had announced itself and did not answer. A tool call
+            // that arrives first waits for the connection anyway (EngineConnection's grace period).
+            var retryTask = Task.Run(() => ConnectAndKeepConnected(engine, cts.Token));
 
             try
             {
@@ -69,15 +74,49 @@ namespace AkerMcp.Server
             return 0;
         }
 
-        /// <summary>`--profile core` or `--profile=core` on the command line, else null.</summary>
+        /// <summary>
+        /// `--profile core` or `--profile=core` on the command line, else null. Anything else on the
+        /// command line is refused: this server has no other option, and a typo deserves an error.
+        /// </summary>
         private static string? ProfileArgument(string[] args)
         {
+            string? profile = null;
             for (var i = 0; i < args.Length; i++)
             {
-                if (args[i] == "--profile" && i + 1 < args.Length) return args[i + 1];
-                if (args[i].StartsWith("--profile=", StringComparison.Ordinal)) return args[i].Substring("--profile=".Length);
+                if (args[i] == "--profile")
+                {
+                    if (i + 1 >= args.Length || args[i + 1].StartsWith("-", StringComparison.Ordinal))
+                        throw new ArgumentException("--profile needs a value: core, standard or full");
+                    profile = args[++i];
+                }
+                else if (args[i].StartsWith("--profile=", StringComparison.Ordinal))
+                {
+                    profile = args[i].Substring("--profile=".Length);
+                    if (string.IsNullOrWhiteSpace(profile))
+                        throw new ArgumentException("--profile= needs a value: core, standard or full");
+                }
+                else
+                {
+                    throw new ArgumentException(
+                        $"unknown argument '{args[i]}'. The only option is --profile <core|standard|full>.");
+                }
             }
-            return null;
+            return profile;
+        }
+
+        private static async Task ConnectAndKeepConnected(EngineConnection engine, CancellationToken ct)
+        {
+            try
+            {
+                await engine.TryDiscoverAndConnect(ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { return; }
+            catch (Exception ex)
+            {
+                StdioTransport.LogInfo($"Initial engine discovery failed: {ex.Message}");
+            }
+
+            await RetryEngineConnection(engine, ct).ConfigureAwait(false);
         }
 
         private static async Task RetryEngineConnection(EngineConnection engine, CancellationToken ct)
@@ -97,6 +136,7 @@ namespace AkerMcp.Server
                     }
 
                     await Task.Delay(delayMs, ct).ConfigureAwait(false);
+                    if (engine.IsConnected) continue; // engine_status connected meanwhile
 
                     try
                     {
@@ -121,4 +161,3 @@ namespace AkerMcp.Server
         }
     }
 }
-

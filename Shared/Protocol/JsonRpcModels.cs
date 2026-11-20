@@ -24,8 +24,11 @@ namespace AkerMcp.Shared.Protocol
         [JsonPropertyName("jsonrpc")]
         public string Jsonrpc { get; set; } = "2.0";
 
+        // Written even when null: the error for a request whose id could not be read (a line that is
+        // not JSON, an id that is neither a string nor an integer) must still say "id": null.
         [JsonPropertyName("id")]
-        public object Id { get; set; } = null!;
+        [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+        public object? Id { get; set; }
 
         [JsonPropertyName("result")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -35,13 +38,13 @@ namespace AkerMcp.Shared.Protocol
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public JsonRpcError? Error { get; set; }
 
-        public static JsonRpcResponse Success(object id, object result) => new()
+        public static JsonRpcResponse Success(object? id, object result) => new()
         {
             Id = id,
             Result = result
         };
 
-        public static JsonRpcResponse Fail(object id, int code, string message, object? data = null) => new()
+        public static JsonRpcResponse Fail(object? id, int code, string message, object? data = null) => new()
         {
             Id = id,
             Error = new JsonRpcError { Code = code, Message = message, Data = data }
@@ -81,5 +84,7 @@ namespace AkerMcp.Shared.Protocol
         public const int MethodNotFound = -32601;
         public const int InvalidParams = -32602;
         public const int InternalError = -32603;
+        // MCP: resources/read for a URI the server does not have.
+        public const int ResourceNotFound = -32002;
     }
 }

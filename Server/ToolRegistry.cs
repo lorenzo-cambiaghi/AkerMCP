@@ -96,7 +96,13 @@ namespace AkerMcp.Server
 
             try
             {
-                return await tool.Handler(callParams.Arguments ?? default, ct).ConfigureAwait(false);
+                // As it came: `?? default` turned a call without `arguments` into an Undefined element that
+                // claims a value, and every forwarded tool then failed on GetRawText.
+                return await tool.Handler(callParams.Arguments, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw; // the client cancelled: there is no one to give an error result to
             }
             catch (Exception ex)
             {

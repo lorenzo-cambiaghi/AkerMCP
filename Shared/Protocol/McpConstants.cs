@@ -10,6 +10,7 @@ namespace AkerMcp.Shared.Protocol
             public const string Initialize = "initialize";
             public const string Initialized = "notifications/initialized";
             public const string Ping = "ping";
+            public const string Cancelled = "notifications/cancelled";
 
             public const string ToolsList = "tools/list";
             public const string ToolsCall = "tools/call";

@@ -34,12 +34,13 @@ namespace AkerMcp.Server
 
         public async Task<ResourceReadResult> ReadResource(JsonElement paramsElement, CancellationToken ct)
         {
-            if (!paramsElement.TryGetProperty("uri", out var uriElement))
-                throw new InvalidOperationException("Missing 'uri' in resource read request");
+            // The codes MCP gives these two, rather than an internal error for both.
+            if (!paramsElement.TryGetProperty("uri", out var uriElement) || uriElement.ValueKind != JsonValueKind.String)
+                throw new McpRequestException(JsonRpcErrorCodes.InvalidParams, "Missing 'uri' in resource read request");
 
             var uri = uriElement.GetString();
             if (uri == null || !_resources.TryGetValue(uri, out var resource))
-                throw new InvalidOperationException($"Unknown resource: {uri}");
+                throw new McpRequestException(JsonRpcErrorCodes.ResourceNotFound, $"Unknown resource: {uri}");
 
             var content = await resource.Handler(ct).ConfigureAwait(false);
 
