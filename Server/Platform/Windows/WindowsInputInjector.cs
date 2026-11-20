@@ -37,6 +37,7 @@ namespace AkerMcp.Server.Platform.Windows
             error = null;
             dispatched = 0;
             var skipped = new List<string>();
+            var delivery = new Delivery();
 
             foreach (var ev in events)
             {
@@ -50,16 +51,13 @@ namespace AkerMcp.Server.Platform.Windows
                         }
                         if (ev.HoldMs > 0)
                         {
-                            SendKey(vk, down: true);
-                            Sleep(ev.HoldMs);
-                            SendKey(vk, down: false);
+                            if (SendKey(delivery, vk, down: true)) Sleep(ev.HoldMs);
+                            SendKey(delivery, vk, down: false);
                         }
-                        else
+                        else if (SendKey(delivery, vk, down: ev.Pressed))
                         {
-                            SendKey(vk, down: ev.Pressed);
                             lock (_lock) { if (ev.Pressed) _heldVks.Add(vk); else _heldVks.Remove(vk); }
                         }
-                        dispatched++;
                         break;
 
                     case "mouse_button":
@@ -70,32 +68,39 @@ namespace AkerMcp.Server.Platform.Windows
                         }
                         if (ev.HoldMs > 0)
                         {
-                            SendMouseButton(downFlag);
-                            Sleep(ev.HoldMs);
-                            SendMouseButton(upFlag);
+                            if (SendMouseButton(delivery, downFlag)) Sleep(ev.HoldMs);
+                            SendMouseButton(delivery, upFlag);
                         }
-                        else
+                        else if (SendMouseButton(delivery, ev.Pressed ? downFlag : upFlag))
                         {
-                            SendMouseButton(ev.Pressed ? downFlag : upFlag);
                             lock (_lock) { if (ev.Pressed) _heldMouseUp.Add(upFlag); else _heldMouseUp.Remove(upFlag); }
                         }
-                        dispatched++;
                         break;
 
                     case "mouse_move":
-                        MoveCursorAbsolute((int)ev.X, (int)ev.Y);
-                        dispatched++;
+                        MoveCursorAbsolute(delivery, (int)ev.X, (int)ev.Y);
                         break;
 
                     case "action":
                         // Named engine actions have no OS-level equivalent.
                         skipped.Add($"action '{ev.Action}'");
-                        break;
+                        continue;
 
                     default:
                         skipped.Add($"type '{ev.Type}'");
-                        break;
+                        continue;
                 }
+
+                // A refused event ends the call: whatever made Windows refuse it — an elevated
+                // window in front, the secure desktop — refuses the rest too, and counting them
+                // as dispatched is how a send_input that did nothing reported success.
+                if (!delivery.Ok)
+                {
+                    delivery.Report(out var refused);
+                    error = refused + (dispatched > 0 ? $" {dispatched} event(s) before it were delivered." : "");
+                    return false;
+                }
+                dispatched++;
             }
 
             if (dispatched == 0)
@@ -120,8 +125,11 @@ namespace AkerMcp.Server.Platform.Windows
                 vks = new ushort[_heldVks.Count]; _heldVks.CopyTo(vks); _heldVks.Clear();
                 mouseUps = new uint[_heldMouseUp.Count]; _heldMouseUp.CopyTo(mouseUps); _heldMouseUp.Clear();
             }
-            foreach (var vk in vks) SendKey(vk, down: false);
-            foreach (var up in mouseUps) SendMouseButton(up);
+            // Best effort: there is nobody to report a refusal to on exit_play, and the next
+            // release is still worth trying.
+            var delivery = new Delivery();
+            foreach (var vk in vks) SendKey(delivery, vk, down: false);
+            foreach (var up in mouseUps) SendMouseButton(delivery, up);
         }
 
         // ---- UI actions ----------------------------------------------------
@@ -131,9 +139,9 @@ namespace AkerMcp.Server.Platform.Windows
 
         public bool MoveTo(int screenX, int screenY, out string? error)
         {
-            error = null;
-            MoveCursorAbsolute(screenX, screenY);
-            return true;
+            var delivery = new Delivery();
+            MoveCursorAbsolute(delivery, screenX, screenY);
+            return delivery.Report(out error);
         }
 
         public bool Click(int screenX, int screenY, string button, int count, out string? error)
@@ -146,17 +154,18 @@ namespace AkerMcp.Server.Platform.Windows
             }
 
             count = Math.Max(1, Math.Min(3, count));
-            MoveCursorAbsolute(screenX, screenY);
+            var delivery = new Delivery();
+            if (!MoveCursorAbsolute(delivery, screenX, screenY)) return delivery.Report(out error);
             // A control that highlights on hover needs a moment to notice the pointer
             // before the press, or the click lands on a state the screenshot never showed.
             Thread.Sleep(HoverSettleMs);
 
-            for (int i = 0; i < count; i++)
+            for (int i = 0; i < count && delivery.Ok; i++)
             {
                 if (i > 0) Thread.Sleep(MultiClickGapMs);
-                Send(MouseInput(down), MouseInput(up)); // press and release, uninterruptible
+                delivery.Send(MouseInput(down), MouseInput(up)); // press and release, uninterruptible
             }
-            return true;
+            return delivery.Report(out error);
         }
 
         public bool Drag(int fromX, int fromY, int toX, int toY, string button, out string? error)
@@ -168,9 +177,10 @@ namespace AkerMcp.Server.Platform.Windows
                 return false;
             }
 
-            MoveCursorAbsolute(fromX, fromY);
+            var delivery = new Delivery();
+            if (!MoveCursorAbsolute(delivery, fromX, fromY)) return delivery.Report(out error);
             Thread.Sleep(HoverSettleMs);
-            SendMouseButton(down);
+            SendMouseButton(delivery, down);
             lock (_lock) _heldMouseUp.Add(up);
             try
             {
@@ -178,21 +188,21 @@ namespace AkerMcp.Server.Platform.Windows
                 // Travel in steps: a press followed by a jump to the destination reads as a
                 // click in the wrong place to anything that waits for the pointer to move.
                 const int steps = 12;
-                for (int i = 1; i <= steps; i++)
+                for (int i = 1; i <= steps && delivery.Ok; i++)
                 {
                     var x = fromX + (toX - fromX) * i / (double)steps;
                     var y = fromY + (toY - fromY) * i / (double)steps;
-                    MoveCursorAbsolute((int)Math.Round(x), (int)Math.Round(y));
+                    MoveCursorAbsolute(delivery, (int)Math.Round(x), (int)Math.Round(y));
                     Thread.Sleep(DragStepMs);
                 }
-                Thread.Sleep(DragGrabMs);
+                if (delivery.Ok) Thread.Sleep(DragGrabMs);
             }
             finally
             {
-                SendMouseButton(up);
+                SendMouseButton(delivery, up);
                 lock (_lock) _heldMouseUp.Remove(up);
             }
-            return true;
+            return delivery.Report(out error);
         }
 
         public bool Scroll(int screenX, int screenY, int clicks, bool horizontal, out string? error)
@@ -204,18 +214,19 @@ namespace AkerMcp.Server.Platform.Windows
                 return false;
             }
 
-            MoveCursorAbsolute(screenX, screenY);
+            var delivery = new Delivery();
+            if (!MoveCursorAbsolute(delivery, screenX, screenY)) return delivery.Report(out error);
             Thread.Sleep(HoverSettleMs);
 
             // One detent at a time: a single event carrying ten detents is coalesced by some
             // controls into far less than ten lines of movement.
             var perStep = clicks > 0 ? 1 : -1;
-            for (int i = 0; i < Math.Abs(clicks); i++)
+            for (int i = 0; i < Math.Abs(clicks) && delivery.Ok; i++)
             {
-                SendWheel(perStep * WHEEL_DELTA, horizontal);
+                SendWheel(delivery, perStep * WHEEL_DELTA, horizontal);
                 Thread.Sleep(ScrollStepMs);
             }
-            return true;
+            return delivery.Report(out error);
         }
 
         public bool TypeText(string text, out string? error)
@@ -233,20 +244,29 @@ namespace AkerMcp.Server.Platform.Windows
             // keyboard: 1.5" arrived as "aaaaction aached     eeyboard:11.5"), while pushing
             // the whole string in as one block overruns the target's queue and every
             // character after the first few comes out as the last one ("AkerMcp kkkkkk...").
+            var delivery = new Delivery();
+            int typed = 0;
             foreach (var ch in text)
             {
                 if (ch == '\r') continue; // a CRLF is one Enter, not two
 
                 if (ch == '\n')
-                    Send(KeyInput(0x0D, down: true), KeyInput(0x0D, down: false));
+                    delivery.Send(KeyInput(0x0D, down: true), KeyInput(0x0D, down: false));
                 else if (ch == '\t')
-                    Send(KeyInput(0x09, down: true), KeyInput(0x09, down: false));
+                    delivery.Send(KeyInput(0x09, down: true), KeyInput(0x09, down: false));
                 else
                     // KEYEVENTF_UNICODE carries the character itself rather than a key
                     // position, so the text arrives the same under any keyboard layout —
                     // and characters with no virtual-key at all still arrive.
-                    Send(UnicodeInput(ch, down: true), UnicodeInput(ch, down: false));
+                    delivery.Send(UnicodeInput(ch, down: true), UnicodeInput(ch, down: false));
 
+                if (!delivery.Ok)
+                {
+                    delivery.Report(out error);
+                    error += typed > 0 ? $" {typed} character(s) had been typed before it." : "";
+                    return false;
+                }
+                typed++;
                 Thread.Sleep(TypeGapMs);
             }
             return true;
@@ -254,44 +274,25 @@ namespace AkerMcp.Server.Platform.Windows
 
         public bool KeyChord(string chord, out string? error)
         {
-            error = null;
-            if (string.IsNullOrWhiteSpace(chord))
-            {
-                error = "No key to send.";
+            // The spelling — modifiers, key, the plus key — is shared with macOS (KeyChordSyntax).
+            if (!KeyChordSyntax.TryParse(chord, out var names, out var keyName, out error))
                 return false;
-            }
 
-            // "+" separates the keys, so the plus key itself goes by its name: "ctrl++" split on
-            // "+" was three parts, and the empty middle one was refused as "not a modifier".
-            var spec = chord.Trim();
-            if (spec == "+") spec = "plus";
-            else if (spec.EndsWith("++", StringComparison.Ordinal)) spec = spec.Substring(0, spec.Length - 1) + "plus";
-            var parts = spec.Split('+');
-            var modifiers = new List<ushort>();
-            ushort mainVk = 0;
-
-            for (int i = 0; i < parts.Length; i++)
+            var modifiers = new List<ushort>(names.Count);
+            foreach (var name in names)
             {
-                var part = parts[i].Trim();
-                // A trailing "+" means the plus key itself, e.g. "ctrl++".
-                if (part.Length == 0) part = "+";
-
-                bool isLast = i == parts.Length - 1;
-                if (!isLast)
+                if (!TryMapModifier(name, out var mod))
                 {
-                    if (!TryMapModifier(part, out var mod))
-                    {
-                        error = $"'{part}' is not a modifier. Write shortcuts as 'ctrl+shift+s', " +
-                                "with ctrl/shift/alt/win first and the key last.";
-                        return false;
-                    }
-                    modifiers.Add(mod);
-                }
-                else if (!TryMapKey(part, out mainVk))
-                {
-                    error = $"Unknown key '{part}'.";
+                    error = $"'{name}' is not a modifier. Write shortcuts as 'ctrl+shift+s', " +
+                            "with ctrl/shift/alt/win first and the key last.";
                     return false;
                 }
+                modifiers.Add(mod);
+            }
+            if (!TryMapKey(keyName, out var mainVk))
+            {
+                error = $"Unknown key '{keyName}'.";
+                return false;
             }
 
             // Press in one call and release in another, each atomic: a modifier that gets
@@ -303,10 +304,13 @@ namespace AkerMcp.Server.Platform.Windows
             var release = new List<INPUT>(modifiers.Count + 1) { KeyInput(mainVk, down: false) };
             for (int i = modifiers.Count - 1; i >= 0; i--) release.Add(KeyInput(modifiers[i], down: false));
 
-            Send(press.ToArray());
-            try { Thread.Sleep(ClickHoldMs); }
-            finally { Send(release.ToArray()); }
-            return true;
+            var delivery = new Delivery();
+            delivery.Send(press.ToArray());
+            // The release goes out even when the press was refused: part of a block can land, and
+            // a modifier left down turns the user's next keystrokes into shortcuts.
+            try { if (delivery.Ok) Thread.Sleep(ClickHoldMs); }
+            finally { delivery.Send(release.ToArray()); }
+            return delivery.Report(out error);
         }
 
         // Timings. Small enough that a sequence of actions stays responsive, large enough
@@ -414,31 +418,85 @@ namespace AkerMcp.Server.Platform.Windows
         }
 
         /// <summary>
-        /// Hand a block of events to the OS in one call. Everything that has to stay
-        /// together — a press with its release, a modifier with its key — belongs in the
-        /// same block: that is the only guarantee Windows gives that nothing else, the
-        /// person at the keyboard included, gets in between.
+        /// Whether everything one operation handed to SendInput was taken. Each block goes to the
+        /// OS in one call: everything that has to stay together — a press with its release, a
+        /// modifier with its key — belongs in the same block, which is the only guarantee
+        /// Windows gives that nothing else, the person at the keyboard included, gets in between.
+        ///
+        /// <para>SendInput answers how many events it inserted, and that answer used to be
+        /// ignored: with an elevated window in front, a UAC prompt or the lock screen up, it
+        /// inserts nothing, and the tool still reported "dispatched N".</para>
         /// </summary>
-        private static void Send(params INPUT[] inputs)
+        private sealed class Delivery
         {
-            if (inputs.Length > 0)
-                SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+            private uint _sent, _asked;
+            private int _win32Error;
+
+            public bool Ok { get; private set; } = true;
+
+            /// <summary>Send one block; false if Windows took fewer events than it was given.</summary>
+            public bool Send(params INPUT[] inputs)
+            {
+                if (inputs.Length == 0) return true;
+                uint sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+                if (sent == inputs.Length) return true;
+                if (Ok)
+                {
+                    // The first refusal is the one worth naming; later ones are its consequences.
+                    _win32Error = Marshal.GetLastWin32Error();
+                    _sent = sent;
+                    _asked = (uint)inputs.Length;
+                    Ok = false;
+                }
+                return false;
+            }
+
+            public bool Report(out string? error)
+            {
+                error = Ok ? null : RefusedMessage(_sent, _asked, _win32Error);
+                return Ok;
+            }
         }
+
+        /// <summary>
+        /// What to say when SendInput refuses. Windows does not say which cause it was — the
+        /// documentation is explicit that neither the count nor GetLastError identifies UIPI —
+        /// so the answer lists the ones that produce it.
+        /// </summary>
+        internal static string RefusedMessage(uint sent, uint asked, int win32Error) =>
+            $"Windows refused the synthetic input: SendInput delivered {sent} of {asked} event(s)" +
+            (win32Error != 0 ? $" (error {win32Error})" : "") + ". " +
+            "Windows does this when the window in front runs elevated (as administrator) and this " +
+            "server does not — UIPI blocks input to a higher-integrity window; when the secure desktop " +
+            "is up (a UAC prompt, Ctrl+Alt+Del); or when the session is locked or disconnected. " +
+            "Run the server at the same integrity level as the target, or dismiss the prompt or unlock, " +
+            "and try again.";
 
         private static INPUT KeyInput(ushort vk, bool down)
         {
             ushort scan = (ushort)MapVirtualKey(vk, MAPVK_VK_TO_VSC);
-            uint flags = KEYEVENTF_SCANCODE | (down ? 0u : KEYEVENTF_KEYUP);
-            if (IsExtendedKey(vk)) flags |= KEYEVENTF_EXTENDEDKEY;
-
             return new INPUT
             {
                 type = INPUT_KEYBOARD,
                 U = new InputUnion
                 {
-                    ki = new KEYBDINPUT { wVk = vk, wScan = scan, dwFlags = flags }
+                    ki = new KEYBDINPUT { wVk = vk, wScan = scan, dwFlags = KeyEventFlags(vk, scan, down) }
                 }
             };
+        }
+
+        /// <summary>
+        /// Scancode when the active layout has one for the key, so games reading raw input see
+        /// it; the virtual key alone when it does not. MapVirtualKey answers 0 for a key the
+        /// layout lacks, and KEYEVENTF_SCANCODE with scancode 0 makes Windows ignore wVk and
+        /// send nothing at all.
+        /// </summary>
+        internal static uint KeyEventFlags(ushort vk, ushort scan, bool down)
+        {
+            uint flags = down ? 0u : KEYEVENTF_KEYUP;
+            if (scan != 0) flags |= KEYEVENTF_SCANCODE;
+            if (IsExtendedKey(vk)) flags |= KEYEVENTF_EXTENDEDKEY;
+            return flags;
         }
 
         private static INPUT UnicodeInput(char ch, bool down)
@@ -463,14 +521,14 @@ namespace AkerMcp.Server.Platform.Windows
             }
         };
 
-        private static void SendKey(ushort vk, bool down) => Send(KeyInput(vk, down));
+        private static bool SendKey(Delivery d, ushort vk, bool down) => d.Send(KeyInput(vk, down));
 
-        private static void SendMouseButton(uint flag) => Send(MouseInput(flag));
+        private static bool SendMouseButton(Delivery d, uint flag) => d.Send(MouseInput(flag));
 
-        private static void SendWheel(int delta, bool horizontal)
-            => Send(MouseInput(horizontal ? MOUSEEVENTF_HWHEEL : MOUSEEVENTF_WHEEL, delta));
+        private static bool SendWheel(Delivery d, int delta, bool horizontal)
+            => d.Send(MouseInput(horizontal ? MOUSEEVENTF_HWHEEL : MOUSEEVENTF_WHEEL, delta));
 
-        private static void MoveCursorAbsolute(int x, int y)
+        private static bool MoveCursorAbsolute(Delivery d, int x, int y)
         {
             // The virtual screen is the bounding box of every monitor, and its origin is not
             // 0,0 when one sits left of or above the primary. MOUSEEVENTF_VIRTUALDESK tells
@@ -503,7 +561,7 @@ namespace AkerMcp.Server.Platform.Windows
                     }
                 }
             };
-            SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
+            return d.Send(input);
         }
 
         private static bool TryMapMouseButton(string? button, out uint down, out uint up)

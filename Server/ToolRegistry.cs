@@ -545,7 +545,7 @@ namespace AkerMcp.Server
                         ""to_x"": { ""type"": ""number"", ""description"": ""Drag destination, same units"" },
                         ""to_y"": { ""type"": ""number"" },
                         ""text"": { ""type"": ""string"", ""description"": ""For 'type': the text to enter"" },
-                        ""keys"": { ""type"": ""string"", ""description"": ""For 'key': 'ctrl+s', 'alt+F4', 'Escape'"" },
+                        ""keys"": { ""type"": ""string"", ""description"": ""For 'key': 'ctrl+s', 'alt+F4', 'Escape'; plus key: ctrl++"" },
                         ""scroll_direction"": { ""type"": ""string"", ""enum"": [""up"", ""down"", ""left"", ""right""] },
                         ""scroll_amount"": { ""type"": ""integer"", ""description"": ""Wheel notches (1-30, default 3)"" },
                         ""duration_ms"": { ""type"": ""integer"", ""description"": ""For 'wait' (default 500)"" },

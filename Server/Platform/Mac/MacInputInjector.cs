@@ -202,7 +202,11 @@ namespace AkerMcp.Server.Platform.Mac
                 error = $"Unknown mouse button '{button}'.";
                 return false;
             }
-            uint dragged = which == kCGMouseButtonRight ? kCGEventRightMouseDragged : kCGEventLeftMouseDragged;
+            // Each button has its own drag event, as Inject's mouse_move already knows: a middle
+            // drag posted as LeftMouseDragged told the target the left button was down.
+            uint dragged = which == kCGMouseButtonRight ? kCGEventRightMouseDragged
+                         : which == kCGMouseButtonCenter ? kCGEventOtherMouseDragged
+                         : kCGEventLeftMouseDragged;
 
             _cursor = new CGPoint { x = fromX, y = fromY };
             PostMouse(kCGEventMouseMoved, _cursor, which, 0);
@@ -295,40 +299,26 @@ namespace AkerMcp.Server.Platform.Mac
         public bool KeyChord(string chord, out string? error)
         {
             if (!Preflight(out error)) return false;
-            if (string.IsNullOrWhiteSpace(chord))
-            {
-                error = "No key to send.";
+
+            // The spelling — modifiers, key, the plus key — is shared with Windows (KeyChordSyntax).
+            if (!KeyChordSyntax.TryParse(chord, out var names, out var keyName, out error))
                 return false;
-            }
 
-            // "+" separates the keys, so the plus key itself goes by its name (see Windows).
-            var spec = chord.Trim();
-            if (spec == "+") spec = "plus";
-            else if (spec.EndsWith("++", StringComparison.Ordinal)) spec = spec.Substring(0, spec.Length - 1) + "plus";
-            var parts = spec.Split('+');
             ulong flags = 0;
-            ushort mainKey = 0;
-
-            for (int i = 0; i < parts.Length; i++)
+            foreach (var name in names)
             {
-                var part = parts[i].Trim();
-                if (part.Length == 0) part = "+";
-
-                if (i < parts.Length - 1)
+                if (!TryMapModifierFlag(name, out var flag))
                 {
-                    if (!TryMapModifierFlag(part, out var flag))
-                    {
-                        error = $"'{part}' is not a modifier. Write shortcuts as 'cmd+shift+s', " +
-                                "with cmd/ctrl/shift/alt first and the key last.";
-                        return false;
-                    }
-                    flags |= flag;
-                }
-                else if (!TryMapKey(part, out mainKey))
-                {
-                    error = $"Unknown key '{part}'.";
+                    error = $"'{name}' is not a modifier. Write shortcuts as 'cmd+shift+s', " +
+                            "with cmd/ctrl/shift/alt first and the key last.";
                     return false;
                 }
+                flags |= flag;
+            }
+            if (!TryMapKey(keyName, out var mainKey))
+            {
+                error = $"Unknown key '{keyName}'.";
+                return false;
             }
 
             // The modifiers ride as flags on the key event itself. Posting them as separate
