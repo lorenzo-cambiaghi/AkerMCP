@@ -41,7 +41,7 @@ AI: "Set the player's position to (10, 0, 5)"
 | Scene management (`new_scene` · `open_scene` · `save_scene`) | ✅ | ✅ | ✅ |
 | **Runtime loop** (`enter_play`/`exit_play` · `capture_sequence` · `send_input`) | ✅ | ◑ | ◑ |
 
-Every ✅ is implemented and was verified live in that engine's editor. A ❌ answers NOT_SUPPORTED and names what is missing rather than failing quietly: Stride has no sound importer yet, and the primitive catalog carries Unity variants only. The window tools are the exception to the whole table, since they talk to the operating system, Windows or macOS, and work with no engine connected at all: they are how you see and dismiss a modal dialog that has frozen the editor's main thread. `ui_action` extends that OS-level path from looking to acting — clicking and typing in the pixels of the screenshot it returns. It is verified on Windows; the macOS implementation (Quartz `CGEvent`, plus window geometry and by-title capture that macOS had stubs for until now) is written but has not yet been run on a Mac, and says so rather than pretending otherwise. Linux has neither half.
+Every ✅ is implemented and was verified live in that engine's editor; the fixes v1.6.0 makes inside the adapters (Godot's undo for create and delete among them) compile against each engine and are not all run in its editor yet, and `todo.md` lists which. A ❌ answers NOT_SUPPORTED and names what is missing rather than failing quietly: Stride has no sound importer yet, and the primitive catalog carries Unity variants only. The window tools are the exception to the whole table, since they talk to the operating system, Windows or macOS, and work with no engine connected at all: they are how you see and dismiss a modal dialog that has frozen the editor's main thread. `ui_action` extends that OS-level path from looking to acting — clicking and typing in the pixels of the screenshot it returns. It is verified on Windows; the macOS implementation (Quartz `CGEvent`, plus window geometry and by-title capture that macOS had stubs for until now) is written but has not yet been run on a Mac, and says so rather than pretending otherwise. Linux has neither half.
 
 
 ### What it does that the others do not
@@ -388,7 +388,7 @@ Every tool carries the four MCP hints (read-only, destructive, idempotent, open-
 | `execute` | core | Run any C# on the engine's main thread through Roslyn and return its value; globals `selectedObject`, `Find`, `FindAll<T>`, `Create`, `Log` |
 | `take_screenshot` | core | JPEG of the Game view (default) or the Scene view with gizmos |
 | `write_script` | standard | Write a source file into the project by a path relative to its root, wherever the server runs |
-| `engine_status` | standard | Which engine answers, which others run, and a pin that survives reconnects |
+| `engine_status` | standard | Which engine answers, which others run (with pid and project), and a pin by engine, pid or project that survives reconnects |
 
 ### Scene and 2D authoring
 
