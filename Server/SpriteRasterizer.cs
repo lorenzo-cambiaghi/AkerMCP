@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Numerics;
 using System.Text.Json;
 using SixLabors.ImageSharp;
@@ -25,7 +26,7 @@ namespace AkerMcp.Server
     /// Shape-spec (JSON):
     /// {
     ///   "width": 64, "height": 64,          // logical coordinate space (defaults to target px)
-    ///   "background": "#rrggbb" | null,      // null/absent = transparent
+    ///   "background": <colour> | null,       // null/absent/"none" = transparent
     ///   "shapes": [                           // drawn in order (painter's algorithm)
     ///     { "type":"ellipse", "cx":32,"cy":32,"rx":20,"ry":18, "fill":"#FFCC00", "stroke":"#222","strokeWidth":2 },
     ///     { "type":"rect", "x":4,"y":4,"w":56,"h":56,"rx":8, "fill": <paint> },
@@ -34,14 +35,27 @@ namespace AkerMcp.Server
     ///     { "type":"path", "d":"M0 0 L10 10 Q.. C..  Z", "fill":"#000" }
     ///   ]
     /// }
-    /// A <paint> is either a hex string or a linear gradient:
+    /// A colour is a hex string (#rgb, #rgba, #rrggbb, #rrggbbaa), a CSS colour name ("red"),
+    /// rgb(r,g,b) / rgba(r,g,b,a), or "none"/"transparent" for no paint. A paint (fill or
+    /// stroke) is a colour or a linear gradient:
     ///   { "gradient":"linear", "x1":0,"y1":0,"x2":0,"y2":64,
     ///     "stops":[{"offset":0,"color":"#fff"},{"offset":1,"color":"#888"}] }
-    /// Optional per-shape "opacity" (0..1) multiplies the paint alpha.
+    /// Optional per-shape "opacity" (0..1) multiplies the paint alpha. A closed shape with
+    /// neither fill nor stroke is filled black.
+    ///
+    /// Everything wrong with a spec is an error naming the shape, collected before anything is
+    /// drawn. The caller is a model that never sees the sprite: a shape that silently draws
+    /// nothing — an unknown type, a colour name, an arc command — comes back as a successful
+    /// import with a hole in it, and nothing in the answer says which shape went missing.
     /// </summary>
     public static class SpriteRasterizer
     {
         public const int DefaultSupersample = 4;
+
+        /// <summary>Problems reported per spec; past this a model has enough to start fixing.</summary>
+        private const int MaxReportedProblems = 8;
+
+        private const string SupportedShapes = "ellipse (or circle), rect (or rectangle), polygon, polyline, line, path";
 
         public static byte[] RenderToPng(JsonElement spec, int targetWidth, int targetHeight,
             int supersample = DefaultSupersample)
@@ -77,6 +91,48 @@ namespace AkerMcp.Server
             var transform = Matrix3x2.CreateScale(sx, sy);
             float strokeScale = (sx + sy) / 2f;
 
+            // Every shape is built — and every problem found — before a pixel is drawn.
+            var problems = new List<string>();
+            Color? background = null;
+            if (spec.TryGetProperty("background", out var bgEl))
+            {
+                try { background = ParseColorValue(bgEl, 1.0, "background"); }
+                catch (ArgumentException ex) { problems.Add($"background: {ex.Message}"); }
+            }
+
+            var ops = new List<DrawOp>();
+            if (spec.TryGetProperty("shapes", out var shapes) && shapes.ValueKind != JsonValueKind.Null)
+            {
+                if (shapes.ValueKind != JsonValueKind.Array)
+                {
+                    problems.Add("'shapes' must be an array of shape objects");
+                }
+                else
+                {
+                    int index = 0;
+                    foreach (var shape in shapes.EnumerateArray())
+                    {
+                        index++;
+                        try
+                        {
+                            var op = BuildShape(shape, transform, strokeScale);
+                            if (op != null) ops.Add(op);
+                        }
+                        catch (Exception ex) when (ex is ArgumentException or FormatException or InvalidOperationException)
+                        {
+                            problems.Add($"shape {index}{Label(shape)}: {ex.Message}");
+                        }
+                    }
+                }
+            }
+
+            if (problems.Count > 0)
+            {
+                var shown = string.Join("; ", problems.Take(MaxReportedProblems));
+                var more = problems.Count > MaxReportedProblems ? $" (and {problems.Count - MaxReportedProblems} more)" : "";
+                throw new ArgumentException($"The shape-spec has problems: {shown}{more}.");
+            }
+
             using var image = new Image<Rgba32>(renderW, renderH, Color.Transparent);
 
             // Antialiasing is on by default; SSAA on top gives crisp vector-like edges.
@@ -87,14 +143,12 @@ namespace AkerMcp.Server
 
             image.Mutate(ctx =>
             {
-                if (TryGetString(spec, "background", out var bg) && !string.IsNullOrWhiteSpace(bg))
-                    ctx.Fill(ParseColor(bg, 1.0));
-
-                if (!spec.TryGetProperty("shapes", out var shapes) || shapes.ValueKind != JsonValueKind.Array)
-                    return;
-
-                foreach (var shape in shapes.EnumerateArray())
-                    DrawShape(ctx, drawOpts, shape, transform, strokeScale);
+                if (background is Color bg) ctx.Fill(bg);
+                foreach (var op in ops)
+                {
+                    if (op.Fill != null) ctx.Fill(drawOpts, op.Fill, op.Path);
+                    if (op.Stroke != null) ctx.Draw(drawOpts, op.Stroke, op.Path);
+                }
             });
 
             if (supersample > 1)
@@ -116,70 +170,97 @@ namespace AkerMcp.Server
             return outStream.ToArray();
         }
 
-        private static void DrawShape(IImageProcessingContext ctx, DrawingOptions opts,
-            JsonElement shape, Matrix3x2 transform, float strokeScale)
-        {
-            var type = TryGetString(shape, "type", out var t) ? t!.ToLowerInvariant() : "";
-            double opacity = GetDouble(shape, "opacity", 1.0);
+        /// <summary>One shape, ready to draw: its outline in render pixels and what paints it.</summary>
+        private sealed record DrawOp(IPath Path, Brush? Fill, Pen? Stroke);
 
-            IPath? path = type switch
+        private static string Label(JsonElement shape)
+            => TryGetString(shape, "type", out var t) && !string.IsNullOrWhiteSpace(t) ? $" ({t})" : "";
+
+        /// <summary>
+        /// The outline and the paints of one shape, or null when it explicitly paints nothing
+        /// ("fill":"none" and no stroke). Throws <see cref="ArgumentException"/> for anything
+        /// it cannot draw as asked.
+        /// </summary>
+        private static DrawOp? BuildShape(JsonElement shape, Matrix3x2 transform, float strokeScale)
+        {
+            if (shape.ValueKind != JsonValueKind.Object)
+                throw new ArgumentException("a shape must be a JSON object with a \"type\"");
+
+            if (!TryGetString(shape, "type", out var t) || string.IsNullOrWhiteSpace(t))
+                throw new ArgumentException($"no \"type\"; use one of {SupportedShapes}");
+            var type = t!.Trim().ToLowerInvariant();
+            double opacity = Math.Clamp(GetDouble(shape, "opacity", 1.0), 0, 1);
+
+            IPath path = type switch
             {
                 "ellipse" or "circle" => BuildEllipse(shape),
                 "rect" or "rectangle" => BuildRect(shape),
                 "polygon" => BuildPolygon(shape, closed: true),
                 "polyline" or "line" => BuildPolygon(shape, closed: false),
                 "path" => BuildPath(shape),
-                _ => null
+                _ => throw new ArgumentException($"unknown type '{t}'; use one of {SupportedShapes}"),
             };
-            if (path == null) return;
-
             path = path.Transform(transform);
 
-            // Fill (skip for open lines/polylines unless an explicit fill is given).
-            bool isOpen = type is "polyline" or "line";
-            if (shape.TryGetProperty("fill", out var fill) && fill.ValueKind != JsonValueKind.Null)
+            bool hasFill = shape.TryGetProperty("fill", out var fillEl);
+            bool hasStroke = shape.TryGetProperty("stroke", out var strokeEl);
+
+            Brush? fill = hasFill ? ParseBrush(fillEl, opacity, transform, "fill") : null;
+
+            Pen? stroke = null;
+            if (hasStroke)
             {
-                var brush = ParseBrush(fill, opacity, transform);
-                if (brush != null)
-                    ctx.Fill(opts, brush, path);
-            }
-            else if (!isOpen && type != "path")
-            {
-                // Default solid black fill keeps simple specs (just geometry) visible.
-                // Paths and open lines must opt in via "fill"/"stroke".
+                var strokeBrush = ParseBrush(strokeEl, opacity, transform, "stroke");
+                double w = GetDouble(shape, "strokeWidth", 1.0) * strokeScale;
+                if (strokeBrush != null && w > 0)
+                    stroke = Pens.Solid(strokeBrush, (float)w);
             }
 
-            // Stroke.
-            if (TryGetString(shape, "stroke", out var strokeHex) && !string.IsNullOrWhiteSpace(strokeHex))
+            if (!hasFill && !hasStroke)
             {
-                double w = GetDouble(shape, "strokeWidth", 1.0) * strokeScale;
-                if (w > 0)
-                    ctx.Draw(opts, Pens.Solid(ParseColor(strokeHex!, opacity), (float)w), path);
+                // Bare geometry is drawn in black, so a spec that is only shapes still shows
+                // them. An open line or a path has no inside to fill the way a model means it —
+                // a filled polyline is a wedge — so those have to say how they are painted.
+                bool isOpen = type is "polyline" or "line";
+                if (isOpen || type == "path")
+                    throw new ArgumentException(
+                        $"has neither \"fill\" nor \"stroke\", so it would draw nothing; give it a " +
+                        (isOpen ? "\"stroke\" (and \"strokeWidth\")" : "\"fill\" or a \"stroke\""));
+                fill = new SolidBrush(ApplyOpacity(Color.Black, opacity));
             }
+
+            return fill == null && stroke == null ? null : new DrawOp(path, fill, stroke);
         }
 
         private static IPath BuildEllipse(JsonElement s)
         {
             float cx = (float)GetDouble(s, "cx", 0);
             float cy = (float)GetDouble(s, "cy", 0);
-            float rx = (float)GetDouble(s, "rx", GetDouble(s, "r", 0));
-            float ry = (float)GetDouble(s, "ry", GetDouble(s, "r", 0));
-            return new EllipsePolygon(cx, cy, rx, ry);
+            double r = GetDouble(s, "r", 0);
+            double rx = GetDouble(s, "rx", r);
+            double ry = GetDouble(s, "ry", r);
+            // EllipsePolygon throws ArgumentOutOfRangeException for a zero radius, which used to
+            // fail the whole sprite with a message about a parameter nobody wrote.
+            if (rx <= 0 || ry <= 0)
+                throw new ArgumentException($"rx and ry (or r) must be positive, got rx {F(rx)} and ry {F(ry)}");
+            return new EllipsePolygon(cx, cy, (float)rx, (float)ry);
         }
 
         private static IPath BuildRect(JsonElement s)
         {
             float x = (float)GetDouble(s, "x", 0);
             float y = (float)GetDouble(s, "y", 0);
-            float w = (float)GetDouble(s, "w", GetDouble(s, "width", 0));
-            float h = (float)GetDouble(s, "h", GetDouble(s, "height", 0));
+            double w = GetDouble(s, "w", GetDouble(s, "width", 0));
+            double h = GetDouble(s, "h", GetDouble(s, "height", 0));
+            if (w <= 0 || h <= 0)
+                throw new ArgumentException($"w and h must be positive, got w {F(w)} and h {F(h)}");
             float r = (float)GetDouble(s, "rx", GetDouble(s, "r", 0));
 
             if (r <= 0)
-                return new RectangularPolygon(x, y, w, h);
+                return new RectangularPolygon(x, y, (float)w, (float)h);
 
-            r = Math.Min(r, Math.Min(w, h) / 2f);
-            return BuildRoundedRect(x, y, w, h, r);
+            r = Math.Min(r, (float)Math.Min(w, h) / 2f);
+            return BuildRoundedRect(x, y, (float)w, (float)h, r);
         }
 
         // ImageSharp.Drawing has no rounded-rect primitive; compose one from 4 corner
@@ -200,10 +281,13 @@ namespace AkerMcp.Server
             return pb.Build();
         }
 
-        private static IPath? BuildPolygon(JsonElement s, bool closed)
+        private static IPath BuildPolygon(JsonElement s, bool closed)
         {
             var pts = ParsePoints(s);
-            if (pts.Count < 2) return null;
+            int needed = closed ? 3 : 2;
+            if (pts.Count < needed)
+                throw new ArgumentException(
+                    $"needs at least {needed} points in \"points\" ([[x,y],...]), got {pts.Count}");
             if (closed)
                 return new Polygon(new LinearLineSegment(pts.ToArray()));
 
@@ -215,132 +299,172 @@ namespace AkerMcp.Server
         private static List<PointF> ParsePoints(JsonElement s)
         {
             var result = new List<PointF>();
-            if (!s.TryGetProperty("points", out var pts) || pts.ValueKind != JsonValueKind.Array)
+            if (!s.TryGetProperty("points", out var pts) || pts.ValueKind == JsonValueKind.Null)
                 return result;
+            if (pts.ValueKind != JsonValueKind.Array)
+                throw new ArgumentException("\"points\" must be an array of [x,y] pairs");
 
+            // A point that is not two numbers is named, rather than read as 0: GetDouble on a
+            // string threw InvalidOperationException and failed the sprite, and a one-element
+            // pair quietly put its point on the top edge.
+            int i = 0;
             foreach (var p in pts.EnumerateArray())
             {
-                if (p.ValueKind == JsonValueKind.Array)
+                if (p.ValueKind == JsonValueKind.Array && p.GetArrayLength() == 2
+                    && p[0].ValueKind == JsonValueKind.Number && p[1].ValueKind == JsonValueKind.Number)
                 {
-                    var arr = p.EnumerateArray();
-                    float px = 0, py = 0; int i = 0;
-                    foreach (var c in arr)
-                    {
-                        if (i == 0) px = (float)c.GetDouble();
-                        else if (i == 1) py = (float)c.GetDouble();
-                        i++;
-                    }
-                    result.Add(new PointF(px, py));
+                    result.Add(new PointF((float)p[0].GetDouble(), (float)p[1].GetDouble()));
                 }
-                else if (p.ValueKind == JsonValueKind.Object)
+                else if (p.ValueKind == JsonValueKind.Object
+                         && p.TryGetProperty("x", out var px) && px.ValueKind == JsonValueKind.Number
+                         && p.TryGetProperty("y", out var py) && py.ValueKind == JsonValueKind.Number)
                 {
-                    result.Add(new PointF((float)GetDouble(p, "x", 0), (float)GetDouble(p, "y", 0)));
+                    result.Add(new PointF((float)px.GetDouble(), (float)py.GetDouble()));
                 }
+                else
+                {
+                    throw new ArgumentException(
+                        $"point {i} is {Abbreviate(p.GetRawText())}; a point is [x,y] or {{\"x\":..,\"y\":..}} with numbers");
+                }
+                i++;
             }
             return result;
         }
 
-        // Minimal SVG path-data subset: M/m L/l H/h V/v C/c Q/q Z/z.
-        // Returns null on malformed input rather than throwing, so a bad spec degrades
-        // to "nothing drawn" instead of failing the whole sprite.
-        private static IPath? BuildPath(JsonElement s)
+        private static IPath BuildPath(JsonElement s)
         {
             if (!TryGetString(s, "d", out var d) || string.IsNullOrWhiteSpace(d))
-                return null;
-            return BuildPathStructured(d!);
+                throw new ArgumentException("needs path data in \"d\", e.g. \"M0 0 L10 0 L5 8 Z\"");
+            return BuildPathData(d!);
         }
 
-        private static IPath? BuildPathStructured(string d)
+        internal const string SupportedPathCommands = "M L H V C Q Z (lowercase for relative)";
+
+        /// <summary>
+        /// The SVG path-data subset: M/m L/l H/h V/v C/c Q/q Z/z. Anything else is an error that
+        /// says so: it used to return null, and an arc or a smooth curve drew nothing at all
+        /// while the import reported success.
+        /// </summary>
+        internal static IPath BuildPathData(string d)
         {
-            try
-            {
-                var pb = new PathBuilder();
-                var reader = new PathReader(d);
-                PointF cur = PointF.Empty;
-                PointF startPt = PointF.Empty;
-                bool open = false;
-                char cmd;
+            var pb = new PathBuilder();
+            var reader = new PathReader(d);
+            PointF cur = PointF.Empty;
+            PointF startPt = PointF.Empty;
+            bool open = false;
+            bool any = false;
 
-                while (reader.TryReadCommand(out cmd))
-                {
-                    bool rel = char.IsLower(cmd);
-                    switch (char.ToUpperInvariant(cmd))
-                    {
-                        case 'M':
-                            {
-                                var p = reader.ReadPoint();
-                                cur = rel ? new PointF(cur.X + p.X, cur.Y + p.Y) : p;
-                                pb.StartFigure(); open = true; startPt = cur;
-                                // Subsequent implicit pairs are treated as L.
-                                while (reader.HasNumber)
-                                {
-                                    var p2 = reader.ReadPoint();
-                                    var np = rel ? new PointF(cur.X + p2.X, cur.Y + p2.Y) : p2;
-                                    pb.AddLine(cur, np); cur = np;
-                                }
-                                break;
-                            }
-                        case 'L':
-                            while (reader.HasNumber)
-                            {
-                                var p = reader.ReadPoint();
-                                var np = rel ? new PointF(cur.X + p.X, cur.Y + p.Y) : p;
-                                if (!open) { pb.StartFigure(); open = true; startPt = cur; }
-                                pb.AddLine(cur, np); cur = np;
-                            }
-                            break;
-                        case 'H':
-                            while (reader.HasNumber)
-                            {
-                                float x = reader.ReadNumber();
-                                var np = new PointF(rel ? cur.X + x : x, cur.Y);
-                                pb.AddLine(cur, np); cur = np;
-                            }
-                            break;
-                        case 'V':
-                            while (reader.HasNumber)
-                            {
-                                float y = reader.ReadNumber();
-                                var np = new PointF(cur.X, rel ? cur.Y + y : y);
-                                pb.AddLine(cur, np); cur = np;
-                            }
-                            break;
-                        case 'C':
-                            while (reader.HasNumber)
-                            {
-                                var c1 = reader.ReadPoint(); var c2 = reader.ReadPoint(); var e = reader.ReadPoint();
-                                var pc1 = rel ? new PointF(cur.X + c1.X, cur.Y + c1.Y) : c1;
-                                var pc2 = rel ? new PointF(cur.X + c2.X, cur.Y + c2.Y) : c2;
-                                var pe = rel ? new PointF(cur.X + e.X, cur.Y + e.Y) : e;
-                                pb.AddCubicBezier(cur, pc1, pc2, pe); cur = pe;
-                            }
-                            break;
-                        case 'Q':
-                            while (reader.HasNumber)
-                            {
-                                var c = reader.ReadPoint(); var e = reader.ReadPoint();
-                                var pc = rel ? new PointF(cur.X + c.X, cur.Y + c.Y) : c;
-                                var pe = rel ? new PointF(cur.X + e.X, cur.Y + e.Y) : e;
-                                pb.AddQuadraticBezier(cur, pc, pe); cur = pe;
-                            }
-                            break;
-                        case 'Z':
-                            if (open) { pb.CloseFigure(); open = false; cur = startPt; }
-                            break;
-                        default:
-                            return null; // unsupported command
-                    }
-                }
-                return pb.Build();
-            }
-            catch
+            // After a Z — or at the very start — the next drawing command begins a new subpath at
+            // the current point. Only M and L used to do that, so in "M2 2 H10 V10 Z H20 V20 Z" the
+            // second square's segments joined no figure and its Z, seeing nothing open, was dropped.
+            void EnsureFigure()
             {
-                return null;
+                if (open) return;
+                pb.StartFigure();
+                open = true;
+                startPt = cur;
             }
+
+            PointF Next(PointF p, bool rel) => rel ? new PointF(cur.X + p.X, cur.Y + p.Y) : p;
+
+            if (!reader.AtEnd && !reader.AtCommand)
+                throw new ArgumentException($"path data must start with a command such as M, not '{reader.Peek}'");
+
+            while (reader.TryReadCommand(out char cmd))
+            {
+                bool rel = char.IsLower(cmd);
+                switch (char.ToUpperInvariant(cmd))
+                {
+                    case 'M':
+                    {
+                        var p = reader.ReadPoint(cmd);
+                        cur = Next(p, rel);
+                        pb.StartFigure(); open = true; startPt = cur;
+                        // Subsequent implicit pairs are treated as L.
+                        while (reader.HasNumber)
+                        {
+                            var np = Next(reader.ReadPoint(cmd), rel);
+                            pb.AddLine(cur, np); cur = np; any = true;
+                        }
+                        break;
+                    }
+                    case 'L':
+                        do
+                        {
+                            var np = Next(reader.ReadPoint(cmd), rel);
+                            EnsureFigure();
+                            pb.AddLine(cur, np); cur = np; any = true;
+                        } while (reader.HasNumber);
+                        break;
+                    case 'H':
+                        do
+                        {
+                            float x = reader.ReadNumber(cmd);
+                            var np = new PointF(rel ? cur.X + x : x, cur.Y);
+                            EnsureFigure();
+                            pb.AddLine(cur, np); cur = np; any = true;
+                        } while (reader.HasNumber);
+                        break;
+                    case 'V':
+                        do
+                        {
+                            float y = reader.ReadNumber(cmd);
+                            var np = new PointF(cur.X, rel ? cur.Y + y : y);
+                            EnsureFigure();
+                            pb.AddLine(cur, np); cur = np; any = true;
+                        } while (reader.HasNumber);
+                        break;
+                    case 'C':
+                        do
+                        {
+                            var c1 = Next(reader.ReadPoint(cmd), rel);
+                            var c2 = Next(reader.ReadPoint(cmd), rel);
+                            var e = Next(reader.ReadPoint(cmd), rel);
+                            EnsureFigure();
+                            pb.AddCubicBezier(cur, c1, c2, e); cur = e; any = true;
+                        } while (reader.HasNumber);
+                        break;
+                    case 'Q':
+                        do
+                        {
+                            var c = Next(reader.ReadPoint(cmd), rel);
+                            var e = Next(reader.ReadPoint(cmd), rel);
+                            EnsureFigure();
+                            pb.AddQuadraticBezier(cur, c, e); cur = e; any = true;
+                        } while (reader.HasNumber);
+                        break;
+                    case 'Z':
+                        if (open) { pb.CloseFigure(); open = false; cur = startPt; }
+                        break;
+                    case 'A':
+                    case 'S':
+                    case 'T':
+                        throw new ArgumentException(
+                            $"path command '{cmd}' is not supported; supported: {SupportedPathCommands}. " +
+                            (char.ToUpperInvariant(cmd) == 'A'
+                                ? "Approximate an arc with C curves, or use an ellipse shape."
+                                : "Write the smooth curve out as C or Q with its control point."));
+                    default:
+                        throw new ArgumentException(
+                            $"'{cmd}' is not an SVG path command; supported: {SupportedPathCommands}");
+                }
+
+                if (!reader.AtEnd && !reader.AtCommand)
+                    throw new ArgumentException($"unexpected '{reader.Peek}' after the '{cmd}' command in the path data");
+            }
+
+            if (!any)
+                throw new ArgumentException("the path data draws no segment (it needs an L, H, V, C or Q after the M)");
+            return pb.Build();
         }
 
-        // Lightweight number/command reader for SVG path data.
-        private sealed class PathReader
+        /// <summary>
+        /// Number/command reader for SVG path data, following the SVG number grammar: a
+        /// number has at most one decimal point and one exponent, so ".5.5" is two numbers
+        /// (0.5 and 0.5) and "1-2" is two as well. It used to read ".5.5" as one and fail to
+        /// parse it, which dropped the whole path.
+        /// </summary>
+        internal sealed class PathReader
         {
             private readonly string _s;
             private int _i;
@@ -351,10 +475,15 @@ namespace AkerMcp.Server
                 while (_i < _s.Length && (char.IsWhiteSpace(_s[_i]) || _s[_i] == ',')) _i++;
             }
 
+            public bool AtEnd { get { SkipSep(); return _i >= _s.Length; } }
+
+            public bool AtCommand { get { SkipSep(); return _i < _s.Length && char.IsLetter(_s[_i]); } }
+
+            public char Peek { get { SkipSep(); return _i < _s.Length ? _s[_i] : '\0'; } }
+
             public bool TryReadCommand(out char cmd)
             {
-                SkipSep();
-                if (_i < _s.Length && char.IsLetter(_s[_i])) { cmd = _s[_i++]; return true; }
+                if (AtCommand) { cmd = _s[_i++]; return true; }
                 cmd = '\0';
                 return false;
             }
@@ -368,67 +497,147 @@ namespace AkerMcp.Server
                 }
             }
 
-            public float ReadNumber()
+            public float ReadNumber(char command = '\0')
             {
                 SkipSep();
                 int start = _i;
                 if (_i < _s.Length && (_s[_i] == '-' || _s[_i] == '+')) _i++;
-                while (_i < _s.Length && (char.IsDigit(_s[_i]) || _s[_i] == '.' || _s[_i] == 'e' || _s[_i] == 'E'
-                       || ((_s[_i] == '-' || _s[_i] == '+') && (_s[_i - 1] == 'e' || _s[_i - 1] == 'E'))))
+
+                int digits = 0;
+                while (_i < _s.Length && char.IsDigit(_s[_i])) { _i++; digits++; }
+                if (_i < _s.Length && _s[_i] == '.')
+                {
                     _i++;
-                return float.Parse(_s.Substring(start, _i - start), CultureInfo.InvariantCulture);
+                    while (_i < _s.Length && char.IsDigit(_s[_i])) { _i++; digits++; }
+                }
+                // An exponent only when digits follow it, so a stray 'e' is reported where it is.
+                if (digits > 0 && _i < _s.Length && (_s[_i] == 'e' || _s[_i] == 'E'))
+                {
+                    int mark = _i++;
+                    if (_i < _s.Length && (_s[_i] == '-' || _s[_i] == '+')) _i++;
+                    if (_i < _s.Length && char.IsDigit(_s[_i]))
+                        while (_i < _s.Length && char.IsDigit(_s[_i])) _i++;
+                    else
+                        _i = mark;
+                }
+
+                if (digits == 0)
+                {
+                    var found = start < _s.Length ? $"'{_s[start]}'" : "the end of the data";
+                    var after = command != '\0' ? $" for '{command}'" : "";
+                    throw new ArgumentException($"expected a number{after} in the path data at position {start}, found {found}");
+                }
+                return float.Parse(_s.AsSpan(start, _i - start), NumberStyles.Float, CultureInfo.InvariantCulture);
             }
 
-            public PointF ReadPoint() => new PointF(ReadNumber(), ReadNumber());
+            public PointF ReadPoint(char command = '\0') => new PointF(ReadNumber(command), ReadNumber(command));
         }
 
         // ---- paint / color helpers ----
 
-        private static Brush? ParseBrush(JsonElement paint, double opacity, Matrix3x2 transform)
+        /// <summary>A fill or stroke: a colour, a gradient, or null for "none".</summary>
+        private static Brush? ParseBrush(JsonElement paint, double opacity, Matrix3x2 transform, string what)
         {
-            if (paint.ValueKind == JsonValueKind.String)
-                return new SolidBrush(ParseColor(paint.GetString()!, opacity));
-
-            if (paint.ValueKind == JsonValueKind.Object)
+            if (paint.ValueKind != JsonValueKind.Object)
             {
-                var kind = TryGetString(paint, "gradient", out var g) ? g!.ToLowerInvariant() : "linear";
-                if (kind == "linear")
-                {
-                    var p1 = Vector2.Transform(new Vector2(
-                        (float)GetDouble(paint, "x1", 0), (float)GetDouble(paint, "y1", 0)), transform);
-                    var p2 = Vector2.Transform(new Vector2(
-                        (float)GetDouble(paint, "x2", 0), (float)GetDouble(paint, "y2", 0)), transform);
+                var color = ParseColorValue(paint, opacity, what);
+                return color is Color c ? new SolidBrush(c) : null;
+            }
 
-                    var stops = new List<ColorStop>();
-                    if (paint.TryGetProperty("stops", out var arr) && arr.ValueKind == JsonValueKind.Array)
-                    {
-                        foreach (var st in arr.EnumerateArray())
-                        {
-                            float off = (float)GetDouble(st, "offset", 0);
-                            var col = TryGetString(st, "color", out var c) ? ParseColor(c!, opacity) : Color.Black;
-                            stops.Add(new ColorStop(Math.Clamp(off, 0f, 1f), col));
-                        }
-                    }
-                    if (stops.Count == 0) return null;
-                    return new LinearGradientBrush(new PointF(p1.X, p1.Y), new PointF(p2.X, p2.Y),
-                        GradientRepetitionMode.None, stops.ToArray());
+            var kind = TryGetString(paint, "gradient", out var g) ? g!.Trim().ToLowerInvariant() : "linear";
+            if (kind != "linear")
+                throw new ArgumentException(
+                    $"{what}: gradient '{g}' is not supported; only \"linear\" is (x1,y1 to x2,y2 with stops)");
+
+            var p1 = Vector2.Transform(new Vector2(
+                (float)GetDouble(paint, "x1", 0), (float)GetDouble(paint, "y1", 0)), transform);
+            var p2 = Vector2.Transform(new Vector2(
+                (float)GetDouble(paint, "x2", 0), (float)GetDouble(paint, "y2", 0)), transform);
+
+            var stops = new List<ColorStop>();
+            if (paint.TryGetProperty("stops", out var arr) && arr.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var st in arr.EnumerateArray())
+                {
+                    float off = (float)GetDouble(st, "offset", 0);
+                    // A stop that is "none"/"transparent" fades to nothing, which is what a
+                    // gradient to transparent means — not a stop that is not there.
+                    var col = st.ValueKind == JsonValueKind.Object && st.TryGetProperty("color", out var c)
+                        ? ParseColorValue(c, opacity, $"{what} gradient stop") ?? Color.Transparent
+                        : Color.Black;
+                    stops.Add(new ColorStop(Math.Clamp(off, 0f, 1f), col));
                 }
             }
-            return null;
+            if (stops.Count == 0)
+                throw new ArgumentException($"{what}: a gradient needs \"stops\", e.g. [{{\"offset\":0,\"color\":\"#fff\"}},{{\"offset\":1,\"color\":\"#888\"}}]");
+            return new LinearGradientBrush(new PointF(p1.X, p1.Y), new PointF(p2.X, p2.Y),
+                GradientRepetitionMode.None, stops.ToArray());
         }
 
-        private static Color ParseColor(string hex, double opacity)
+        /// <summary>A colour from JSON: null and "none"/"transparent"/"" mean no paint (null).</summary>
+        private static Color? ParseColorValue(JsonElement value, double opacity, string what)
         {
-            hex = hex.Trim();
-            if (hex.StartsWith("#")) hex = hex.Substring(1);
-            var color = Color.ParseHex(hex);
-            if (opacity < 1.0)
+            if (value.ValueKind == JsonValueKind.Null) return null;
+            if (value.ValueKind != JsonValueKind.String)
+                throw new ArgumentException($"{what} must be a colour string such as \"#FFCC00\" or \"red\", got {Abbreviate(value.GetRawText())}");
+            return ParseColor(value.GetString()!, opacity, what);
+        }
+
+        /// <summary>
+        /// Hex, a CSS colour name, rgb()/rgba(), or "none"/"transparent" (null: no paint). A
+        /// colour name or "none" used to reach Color.ParseHex and fail the whole sprite, for
+        /// the spelling every SVG example on the web uses.
+        /// </summary>
+        internal static Color? ParseColor(string text, double opacity, string what = "colour")
+        {
+            var s = text.Trim();
+            if (s.Length == 0 || s.Equals("none", StringComparison.OrdinalIgnoreCase)
+                || s.Equals("transparent", StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            Color color;
+            if (s.StartsWith("rgb", StringComparison.OrdinalIgnoreCase))
+                color = ParseRgbFunction(s, what);
+            else if (!Color.TryParse(s.StartsWith('#') ? s.Substring(1) : s, out color))
+                throw new ArgumentException(
+                    $"{what} '{text}' is not a colour; use hex (#rgb, #rrggbb, #rrggbbaa), a CSS name such as " +
+                    "\"red\", rgb(r,g,b), rgba(r,g,b,a), or \"none\"");
+            return ApplyOpacity(color, opacity);
+        }
+
+        private static Color ApplyOpacity(Color color, double opacity)
+        {
+            if (opacity >= 1.0) return color;
+            var p = color.ToPixel<Rgba32>();
+            p.A = (byte)Math.Clamp(p.A * opacity, 0, 255);
+            return Color.FromPixel(p);
+        }
+
+        /// <summary>rgb(255, 0, 0), rgba(255,0,0,0.5), rgb(100% 0% 0% / 50%): CSS's functional notation.</summary>
+        private static Color ParseRgbFunction(string s, string what)
+        {
+            int open = s.IndexOf('('), close = s.LastIndexOf(')');
+            var name = open > 0 ? s.Substring(0, open).Trim().ToLowerInvariant() : "";
+            if ((name != "rgb" && name != "rgba") || close < open || close != s.Length - 1)
+                throw new ArgumentException($"{what} '{s}' is not rgb(r,g,b) or rgba(r,g,b,a)");
+
+            var parts = s.Substring(open + 1, close - open - 1)
+                         .Split(new[] { ',', ' ', '/', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length is not (3 or 4))
+                throw new ArgumentException($"{what} '{s}' needs three channels and an optional alpha");
+
+            byte Channel(string part, bool alpha)
             {
-                var p = color.ToPixel<Rgba32>();
-                p.A = (byte)Math.Clamp(p.A * opacity, 0, 255);
-                color = Color.FromPixel(p);
+                bool percent = part.EndsWith('%');
+                var number = percent ? part.Substring(0, part.Length - 1) : part;
+                if (!double.TryParse(number, NumberStyles.Float, CultureInfo.InvariantCulture, out var v))
+                    throw new ArgumentException($"{what} '{s}': '{part}' is not a number");
+                double unit = percent ? v / 100.0 : (alpha ? v : v / 255.0);
+                return (byte)Math.Round(Math.Clamp(unit, 0, 1) * 255);
             }
-            return color;
+
+            byte a = parts.Length == 4 ? Channel(parts[3], alpha: true) : (byte)255;
+            return Color.FromPixel(new Rgba32(Channel(parts[0], false), Channel(parts[1], false), Channel(parts[2], false), a));
         }
 
         // ---- JSON helpers ----
@@ -452,5 +661,9 @@ namespace AkerMcp.Server
             }
             return false;
         }
+
+        private static string F(double v) => v.ToString("0.###", CultureInfo.InvariantCulture);
+
+        private static string Abbreviate(string raw) => raw.Length <= 40 ? raw : raw.Substring(0, 37) + "...";
     }
 }
