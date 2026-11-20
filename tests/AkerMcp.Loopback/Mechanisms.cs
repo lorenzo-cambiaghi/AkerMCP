@@ -19,6 +19,7 @@ namespace AkerMcp.Loopback
         public static async Task Run(Func<string, object, Task<ToolResult>> call, Action<string, bool, string?> check)
         {
             MediaMechanisms.Run(check);
+            await ValueMechanisms.Run(check);
             Serializer(check);
             Resolver(check);
             SharedTwins(check);

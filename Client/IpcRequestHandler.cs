@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using AkerMcp.Shared.Abstraction;
@@ -35,10 +38,13 @@ namespace AkerMcp.Client
         private readonly GenericSerializer _serializer;
         private readonly ClientConfiguration _config;
 
+        // Named floating-point literals: a default argument of -Infinity (Animator.Play's normalizedTime) or an infinite
+        // value in an inspection threw on the way out, and the whole reply was lost to one number.
         private readonly JsonSerializerOptions _jsonOptions = new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            PropertyNameCaseInsensitive = true
+            PropertyNameCaseInsensitive = true,
+            NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals
         };
 
         // For tool outputs where null fields are pure noise (e.g. execute results).
@@ -46,8 +52,20 @@ namespace AkerMcp.Client
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             PropertyNameCaseInsensitive = true,
-            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+            NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
         };
+
+        /// <summary>
+        /// A request the handler refuses as such — an object that does not exist, a path outside the project, a tool the
+        /// plugin switched off — answered as an error response, with no stack frame: a reply that succeeded while carrying
+        /// "Object not found" read as success to the server and to the agent.
+        /// </summary>
+        private sealed class RequestFailure : Exception
+        {
+            public RequestFailure(string message, string? code = null) : base(message) => Code = code;
+            public string? Code { get; }
+        }
 
         public IpcRequestHandler(
             ISceneGraph sceneGraph,
@@ -124,7 +142,8 @@ namespace AkerMcp.Client
                     IpcConstants.Methods.Create => await HandleCreate(request, ct),
                     IpcConstants.Methods.Delete => await HandleDelete(request, ct),
                     IpcConstants.Methods.GetSceneHierarchy => await HandleGetSceneHierarchy(ct),
-                    IpcConstants.Methods.GetProjectInfo => HandleGetProjectInfo(),
+                    // On the main thread: it reads the editor (Unity's GetActiveScene throws on any other thread).
+                    IpcConstants.Methods.GetProjectInfo => await _dispatcher.RunOnMainThread(HandleGetProjectInfo, ct),
                     IpcConstants.Methods.GetRecentLogs => HandleGetRecentLogs(),
                     IpcConstants.Methods.GetEngineTypes => HandleGetEngineTypes(),
                     IpcConstants.Methods.RefreshScripts => await HandleRefreshScripts(request, ct),
@@ -155,6 +174,12 @@ namespace AkerMcp.Client
                 };
 
                 return IpcResponse.Ok(request.Id, Encoding.UTF8.GetBytes(result));
+            }
+            catch (RequestFailure refused)
+            {
+                return refused.Code != null
+                    ? IpcResponse.FailWithCode(request.Id, refused.Code, refused.Message)
+                    : IpcResponse.Fail(request.Id, refused.Message);
             }
             catch (Exception ex)
             {
@@ -341,12 +366,18 @@ namespace AkerMcp.Client
                 // GetProjectPath returns a directory on Unity/Godot but the .sln file on
                 // Stride — normalize to a directory either way.
                 var root = _editorContext.GetProjectPath();
+                if (string.IsNullOrWhiteSpace(root))
+                    throw new RequestFailure("write_script: the editor reports no project path, so there is nowhere to write.");
                 if (System.IO.File.Exists(root))
                     root = System.IO.Path.GetDirectoryName(root) ?? root;
+                root = System.IO.Path.GetFullPath(root);
 
-                var full = System.IO.Path.IsPathRooted(rel)
+                // Resolved before it is checked: "../../x.cs" and an absolute path wrote anywhere the editor could reach.
+                var full = System.IO.Path.GetFullPath(System.IO.Path.IsPathRooted(rel)
                     ? rel
-                    : System.IO.Path.Combine(root, rel);
+                    : System.IO.Path.Combine(root, rel));
+                if (!IsInside(full, root))
+                    throw new RequestFailure($"write_script refuses '{rel}': it resolves to {full}, outside the project at {root}.");
 
                 var dir = System.IO.Path.GetDirectoryName(full);
                 if (!string.IsNullOrEmpty(dir))
@@ -355,6 +386,21 @@ namespace AkerMcp.Client
 
                 return JsonSerializer.Serialize(new { written = true, path = full }, _compactJsonOptions);
             }, ct);
+        }
+
+        /// <summary>
+        /// <paramref name="path"/> lies under <paramref name="root"/> (both full paths). The comparison ignores case where
+        /// the file system does — Windows, and macOS by default — or an absolute path into the project typed in another case
+        /// (c:\proj against C:\Proj) would be refused.
+        /// </summary>
+        private static bool IsInside(string path, string root)
+        {
+            var comparison = RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+            var prefix = root.EndsWith(System.IO.Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal)
+                         || root.EndsWith(System.IO.Path.AltDirectorySeparatorChar.ToString(), StringComparison.Ordinal)
+                ? root
+                : root + System.IO.Path.DirectorySeparatorChar;
+            return path.StartsWith(prefix, comparison);
         }
 
         private async Task<string> HandleInspect(IpcRequest request, CancellationToken ct)
@@ -374,10 +420,7 @@ namespace AkerMcp.Client
                 {
                     var type = _capabilities.ResolveType(target);
                     if (type != null)
-                    {
-                        var typeResult = _inspector.InspectType(type, includeMethods, filter);
-                        return CapOutput(JsonSerializer.Serialize(typeResult, _jsonOptions));
-                    }
+                        return CapInspection(_inspector.InspectType(type, includeMethods, filter));
                     return ErrorJson($"Object not found: {target}");
                 }
 
@@ -390,13 +433,13 @@ namespace AkerMcp.Client
                 // not DISCOVER. Depth > 1 stays reflective on purpose: nested expansion is a
                 // power ask the declared surface does not model.
                 if (depth == 1 && DeclaredSurface(node, includeMethods, filter) is { } declared)
-                    return CapOutput(JsonSerializer.Serialize(WithWireValues(declared), _jsonOptions));
+                    return CapInspection(WithWireValues(declared));
 
                 var result = _inspector.Inspect(node.UnderlyingObject, depth, includeMethods, filter);
                 result.Path = node.Path;
                 result.Components = node.GetComponents().ToList();
                 result.ChildNames = node.Children.Select(c => c.Name).ToList();
-                return CapOutput(JsonSerializer.Serialize(WithWireValues(result), _jsonOptions));
+                return CapInspection(WithWireValues(result));
             }, ct);
         }
 
@@ -459,12 +502,45 @@ namespace AkerMcp.Client
 
         // Inspection of large objects/types can produce tens of thousands of tokens.
         // A truncated payload plus steering advice beats flooding the model context.
-        private static string CapOutput(string json, int maxChars = 30_000)
+        private const int MaxInspectionChars = 30_000;
+
+        /// <summary>
+        /// The inspection as JSON within <see cref="MaxInspectionChars"/>. Past the cap the lists are shortened before
+        /// serializing, and the reply says so ("truncated", the totals, how to narrow it): the text used to be cut at
+        /// character 30,000 — mid-string, mid-object — and what reached the agent was not JSON any more.
+        /// </summary>
+        private string CapInspection(InspectionResult result)
         {
-            if (json.Length <= maxChars) return json;
-            return json.Substring(0, maxChars) +
-                   $"\n…TRUNCATED ({json.Length} chars total). " +
-                   "Narrow the inspection with 'filter' (regex on member names), lower 'depth', or omit 'include_methods'.";
+            var json = JsonSerializer.Serialize(result, _jsonOptions);
+            if (json.Length <= MaxInspectionChars) return json;
+
+            int properties = result.Properties.Count, methods = result.Methods?.Count ?? 0, children = result.ChildNames?.Count ?? 0;
+            double share = (double)MaxInspectionChars / json.Length;
+            while (true)
+            {
+                share = share < 0.01 ? 0 : share * 0.8;
+                var trimmed = new InspectionResult
+                {
+                    TypeName = result.TypeName,
+                    Path = result.Path,
+                    Components = result.Components,
+                    Properties = result.Properties.Take((int)(properties * share)).ToList(),
+                    Methods = result.Methods?.Take((int)(methods * share)).ToList(),
+                    ChildNames = result.ChildNames?.Take((int)(children * share)).ToList(),
+                };
+                trimmed.Summary =
+                    $"Truncated: {trimmed.Properties.Count} of {properties} properties, {trimmed.Methods?.Count ?? 0} of {methods} methods, " +
+                    $"{trimmed.ChildNames?.Count ?? 0} of {children} children. Narrow the inspection with 'filter' (regex on member names), " +
+                    "lower 'depth', or omit 'include_methods'.";
+
+                var reply = JsonSerializer.SerializeToNode(trimmed, _jsonOptions)!.AsObject();
+                reply["truncated"] = true;
+                reply["totalProperties"] = properties;
+                reply["totalMethods"] = methods;
+                reply["totalChildren"] = children;
+                var text = reply.ToJsonString(_jsonOptions);
+                if (text.Length <= MaxInspectionChars || share == 0) return text;
+            }
         }
 
         private async Task<string> HandleGetProperty(IpcRequest request, CancellationToken ct)
@@ -494,17 +570,28 @@ namespace AkerMcp.Client
 
             return await _dispatcher.RunOnMainThread(() =>
             {
-                var node = _sceneGraph.GetNode(objectPath);
-                if (node == null) return $"Object not found: {objectPath}";
+                var node = _sceneGraph.GetNode(objectPath)
+                    ?? throw new RequestFailure($"Object not found: {objectPath}");
 
-                var targetType = _pathResolver.GetTargetType(node.UnderlyingObject.GetType(), propertyPath);
-                object? value = targetType != null
-                    ? _serializer.JsonElementToObject(valueElement, targetType)
-                    : valueElement.ToString();
-
-                node.SetProperty(propertyPath, value);
+                node.SetProperty(propertyPath, ValueFor(node, propertyPath, valueElement));
                 return $"Property '{propertyPath}' set successfully on {objectPath}";
             }, ct);
+        }
+
+        /// <summary>
+        /// The value set_property and create hand the node: typed when the node's object declares the member, otherwise
+        /// its JSON text, which the node converts once it has found the member (a Unity component's, through
+        /// PropertyPathResolver). A JSON null is null — it used to go on as its text, "", so a reference could not be
+        /// cleared: "" is not a Material.
+        /// </summary>
+        private object? ValueFor(ISceneNode node, string propertyPath, JsonElement value)
+        {
+            if (value.ValueKind == JsonValueKind.Null || value.ValueKind == JsonValueKind.Undefined)
+                return null;
+            var targetType = _pathResolver.GetTargetType(node.UnderlyingObject.GetType(), propertyPath);
+            if (targetType != null)
+                return _serializer.JsonElementToObject(value, targetType);
+            return value.ValueKind == JsonValueKind.String ? value.GetString() : value.GetRawText();
         }
 
         private async Task<string> HandleCallMethod(IpcRequest request, CancellationToken ct)
@@ -514,23 +601,24 @@ namespace AkerMcp.Client
             var methodName = args.GetProperty("method").GetString()!;
             object?[]? methodArgs = null;
 
+            // Scalars go on as the CLR values every ISceneNode has always received (string, double, bool, null), and an
+            // object or array as its JsonElement; the invoker converts each to the parameter it lands on. Kept that way
+            // for adapters outside this repository: SkelForge's operations coerce with Convert.ToSingle and friends, which
+            // a JsonElement does not satisfy. What used to fail happened after this point — a vector given as an object
+            // reached the method as text, a StringName parameter (Godot's AnimationPlayer.Play("walk")) had no conversion
+            // from a string, an enum could not be given by name, "0.5" was parsed in the editor's culture.
             if (args.TryGetProperty("args", out var argsArray) && argsArray.ValueKind == JsonValueKind.Array)
-            {
-                var list = new List<object?>();
-                foreach (var item in argsArray.EnumerateArray())
-                {
-                    list.Add(item.ValueKind switch
+                methodArgs = argsArray.EnumerateArray()
+                    .Select(item => item.ValueKind switch
                     {
+                        JsonValueKind.Null => null,
                         JsonValueKind.String => item.GetString(),
                         JsonValueKind.Number => item.GetDouble(),
                         JsonValueKind.True => true,
                         JsonValueKind.False => false,
-                        JsonValueKind.Null => null,
-                        _ => item.GetRawText()
-                    });
-                }
-                methodArgs = list.ToArray();
-            }
+                        _ => (object?)item.Clone(),
+                    })
+                    .ToArray();
 
             return await _dispatcher.RunOnMainThread(() =>
             {
@@ -650,22 +738,21 @@ namespace AkerMcp.Client
             {
                 var node = _sceneGraph.CreateNode(type, name, parentPath);
 
+                // The object exists by now, so a property that does not take is reported, not fatal. It used to be
+                // swallowed: create answered "created" with the position or colour it was given silently missing.
+                var propertyErrors = new List<object>();
                 if (args.TryGetProperty("properties", out var props) && props.ValueKind == JsonValueKind.Object)
                 {
                     foreach (var prop in props.EnumerateObject())
                     {
                         try
                         {
-                            var targetType = _pathResolver.GetTargetType(
-                                node.UnderlyingObject.GetType(), prop.Name);
-                            var value = targetType != null
-                                ? _serializer.JsonElementToObject(prop.Value, targetType)
-                                : prop.Value.ToString();
-                            node.SetProperty(prop.Name, value);
+                            node.SetProperty(prop.Name, ValueFor(node, prop.Name, prop.Value));
                         }
-                        catch
+                        catch (Exception ex)
                         {
-                            // Skip properties that can't be set during creation
+                            var cause = ex is System.Reflection.TargetInvocationException { InnerException: { } inner } ? inner : ex;
+                            propertyErrors.Add(new { property = prop.Name, error = $"{cause.GetType().Name}: {cause.Message}" });
                         }
                     }
                 }
@@ -675,8 +762,9 @@ namespace AkerMcp.Client
                     created = true,
                     path = node.Path,
                     type = node.TypeName,
-                    name = node.Name
-                }, _jsonOptions);
+                    name = node.Name,
+                    property_errors = propertyErrors.Count > 0 ? propertyErrors : null
+                }, _compactJsonOptions);
             }, ct);
         }
 
@@ -995,6 +1083,10 @@ namespace AkerMcp.Client
 
         private async Task<string> HandleExecute(IpcRequest request, CancellationToken ct)
         {
+            // The switch existed and nothing read it: a plugin that turned execute off still ran every script.
+            if (!_config.EnableExecuteTool)
+                throw new RequestFailure("Code execution is disabled by the editor plugin configuration.", "FORBIDDEN");
+
             if (_codeExecutor == null)
                 return JsonSerializer.Serialize(new { success = false, error = "Code execution not available. Engine plugin does not provide an ICodeExecutor." }, _jsonOptions);
 
