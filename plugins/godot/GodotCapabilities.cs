@@ -1,3 +1,4 @@
+#if TOOLS
 #nullable enable
 using System;
 using System.Collections.Generic;
@@ -102,3 +103,4 @@ namespace AkerMcp.GodotAdapter
         }
     }
 }
+#endif

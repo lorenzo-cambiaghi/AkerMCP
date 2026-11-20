@@ -1,3 +1,4 @@
+#if TOOLS
 #nullable enable
 using AkerMcp.Client;
 
@@ -14,3 +15,4 @@ namespace AkerMcp.GodotAdapter
         protected override void ScheduleProcessQueue() { /* pumped by EditorPlugin._Process */ }
     }
 }
+#endif

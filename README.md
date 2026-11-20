@@ -138,17 +138,30 @@ Two steps: **(1)** install the adapter for your engine, Unity, Godot or Stride (
 
 AkerMCP ships a **Godot 4.x (.NET/C#) adapter** with the **same full toolset** as Unity. Because a Godot project is a real `.csproj`, there are no DLLs to copy: references and the Roslyn engine come via NuGet/ProjectReference.
 
-1. Download `AkerMcp.Godot-addon.zip` from the [latest Release](https://github.com/lorenzo-cambiaghi/AkerMCP/releases/latest) and extract it so you get `addons/aker_mcp/` in your Godot project (or copy this repo's `plugins/godot` folder into your project as `addons/aker_mcp`).
+1. Download `AkerMcp.Godot-addon.zip` from the [latest Release](https://github.com/lorenzo-cambiaghi/AkerMCP/releases/latest) and extract it into your project's `addons/` folder, so you get `addons/aker_mcp/`. The zip carries the AkerMcp core it builds against as source, in `addons/aker_mcp/core/Shared` and `addons/aker_mcp/core/Client` (a `.gdignore` keeps the editor from treating it as project scripts).
 2. Add the AkerMcp core to your game's `.csproj` (or use the included `samples/godot` project directly; run `setup-samples` first to link the addon):
    ```xml
-   <ProjectReference Include="path/to/AkerMcp.Shared.csproj" />
-   <ProjectReference Include="path/to/AkerMcp.Client.csproj" />
-   <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="4.8.0" />
+   <PropertyGroup>
+     <!-- Required for editor plugins. -->
+     <EnableDynamicLoading>true</EnableDynamicLoading>
+   </PropertyGroup>
+   <!-- Editor only: Debug is the configuration the Godot editor builds, so exported games ship without AkerMcp or Roslyn. -->
+   <ItemGroup Condition="'$(Configuration)' == 'Debug'">
+     <ProjectReference Include="addons/aker_mcp/core/Shared/AkerMcp.Shared.csproj" />
+     <ProjectReference Include="addons/aker_mcp/core/Client/AkerMcp.Client.csproj" />
+     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
+   </ItemGroup>
+   <ItemGroup>
+     <!-- The core builds as its own two projects, never as part of your game assembly. -->
+     <Compile Remove="addons/aker_mcp/core/**" />
+   </ItemGroup>
    ```
-   Make sure your project has `<EnableDynamicLoading>true</EnableDynamicLoading>` (required for editor plugins).
+   If you copied this repo's `plugins/godot` folder into your project as `addons/aker_mcp` instead of using the zip, point the two `ProjectReference`s at the repo's `Shared/AkerMcp.Shared.csproj` and `Client/AkerMcp.Client.csproj`; the `Compile Remove` line is then not needed.
 3. Build the C# solution once (**Project → Tools → C#: Create/Build**), then enable the plugin under **Project → Project Settings → Plugins → AkerMcp**.
 
-The plugin auto-starts with the editor and pumps requests on the main thread every frame. Scene paths follow the edited scene root (e.g. `/TestScene/Box`), property paths are case-insensitive (`position.x` resolves to `Position.X`), and screenshots capture the editor's 3D viewport. The standalone MCP server discovers the Godot plugin automatically, with no server changes.
+Every addon file is wrapped in `#if TOOLS`, which Godot defines only for the editor's Debug build, so exporting the game (ExportDebug / ExportRelease) compiles none of it.
+
+The plugin auto-starts with the editor and pumps requests on the main thread every frame. Scene paths follow the edited scene root (e.g. `/TestScene/Box`), property paths are case-insensitive (`position.x` resolves to `Position.X`), and screenshots capture the editor's 2D or 3D viewport, whichever the edited scene uses (`view: "2d"`/`"3d"` picks one explicitly; while the game runs in its own window, `view: "game"` falls back to OS-level window capture). `create`, `delete` and the nodes placed by `create_sprite`/`create_sound` are single steps in the editor's Undo history and mark the scene unsaved; `set_property` is not undoable on Godot yet. The standalone MCP server discovers the Godot plugin automatically, with no server changes.
 
 ### 1c. Stride Setup
 

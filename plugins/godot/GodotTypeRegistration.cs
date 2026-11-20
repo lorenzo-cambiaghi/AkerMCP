@@ -1,3 +1,4 @@
+#if TOOLS
 #nullable enable
 using System.Collections.Generic;
 using System.Globalization;
@@ -116,3 +117,4 @@ namespace AkerMcp.GodotAdapter
                 : Vector3.Zero;
     }
 }
+#endif

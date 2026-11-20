@@ -1,3 +1,4 @@
+#if TOOLS
 #nullable enable
 using Godot;
 using AkerMcp.Shared.Abstraction;
@@ -79,3 +80,4 @@ namespace AkerMcp.GodotAdapter
         };
     }
 }
+#endif

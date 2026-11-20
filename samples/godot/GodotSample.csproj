@@ -5,7 +5,6 @@
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <!--
@@ -16,14 +15,17 @@
 
     The AkerMcp core is consumed straight from source — a Godot project is a real
     .csproj, so ProjectReference + NuGet "just work" (no DLL copying like Unity).
+
+    Everything AkerMcp needs is editor-only, so it is referenced for Debug only: Debug is
+    the configuration the Godot editor builds, and the only one where Godot.NET.Sdk
+    defines TOOLS (which every addon file is wrapped in). Referencing it unconditionally
+    shipped Roslyn, MessagePack and the AkerMcp core in every exported game (~22 MB of
+    the export output, 13 Roslyn locale folders included, against 5.3 MB without them).
   -->
-  <ItemGroup>
+  <ItemGroup Condition="'$(Configuration)' == 'Debug'">
     <ProjectReference Include="..\..\Shared\AkerMcp.Shared.csproj" />
     <ProjectReference Include="..\..\Client\AkerMcp.Client.csproj" />
-  </ItemGroup>
-
-  <!-- Roslyn scripting engine that powers the `execute` tool. -->
-  <ItemGroup>
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="4.8.0" />
+    <!-- The C# compiler behind the `execute` tool. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
   </ItemGroup>
 </Project>
