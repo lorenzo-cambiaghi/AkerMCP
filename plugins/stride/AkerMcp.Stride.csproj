@@ -3,18 +3,26 @@
   <!--
     AkerMcp adapter for the Stride game engine (Game Studio editor plugin).
 
-    Unlike Unity (prebuilt DLLs) and Godot (project source), Stride's editor
-    assemblies are NOT on NuGet, so we reference them straight from a local
-    build of the Stride source tree. Point StrideBin at the output folder of a
-    `Stride.GameStudio` build (Debug or Release). Override on the command line:
+    The adapter links Game Studio's own editor assemblies, so it is built against
+    the Game Studio it will run in. Point StrideBin at a folder that holds them
+    (Stride.Core.dll, Stride.Core.Assets.Editor.dll, ...):
         dotnet build -p:StrideBin="D:\stride\...\bin\Release\net10.0-windows"
+    A source build of Stride has them all next to Stride.GameStudio.exe. A Launcher
+    install keeps each one in its own NuGet package; install-stride-wrapper.ps1
+    gathers them into one folder and passes that.
+
+    StrideTfm must match the runtime of that Game Studio: stock 4.2 is
+    net8.0-windows, 4.3+ is net10.0-windows (install-stride-wrapper.ps1 reads it from
+    Stride.GameStudio.runtimeconfig.json). The default is the current Stride:
+    building net8.0 against net10 Stride assemblies fails with CS1705.
 
     The Stride DLLs are NOT copied to our output (Private=false): they already
     live next to Game Studio. Only our own assembly + AkerMcp.* + their NuGet
     deps are emitted, to be dropped into Game Studio's plugin folder.
   -->
   <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <StrideTfm Condition="'$(StrideTfm)' == ''">net10.0-windows</StrideTfm>
+    <TargetFramework>$(StrideTfm)</TargetFramework>
     <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
@@ -24,9 +32,15 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(StrideBin)' == ''">
-    <StrideBin>C:\prjUnity\DedalMCP\stride\sources\editor\Stride.GameStudio\bin\Debug\net10.0-windows</StrideBin>
-  </PropertyGroup>
+  <!-- No default StrideBin: a guessed folder builds against the wrong Game Studio, or
+       fails with dozens of unresolved references that hide the real cause. Runs just
+       before reference resolution, so a restore still works without it. -->
+  <Target Name="AkerMcpCheckStrideBin" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="'$(StrideBin)' == ''"
+           Text="StrideBin is not set. Build with -p:StrideBin=&lt;folder holding Game Studio's Stride.*.dll&gt;, or use install-stride-wrapper.ps1 (Stride from the Launcher) / setup-stride.ps1 (Stride built from source)." />
+    <Error Condition="'$(StrideBin)' != '' And !Exists('$(StrideBin)\Stride.Core.Assets.Editor.dll')"
+           Text="StrideBin '$(StrideBin)' does not contain Stride.Core.Assets.Editor.dll. Point it at the Game Studio build output (source build), or use install-stride-wrapper.ps1, which gathers a Launcher install's assemblies into one folder." />
+  </Target>
 
   <ItemGroup>
     <ProjectReference Include="..\..\Shared\AkerMcp.Shared.csproj" />
@@ -37,6 +51,11 @@
   <ItemGroup>
     <Reference Include="Stride.Core">
       <HintPath>$(StrideBin)\Stride.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- AttachedReferenceManager / AssetId: the sprite importer's reference to the sheet asset. -->
+    <Reference Include="Stride.Core.Serialization">
+      <HintPath>$(StrideBin)\Stride.Core.Serialization.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Stride.Core.Mathematics">
@@ -107,6 +126,11 @@
     </Reference>
     <Reference Include="Microsoft.CodeAnalysis.CSharp">
       <HintPath>$(StrideBin)\Microsoft.CodeAnalysis.CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- EditorServiceGame.IsEditorHidden: a screenshot of a hidden editor game fails fast. -->
+    <Reference Include="Stride.Editor">
+      <HintPath>$(StrideBin)\Stride.Editor.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Stride.Assets.Presentation">

@@ -9,10 +9,18 @@
     variable is never written to the user/machine environment, so it cannot affect
     any other .NET process. If the hook DLL is missing it simply launches Game
     Studio without AkerMcp. WinExe = no console window.
+
+    StrideTfm follows the Game Studio it launches (install-stride-wrapper.ps1 reads it
+    from Stride.GameStudio.runtimeconfig.json): stock 4.2 runs on .NET 8, 4.3+ on
+    .NET 10, and a machine with only the runtime Game Studio needs must still be
+    able to start the launcher. The default is the current Stride.
   -->
   <PropertyGroup>
+    <StrideTfm Condition="'$(StrideTfm)' == ''">net10.0-windows</StrideTfm>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>$(StrideTfm)</TargetFramework>
+    <!-- Start on a newer runtime when the one built for is missing. -->
+    <RollForward>Major</RollForward>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>disable</ImplicitUsings>

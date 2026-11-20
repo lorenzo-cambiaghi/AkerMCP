@@ -1,29 +1,46 @@
 using System;
 using System.IO;
 using System.Reflection;
+using System.Threading;
 
 // IMPORTANT: The .NET runtime startup-hook contract requires a type named
 // "StartupHook" in the GLOBAL namespace (no namespace) exposing a parameterless
 // "static void Initialize()" method. Do not rename or move into a namespace.
 //
-// This runs before Game Studio's Main, in EVERY .NET process that inherits the
-// DOTNET_STARTUP_HOOKS variable — but our launcher only sets it for the Game
-// Studio process it spawns. Everything is wrapped in try/catch and the only work
-// done eagerly is wiring two event handlers, so a non-Stride process (or a broken
-// install) is a no-op and can never prevent the host from starting.
+// This runs before Main in EVERY .NET process that inherits DOTNET_STARTUP_HOOKS.
+// The launcher sets it only for the Game Studio it spawns, but Game Studio passes
+// its environment on to everything it starts: dotnet build, MSBuild nodes,
+// VBCSCompiler, the asset compiler, the game itself. So the first thing done here is
+// to leave any process that is not Game Studio. Everything is wrapped in try/catch,
+// so a broken install can never prevent the host from starting.
 internal static class StartupHook
 {
+    // The entry assembly of Game Studio itself; every other host is left alone.
+    private const string EditorEntryAssembly = "Stride.GameStudio";
+
+    // Set by AkerMcp.Stride.Launcher. The hook runs from a shadow copy under %TEMP%
+    // (so the installed DLL is never locked), which means its own location is not
+    // where the adapter and its dependencies live.
+    private const string PluginDirVariable = "AKERMCP_STRIDE_PLUGIN_DIR";
+
     private static string _pluginDir = string.Empty;
-    private static bool _registered;
+    private static int _registered;
 
     public static void Initialize()
     {
         try
         {
-            _pluginDir = Path.GetDirectoryName(typeof(StartupHook).Assembly.Location) ?? string.Empty;
+            // The variable is deliberately NOT cleared here: Game Studio restarts itself
+            // through Process.Start (File > Open / Reload project), and that new Game
+            // Studio must get the hook too. Leaving early is what keeps the children clean.
+            var entry = Assembly.GetEntryAssembly()?.GetName().Name;
+            if (!string.Equals(entry, EditorEntryAssembly, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            _pluginDir = ResolvePluginDir();
 
             // Our bundled dependencies (AkerMcp.*, MessagePack, ...) live next to
-            // this hook, not next to Game Studio; resolve them from here. Stride
+            // the adapter, not next to Game Studio; resolve them from there. Stride
             // and Roslyn are already loaded by Game Studio, so those never reach us.
             AppDomain.CurrentDomain.AssemblyResolve += ResolveFromPluginDir;
 
@@ -45,6 +62,16 @@ internal static class StartupHook
         }
     }
 
+    private static string ResolvePluginDir()
+    {
+        var fromLauncher = Environment.GetEnvironmentVariable(PluginDirVariable);
+        if (!string.IsNullOrEmpty(fromLauncher) && File.Exists(Path.Combine(fromLauncher, "AkerMcp.Stride.dll")))
+            return fromLauncher!;
+
+        // Loaded straight from the install folder (an older launcher, or a hand-set variable).
+        return Path.GetDirectoryName(typeof(StartupHook).Assembly.Location) ?? string.Empty;
+    }
+
     private static void OnAssemblyLoad(object? sender, AssemblyLoadEventArgs args)
     {
         if (IsEditorAssembly(args.LoadedAssembly))
@@ -56,8 +83,13 @@ internal static class StartupHook
 
     private static void TryRegister()
     {
-        if (_registered) return;
-        _registered = true;
+        // AssemblyLoad fires on whichever thread loads the assembly, so two loads can
+        // race here: only the first caller registers.
+        if (Interlocked.Exchange(ref _registered, 1) != 0) return;
+
+        // Every later assembly load would otherwise pay for this handler for the whole
+        // session, for nothing.
+        AppDomain.CurrentDomain.AssemblyLoad -= OnAssemblyLoad;
         try
         {
             var adapterPath = Path.Combine(_pluginDir, "AkerMcp.Stride.dll");
@@ -88,13 +120,15 @@ internal static class StartupHook
         }
     }
 
+    // Kept separate from the adapter's StrideDiag on purpose: this assembly cannot
+    // reference the adapter (it is what loads it). Same file, same line shape.
     private static void Log(string message)
     {
         try
         {
             File.AppendAllText(
                 Path.Combine(Path.GetTempPath(), "akermcp-stride.log"),
-                $"{DateTime.Now:HH:mm:ss} [startup-hook] {message}{Environment.NewLine}");
+                $"{DateTime.Now:HH:mm:ss.fff} [startup-hook] {message}{Environment.NewLine}");
         }
         catch
         {

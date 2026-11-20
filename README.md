@@ -179,7 +179,9 @@ A per-launch wrapper injects the plugin **only into the Game Studio process it s
 # (omit -GameStudioPath to auto-detect a Launcher install)
 ```
 
-This builds the adapter against your installed Game Studio, drops it into `<GameStudio>/AkerMcpPlugins`, and creates a **"Stride Game Studio (AkerMCP)"** shortcut (Desktop + Start Menu). Launch Stride from that shortcut and **open a project + scene**; the pipe server starts automatically. Your official Stride shortcut keeps launching Game Studio untouched. Remove everything with `.\install-stride-wrapper.ps1 -Uninstall`.
+This builds the adapter against your installed Game Studio, drops it into `<GameStudio>/AkerMcpPlugins`, and creates a **"Stride Game Studio (AkerMCP)"** shortcut (Desktop + Start Menu). Launch Stride from that shortcut and **open a project + scene**; the pipe server starts automatically. Your official Stride shortcut keeps launching Game Studio untouched. Remove everything with `.\install-stride-wrapper.ps1 -Uninstall` (the shortcuts go first, so they are removed even if Game Studio has since moved).
+
+The Launcher installs Game Studio as a NuGet package (`~/.nuget/packages/stride.gamestudio/<version>/lib/<tfm>/`), which is where auto-detect looks first, newest version first. In that layout the Stride assemblies sit in their own packages rather than next to the exe, so the script gathers the ones the adapter references into `plugins/stride/obj/StrideRefs/`; if one is missing, start Game Studio once from the Launcher so it restores its packages. The adapter and the wrapper are built for the .NET that Game Studio runs on, read from its `Stride.GameStudio.runtimeconfig.json` (4.2 is .NET 8, 4.3+ is .NET 10). Only Game Studio itself loads the plugin: the processes it starts (`dotnet build`, MSBuild, the game) inherit the startup hook but leave it at once, and they load a copy under `%TEMP%\AkerMcp\stride-hook`, so they never lock the installed files.
 
 #### Option B: you build Stride Game Studio from source
 
@@ -196,7 +198,7 @@ The adapter loads in-process via a drop-in loader patched into Game Studio itsel
                          AssetsPlugin.RegisterPlugin(t); }
            catch { /* skip incompatible DLLs */ }
    ```
-3. Build + deploy the adapter into Game Studio with `setup-stride.ps1` (set `-StrideBin` to your Game Studio build output), then launch Game Studio and **open a project + scene**; the plugin starts the pipe server when a project opens.
+3. Build + deploy the adapter into Game Studio with `setup-stride.ps1 -StrideBin <your Game Studio build output>` (required: there is no default path), then launch Game Studio and **open a project + scene**; the plugin starts the pipe server when a project opens.
 
 Either way, the standalone MCP server then discovers the Stride engine automatically, the same as Unity and Godot.
 

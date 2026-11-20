@@ -1,4 +1,5 @@
 #nullable enable
+using System.Threading;
 using Stride.Core.Assets.Editor.Services;
 
 namespace AkerMcp.StrideAdapter
@@ -19,7 +20,7 @@ namespace AkerMcp.StrideAdapter
     /// </summary>
     public static class StrideBootstrap
     {
-        private static bool _registered;
+        private static int _registered;
 
         /// <summary>
         /// Registers <see cref="StrideMcpPlugin"/> if it is not already present.
@@ -27,19 +28,24 @@ namespace AkerMcp.StrideAdapter
         /// </summary>
         public static void Register()
         {
-            if (_registered) return;
+            // The two loaders can run on different threads (the hook reacts to an
+            // AssemblyLoad event): only one of them may get past this line.
+            if (Interlocked.CompareExchange(ref _registered, 1, 0) != 0) return;
 
-            foreach (var plugin in AssetsPlugin.RegisteredPlugins)
+            try
             {
-                if (plugin is StrideMcpPlugin)
-                {
-                    _registered = true;
-                    return;
-                }
-            }
+                foreach (var plugin in AssetsPlugin.RegisteredPlugins)
+                    if (plugin is StrideMcpPlugin)
+                        return;
 
-            AssetsPlugin.RegisterPlugin(typeof(StrideMcpPlugin));
-            _registered = true;
+                AssetsPlugin.RegisterPlugin(typeof(StrideMcpPlugin));
+            }
+            catch
+            {
+                // Not registered after all: let a later call try again.
+                Volatile.Write(ref _registered, 0);
+                throw;
+            }
         }
     }
 }
