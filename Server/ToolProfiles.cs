@@ -71,12 +71,15 @@ namespace AkerMcp.Server
             return name;
         }
 
-        /// <summary>Comma-separated names from an environment variable, or none.</summary>
+        /// <summary>
+        /// Comma-separated names from an environment variable, or none. Written the way tool names are (lower case,
+        /// underscores): "UI_Action" or "ui-action" used to match nothing, and the tool was silently not loaded.
+        /// </summary>
         public static string[] NamesFromEnvironment(string variable)
         {
             var raw = Environment.GetEnvironmentVariable(variable);
             if (string.IsNullOrWhiteSpace(raw)) return Array.Empty<string>();
-            return raw.Split(',').Select(s => s.Trim()).Where(s => s.Length > 0).ToArray();
+            return raw.Split(',').Select(s => s.Trim().ToLowerInvariant().Replace('-', '_')).Where(s => s.Length > 0).ToArray();
         }
 
         /// <summary>

@@ -64,6 +64,14 @@ namespace AkerMcp.Server
         public (List<string> kept, List<string> dropped) ApplyProfile(
             string profile, IEnumerable<string>? include = null, IEnumerable<string>? exclude = null)
         {
+            // A name that matches no tool is a typo, and it used to change nothing without a word.
+            var unknown = (include ?? Array.Empty<string>()).Concat(exclude ?? Array.Empty<string>())
+                .Where(n => !_tools.ContainsKey(n)).Distinct().ToList();
+            if (unknown.Count > 0)
+                StdioTransport.LogError(
+                    $"AKER_MCP_TOOLS_INCLUDE/EXCLUDE name no tool: {string.Join(", ", unknown)}. " +
+                    "Tool names are as in tools/list, e.g. ui_action.");
+
             var (kept, dropped) = ToolProfiles.Select(_tools.Keys.ToList(), profile, include, exclude);
             foreach (var name in dropped) _tools.Remove(name);
             Profile = profile;
