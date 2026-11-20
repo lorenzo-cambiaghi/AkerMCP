@@ -15,12 +15,34 @@ namespace AkerMcp.Unity
     /// </summary>
     public sealed class UnityPlayModeController : IPlayModeController
     {
+        // How long a requested frame may take to run before the remaining steps are dropped (a breakpoint, a modal
+        // dialog, an editor that stopped ticking): the queue must not fire into a later, unrelated pause.
+        private const double StepTimeoutSeconds = 5.0;
+
+        private int _stepsQueued;           // steps not requested from Unity yet
+        private int _stepIssuedAtFrame = -1; // Time.frameCount when the outstanding step was requested; -1 = none
+        private double _stepIssuedAt;
+        private bool _pumping;
+
         public PlayState GetState() => Snapshot();
 
         public PlayState EnterPlay()
         {
             if (!EditorApplication.isPlaying)
+            {
+                // Unity refuses both cases with a notification in the editor and nothing in the API: the server then
+                // polled for 4 s and reported isPlaying=false with no reason. Thrown, they come back as the error.
+                if (EditorApplication.isCompiling)
+                    throw new InvalidOperationException(
+                        "Cannot enter Play Mode while scripts are compiling. Wait for get_compile_status to report " +
+                        "the compile finished, then retry.");
+                if (EditorUtility.scriptCompilationFailed)
+                    throw new InvalidOperationException(
+                        "Cannot enter Play Mode: the scripts have compile errors (Unity requires them fixed first). " +
+                        "Call get_compile_errors.");
+
                 EditorApplication.EnterPlaymode();
+            }
 
             // EnterPlaymode is DEFERRED — it applies after this call returns (and after the
             // domain reload). Report the real, not-yet-settled state (do NOT fake IsPlaying=true);
@@ -32,6 +54,7 @@ namespace AkerMcp.Unity
 
         public PlayState ExitPlay()
         {
+            CancelSteps();
             if (EditorApplication.isPlaying)
                 EditorApplication.ExitPlaymode();
 
@@ -43,10 +66,20 @@ namespace AkerMcp.Unity
 
         public PlayState SetPaused(bool paused)
         {
+            if (!paused) CancelSteps();
             EditorApplication.isPaused = paused;
             return Snapshot();
         }
 
+        /// <summary>
+        /// Advances <paramref name="frames"/> frames, one per editor tick.
+        /// <para>
+        /// <c>EditorApplication.Step()</c> only asks for one frame on the next tick: called N times in a row it still
+        /// advanced ONE frame, and play_step(10) reported success after a single frame. The steps are queued instead
+        /// and requested one at a time, each once the previous frame has run. The interface is synchronous, so the
+        /// reply comes back before the last of them: it says which frameCount the steps end on.
+        /// </para>
+        /// </summary>
         public PlayState Step(int frames)
         {
             if (!EditorApplication.isPlaying)
@@ -55,10 +88,76 @@ namespace AkerMcp.Unity
             if (!EditorApplication.isPaused)
                 EditorApplication.isPaused = true;
 
-            for (int i = 0; i < Math.Max(1, frames); i++)
-                EditorApplication.Step();
+            int requested = Math.Max(1, frames);
+            _stepsQueued += requested;
+            // Counted before pumping: whether Unity runs a requested frame inside Step() or on the next tick, the
+            // frames still to come are the outstanding one (if it has not run) plus the queue.
+            int now = UnityEngine.Time.frameCount;
+            long target = now + (_stepIssuedAtFrame == now ? 1 : 0) + _stepsQueued;
+            PumpSteps();
 
-            return Snapshot();
+            var s = Snapshot();
+            s.Note = $"Stepping {requested} frame(s), one per editor tick: frameCount reaches {target} shortly after " +
+                     "this reply. Confirm with get_play_state.";
+            return s;
+        }
+
+        /// <summary>Drops queued steps and the editor hook: called when the plugin stops.</summary>
+        public void Detach() => CancelSteps();
+
+        private void PumpSteps()
+        {
+            if (!EditorApplication.isPlaying || !EditorApplication.isPaused)
+            {
+                CancelSteps(); // play ended or resumed: the queued frames would land in a later, unrelated pause
+                return;
+            }
+
+            if (_stepIssuedAtFrame >= 0)
+            {
+                if (UnityEngine.Time.frameCount == _stepIssuedAtFrame)
+                {
+                    if (EditorApplication.timeSinceStartup - _stepIssuedAt > StepTimeoutSeconds) CancelSteps();
+                    else Hook();
+                    return; // the requested frame has not run yet
+                }
+                _stepIssuedAtFrame = -1;
+            }
+
+            if (_stepsQueued <= 0)
+            {
+                Unhook();
+                return;
+            }
+
+            _stepsQueued--;
+            _stepIssuedAtFrame = UnityEngine.Time.frameCount;
+            _stepIssuedAt = EditorApplication.timeSinceStartup;
+            EditorApplication.Step();
+
+            if (_stepsQueued > 0) Hook();
+            else Unhook();
+        }
+
+        private void CancelSteps()
+        {
+            _stepsQueued = 0;
+            _stepIssuedAtFrame = -1;
+            Unhook();
+        }
+
+        private void Hook()
+        {
+            if (_pumping) return;
+            _pumping = true;
+            EditorApplication.update += PumpSteps;
+        }
+
+        private void Unhook()
+        {
+            if (!_pumping) return;
+            _pumping = false;
+            EditorApplication.update -= PumpSteps;
         }
 
         private static PlayState Snapshot()

@@ -170,8 +170,8 @@ namespace AkerMcp.Server
                 "Pause (true) or resume (false) play. Pause before play_step.",
 
             ["play_step"] =
-                "Advance play while paused: SkelForge steps N frames exactly, Unity one editor tick per " +
-                "call, so repeat and confirm with get_play_state.",
+                "Advance play while paused by N frames (Unity: one per editor tick, so the answer may come " +
+                "before the last one); confirm with get_play_state.",
 
             ["capture_sequence"] =
                 "count screenshots (1-8, default 4) at interval_ms (0-3000, default 500) while playing, " +

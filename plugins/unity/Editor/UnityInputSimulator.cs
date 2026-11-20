@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
@@ -31,6 +32,7 @@ namespace AkerMcp.Unity
         private readonly HashSet<object> _pressedKeys = new HashSet<object>();   // boxed Key enum values
         private readonly HashSet<int> _mouseButtons = new HashSet<int>();
         private Vector2 _mousePos;
+        private bool _hasMousePos;
         private readonly List<Timer> _timers = new List<Timer>();
 
         public UnityInputSimulator(IMainThreadDispatcher dispatcher) => _dispatcher = dispatcher;
@@ -78,9 +80,14 @@ namespace AkerMcp.Unity
                             // Input System screen space is bottom-left origin; the screenshots and
                             // OS-level path the AI reasons about are top-left. Flip Y so mouse_move
                             // x/y mean the same top-left pixels on both paths.
-                            float flippedY = UnityEngine.Screen.height - (float)ev.Y;
-                            _mousePos = new Vector2((float)ev.X, flippedY);
-                            if (refl.QueueMouse(_mousePos, MouseButtonsMask())) dispatched++;
+                            float flippedY = GameViewHeight() - (float)ev.Y;
+                            var target = new Vector2((float)ev.X, flippedY);
+                            // Mouse.delta drives every mouse-look camera; left at zero, a move teleported the
+                            // pointer and nothing that reads delta saw it. The first move has no "before".
+                            var delta = _hasMousePos ? target - _mousePos : Vector2.zero;
+                            _mousePos = target;
+                            _hasMousePos = true;
+                            if (refl.QueueMouse(_mousePos, delta, MouseButtonsMask())) dispatched++;
                             else skipped.Add("mouse_move (no mouse device)");
                             break;
 
@@ -151,15 +158,24 @@ namespace AkerMcp.Unity
         private bool ApplyMouseButton(Reflected refl, int bit, bool pressed, double holdMs)
         {
             if (pressed) _mouseButtons.Add(bit); else _mouseButtons.Remove(bit);
-            if (!refl.QueueMouse(_mousePos, MouseButtonsMask())) return false;
+            if (!refl.QueueMouse(_mousePos, Vector2.zero, MouseButtonsMask())) return false;
 
             if (pressed && holdMs > 0)
                 ScheduleRelease(holdMs, () =>
                 {
                     _mouseButtons.Remove(bit);
-                    refl.QueueMouse(_mousePos, MouseButtonsMask()); // player loop consumes it next frame
+                    refl.QueueMouse(_mousePos, Vector2.zero, MouseButtonsMask()); // player loop consumes it next frame
                 });
             return true;
+        }
+
+        // The height of the Game view, which screenshots capture and whose pixels mouse_move addresses. Not
+        // Screen.height: SendInput runs inside EditorApplication.update, where Screen is whichever view drew last —
+        // the Scene view or an inspector as often as the Game view — and the flipped Y landed elsewhere.
+        private static float GameViewHeight()
+        {
+            var size = UnityEditor.Handles.GetMainGameViewSize();
+            return size.y > 0 ? size.y : UnityEngine.Screen.height;
         }
 
         private ushort MouseButtonsMask()
@@ -213,6 +229,7 @@ namespace AkerMcp.Unity
             private readonly ConstructorInfo? _keyboardStateCtor;
             private readonly Type? _mouseStateType;
             private readonly FieldInfo? _mousePositionField;
+            private readonly FieldInfo? _mouseDeltaField;   // optional: without it moves still land, deltas do not
             private readonly FieldInfo? _mouseButtonsField;
             private readonly MethodInfo? _queueKeyboard;   // QueueStateEvent<KeyboardState>
             private readonly MethodInfo? _queueMouse;      // QueueStateEvent<MouseState>
@@ -241,6 +258,7 @@ namespace AkerMcp.Unity
 
                     _keyboardStateCtor = keyboardStateType.GetConstructor(new[] { _keyEnumType.MakeArrayType() });
                     _mousePositionField = _mouseStateType.GetField("position");
+                    _mouseDeltaField = _mouseStateType.GetField("delta");
                     _mouseButtonsField = _mouseStateType.GetField("buttons");
 
                     var queueGeneric = inputSystemType.GetMethods(BindingFlags.Public | BindingFlags.Static)
@@ -290,45 +308,109 @@ namespace AkerMcp.Unity
                 return true;
             }
 
-            public bool QueueMouse(Vector2 position, ushort buttons)
+            public bool QueueMouse(Vector2 position, Vector2 delta, ushort buttons)
             {
                 var device = _mouseCurrentProp!.GetValue(null);
                 if (device == null) return false; // no mouse device present
                 var state = Activator.CreateInstance(_mouseStateType!)!; // boxed struct
                 _mousePositionField!.SetValue(state, position);
+                // The Input System accumulates delta over a frame and resets it on the next: a button event
+                // sends zero, which adds nothing to a move queued in the same frame.
+                _mouseDeltaField?.SetValue(state, delta);
                 _mouseButtonsField!.SetValue(state, buttons);
                 _queueMouse!.Invoke(null, new object[] { device, state, -1.0 });
                 return true;
             }
 
-            // Canonical, engine-neutral names → Input System `Key` enum member names.
+            // Canonical, engine-neutral names → Input System `Key` enum member names. The same spellings the
+            // server's OS-level maps accept (punctuation, "{ESC}"), so a key does not stop working when the
+            // in-process path takes over; plus what only a keyboard device can tell apart (numpad, right-hand
+            // modifiers). Before these, F5, a numpad key or a comma was skipped here as unknown.
             private static string? CanonicalToKeyName(string key)
             {
                 var k = key.Trim();
+                // "{ESC}", "{ENTER}": the SendKeys spelling.
+                if (k.Length > 2 && k[0] == '{' && k[k.Length - 1] == '}') k = k.Substring(1, k.Length - 2).Trim();
+                if (k.Length == 0 && key.Length > 0) k = key; // a lone space is the space bar
+                if (k.Length == 0) return null;
+
                 if (k.Length == 1)
                 {
                     char c = char.ToUpperInvariant(k[0]);
                     if (c >= 'A' && c <= 'Z') return c.ToString();       // Key.A .. Key.Z
                     if (c >= '0' && c <= '9') return "Digit" + c;        // Key.Digit0 .. Digit9
                 }
-                switch (k.ToLowerInvariant())
+
+                var lower = k.ToLowerInvariant();
+
+                // F1-F12: the Input System's Key enum has no F13 and up.
+                if (lower.Length >= 2 && lower.Length <= 3 && lower[0] == 'f'
+                    && int.TryParse(lower.Substring(1), NumberStyles.None, CultureInfo.InvariantCulture, out var fn)
+                    && fn >= 1 && fn <= 12)
+                    return "F" + fn.ToString(CultureInfo.InvariantCulture);
+
+                // numpad0..numpad9 (also "num0", "kp0").
+                foreach (var prefix in NumpadPrefixes)
                 {
-                    case "space": case "spacebar": return "Space";
+                    if (lower.Length == prefix.Length + 1 && lower.StartsWith(prefix, StringComparison.Ordinal)
+                        && char.IsDigit(lower[prefix.Length]))
+                        return "Numpad" + lower[prefix.Length];
+                }
+
+                switch (lower)
+                {
+                    case " ": case "space": case "spacebar": return "Space";
                     case "enter": case "return": return "Enter";
                     case "escape": case "esc": return "Escape";
                     case "tab": return "Tab";
                     case "backspace": return "Backspace";
                     case "delete": case "del": return "Delete";
+                    case "insert": case "ins": return "Insert";
+                    case "home": return "Home";
+                    case "end": return "End";
+                    case "pageup": case "pgup": return "PageUp";
+                    case "pagedown": case "pgdn": return "PageDown";
+                    case "capslock": case "caps": return "CapsLock";
                     case "up": case "uparrow": return "UpArrow";
                     case "down": case "downarrow": return "DownArrow";
                     case "left": case "leftarrow": return "LeftArrow";
                     case "right": case "rightarrow": return "RightArrow";
-                    case "shift": case "lshift": return "LeftShift";
-                    case "ctrl": case "control": case "lctrl": return "LeftCtrl";
-                    case "alt": case "lalt": return "LeftAlt";
+
+                    case "shift": case "lshift": case "leftshift": return "LeftShift";
+                    case "rshift": case "rightshift": return "RightShift";
+                    case "ctrl": case "control": case "lctrl": case "leftctrl": case "leftcontrol": return "LeftCtrl";
+                    case "rctrl": case "rightctrl": case "rightcontrol": return "RightCtrl";
+                    case "alt": case "option": case "lalt": case "leftalt": return "LeftAlt";
+                    case "ralt": case "rightalt": case "altgr": return "RightAlt";
+                    case "win": case "cmd": case "command": case "meta": case "super": case "lmeta": case "leftmeta": return "LeftMeta";
+                    case "rwin": case "rcmd": case "rmeta": case "rightmeta": return "RightMeta";
+
+                    // Punctuation, by the US-layout keys shortcuts are written against (as on the OS-level path).
+                    case ",": case "comma": return "Comma";
+                    case ".": case "period": return "Period";
+                    case "-": case "minus": return "Minus";
+                    case "+": case "=": case "plus": case "equals": return "Equals";
+                    case "/": case "slash": return "Slash";
+                    case "\\": case "backslash": return "Backslash";
+                    case ";": case "semicolon": return "Semicolon";
+                    case "'": case "quote": return "Quote";
+                    case "[": case "leftbracket": return "LeftBracket";
+                    case "]": case "rightbracket": return "RightBracket";
+                    case "`": case "backquote": case "tilde": return "Backquote";
+
+                    case "numpadenter": case "numenter": case "kpenter": return "NumpadEnter";
+                    case "numpadplus": case "numpadadd": case "numplus": case "kpplus": return "NumpadPlus";
+                    case "numpadminus": case "numpadsubtract": case "numminus": case "kpminus": return "NumpadMinus";
+                    case "numpadmultiply": case "numpadstar": case "nummultiply": case "kpmultiply": return "NumpadMultiply";
+                    case "numpaddivide": case "numpadslash": case "numdivide": case "kpdivide": return "NumpadDivide";
+                    case "numpadperiod": case "numpaddecimal": case "numpaddot": case "kpperiod": return "NumpadPeriod";
+                    case "numpadequals": case "kpequals": return "NumpadEquals";
+                    case "numlock": return "NumLock";
                     default: return null;
                 }
             }
+
+            private static readonly string[] NumpadPrefixes = { "numpad", "num", "kp" };
         }
     }
 }
