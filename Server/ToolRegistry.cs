@@ -124,7 +124,7 @@ namespace AkerMcp.Server
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
-                        ""target"": { ""type"": ""string"", ""description"": ""Scene path (e.g. '/root/Player') or type name"" },
+                        ""target"": { ""type"": ""string"", ""description"": ""Scene path (e.g. '/Player') or type name"" },
                         ""depth"": { ""type"": ""integer"", ""description"": ""Inspection depth (default: 1)"" },
                         ""include_methods"": { ""type"": ""boolean"", ""description"": ""Include method signatures"" },
                         ""filter"": { ""type"": ""string"", ""description"": ""Regex filter on names"" }
@@ -139,7 +139,7 @@ namespace AkerMcp.Server
                     ""type"": ""object"",
                     ""properties"": {
                         ""object_path"": { ""type"": ""string"", ""description"": ""Scene path to the object"" },
-                        ""property_path"": { ""type"": ""string"", ""description"": ""Dot-notation property path (e.g. 'transform.position.x')"" }
+                        ""property_path"": { ""type"": ""string"", ""description"": ""Dot-notation property path (e.g. 'position.x')"" }
                     },
                     ""required"": [""object_path"", ""property_path""]
                 }"),

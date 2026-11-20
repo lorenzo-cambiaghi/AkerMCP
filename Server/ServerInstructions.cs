@@ -114,7 +114,8 @@ for a colour, `{""x"": 0, ""y"": 0, ""z"": 0, ""w"": 1}` for a quaternion.
 | Change one property | `set_property` |
 | Read one value | `get_property` |
 | Find objects | `query` (name pattern, type, tag) |
-| Create one object | `create`, or `add_primitive` for a placeholder mesh |
+| Create one object | `create` |
+| Add a ready-made gameplay script (movement, killzone, score) | `add_primitive` |
 | Modify many objects, generate content, reach editor APIs, create assets | `execute` |
 | Confirm a visual result, or show the user the scene | `take_screenshot` |
 | Exercise gameplay | `enter_play`, `send_input`, `sample_state`, `assert_state`, or `playtest` for a scripted run |
@@ -146,8 +147,9 @@ loops and check the scene after a timeout.
 
 ## After writing or editing a script
 
-Call `refresh_scripts` (the engine recompiles), then `get_compile_errors`. Fix and
-repeat until clean. Never assume a change compiled.
+Call `refresh_scripts`: the engine recompiles and the answer carries the errors and
+warnings. Fix and repeat until clean. Never assume a change compiled. `get_compile_errors`
+re-reads the last result without compiling again.
 
 ## Finding your way
 
@@ -219,7 +221,7 @@ tools decline in the engine's own words rather than working around it.
 |---|---|
 | Guessing property names | `inspect` first |
 | `execute` for a single property | `set_property` (undoable) |
-| Ignoring compile results | `refresh_scripts`, then `get_compile_errors` |
+| Ignoring compile results | read what `refresh_scripts` returns |
 | Building complex objects one property at a time | one `execute` script |
 | An `execute` without a return | return a string that says what happened |
 | Trusting values for a visual change | `take_screenshot` |
