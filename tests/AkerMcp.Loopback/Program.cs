@@ -878,6 +878,11 @@ namespace AkerMcp.Loopback
             var noFrames = await Call(reg, "capture_sequence", new { count = 2, interval_ms = 10, window_title = "no-such-window-" + Guid.NewGuid().ToString("N") });
             Check("capture_sequence with no frame captured is an error", noFrames.IsError && CountImages(noFrames) == 0, Text(noFrames));
 
+            // A primitive for an engine that has none is an error, not Unity C# written into whatever answered.
+            var prim = await Call(reg, "add_primitive", new { id = "platformer_controller_2d", path = "" });
+            Check("add_primitive on an engine without primitives refuses instead of assuming Unity",
+                prim.IsError && Text(prim).Contains("has no primitives"), Text(prim));
+
             var pt = await Call(reg, "playtest", new
             {
                 steps = new object[]

@@ -1420,13 +1420,24 @@ namespace AkerMcp.Server
             if (prim == null)
                 return ToolResult.Error($"Unknown primitive '{id}'. Available: {string.Join(", ", PrimitiveCatalog.All.Select(p => p.Id))}.");
 
-            var info = await _engine.ForwardResourceRead(IpcConstants.Methods.GetProjectInfo, ct);
-            var engineKey = PrimitiveCatalog.EngineKey(info) ?? "unity";
+            // Which engine, from the connection itself, waiting out a reconnect first (add_primitive right after a
+            // refresh_scripts lands in a Unity domain reload). It used to read the project info without waiting and,
+            // finding nothing, assume Unity: a Godot editor that was reconnecting got Unity C# written into it.
+            if (!_engine.IsConnected && !await _engine.WaitForConnection(20_000, ct).ConfigureAwait(false))
+                return ToolResult.Error($"{EngineConnection.EngineDisconnectedPrefix} No engine connected, so there is no " +
+                                        "engine to pick the primitive's variant for. Retry once the editor is up.");
+            var engineKey = PrimitiveCatalog.EngineKey(_engine.ConnectedEngine?.Engine ?? "")
+                            ?? PrimitiveCatalog.EngineKey(await _engine.ForwardResourceRead(IpcConstants.Methods.GetProjectInfo, ct));
+            if (engineKey == null)
+                return ToolResult.Error($"The connected engine ('{_engine.ConnectedEngine?.Engine}') has no primitives " +
+                                        $"(available for: {string.Join(", ", prim.Variants.Keys)}).");
             if (!prim.Variants.TryGetValue(engineKey, out var source))
                 return ToolResult.Error($"No '{id}' variant for engine '{engineKey}' yet (available for: {string.Join(", ", prim.Variants.Keys)}).");
 
+            // An empty path is no path: the variant's default, not a write to "".
             var path = a.ValueKind == JsonValueKind.Object && a.TryGetProperty("path", out var pEl)
-                && pEl.ValueKind == JsonValueKind.String ? pEl.GetString()! : prim.DefaultFile;
+                && pEl.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(pEl.GetString())
+                    ? pEl.GetString()!.Trim() : prim.DefaultFile;
 
             var writeArgs = JsonSerializer.SerializeToElement(new { path, content = source });
             var res = await _engine.ForwardToolCall(IpcConstants.Methods.WriteScript, writeArgs, ct);
