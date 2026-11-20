@@ -920,6 +920,20 @@ namespace AkerMcp.Loopback
             await Task.Delay(1500);   // the retry loop gets its chance to (not) connect
             Check("pinned-but-absent stays disconnected instead of falling back", !engine.IsConnected);
 
+            // Pinning while disconnected connects in the same call: the answer used to be "call again in a moment"
+            // while the retry loop waited out its back-off, up to ten seconds.
+            var direct = Text(await Call(reg, "engine_status", new { engine = "loopback" }));
+            Check("a pin made while disconnected connects in the same call", ConnectedName(direct) == "Loopback", direct);
+
+            // Two editors of the same engine differ only by pid and project: a name pin cannot choose between them.
+            var byProject = Text(await Call(reg, "engine_status", new { engine = "zebragame" }));
+            Check("a pin by project name picks that editor", ConnectedName(byProject) == "Zebra", byProject);
+            Check("engine_status reports the project of each editor",
+                byProject.Contains("\"project\":\"ZebraGame\"") && byProject.Contains("\"project\":\"LoopbackGame\""), byProject);
+            var pid = Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var byPid = Text(await Call(reg, "engine_status", new { engine = pid }));
+            Check("a pin by pid matches the editor running under it", engine.IsConnected && byPid.Contains($"\"pinned\":\"{pid}\""), byPid);
+
             await Call(reg, "engine_status", new { engine = "" });
             Check("unpinning connects again", await engine.WaitForConnection(10_000, cts.Token));
 

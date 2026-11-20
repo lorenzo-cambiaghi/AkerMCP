@@ -485,7 +485,7 @@ namespace AkerMcp.Server
                 ParseSchema(@"{
                     ""type"": ""object"",
                     ""properties"": {
-                        ""engine"": { ""type"": ""string"", ""description"": ""Engine name to pin (case-insensitive, e.g. 'unity'). Empty string unpins. Omit to only report."" }
+                        ""engine"": { ""type"": ""string"", ""description"": ""Pin by engine ('unity'), pid or project name. Empty string unpins; omit to only report."" }
                     }
                 }"),
                 HandleEngineStatus,
@@ -723,12 +723,18 @@ namespace AkerMcp.Server
                 {
                     switchedFrom = connected.ToString();
                     _engine.Disconnect();
-                    await _engine.TryDiscoverAndConnect(ct).ConfigureAwait(false);
                 }
+                // Connect now rather than at the retry loop's next tick, which can be ten seconds away:
+                // also when nothing was connected, which used to leave the caller with "call again in a
+                // moment". TryDiscoverAndConnect keeps a connection that already matches.
+                if (!_engine.IsConnected || switchedFrom != null)
+                    await _engine.TryDiscoverAndConnect(ct).ConfigureAwait(false);
             }
 
             var available = EngineConnection.DiscoverEngines();
             var now = _engine.ConnectedEngine;
+            var pinned = _engine.PinnedEngine;
+            var matching = pinned != null ? available.FindAll(e => e.Is(pinned)) : available;
 
             var payload = new
             {
@@ -737,26 +743,39 @@ namespace AkerMcp.Server
                     engine = now.Engine,
                     version = now.Version,
                     pid = now.Pid,
+                    project = now.Project,
+                    projectPath = now.ProjectPath,
+                    protocolVersion = now.ProtocolVersion,
                     pipe = now.Pipe,
                 },
-                pinned = _engine.PinnedEngine,
+                pinned,
                 switchedFrom,
-                available = available.ConvertAll(x => new { engine = x.Engine, version = x.Version, pid = x.Pid }),
+                available = available.ConvertAll(x => new
+                {
+                    engine = x.Engine,
+                    version = x.Version,
+                    pid = x.Pid,
+                    project = x.Project,
+                    protocolVersion = x.ProtocolVersion,
+                }),
                 note = now == null
-                    ? (_engine.PinnedEngine != null
+                    ? (pinned != null
                         // "Not connected" and "not running" are different things, and pinning
-                        // makes the difference visible: the pin drops the live connection and
-                        // the reconnect happens in the background, so for a moment the target
-                        // is both listed and unconnected. Saying it is not running then sends
-                        // someone off to start an editor that is already open.
-                        ? (available.Exists(e => e.Is(_engine.PinnedEngine))
-                            ? $"Pinned to '{_engine.PinnedEngine}', which is running; the connection is still being " +
-                              "made. Call engine_status again in a moment."
-                            : $"Not connected: nothing named '{_engine.PinnedEngine}' is running. " +
+                        // makes the difference visible: a target can be listed and still
+                        // unconnected while its plugin restarts. Saying it is not running then
+                        // sends someone off to start an editor that is already open.
+                        ? (matching.Count > 0
+                            ? $"Pinned to '{pinned}', which is running, but it did not answer yet (a domain reload, " +
+                              "or the plugin is restarting). It is retried in the background; call engine_status again."
+                            : $"Not connected: nothing matching '{pinned}' (engine, pid or project) is running. " +
                               "Start it, or unpin with an empty string.")
                         : "Not connected: no engine plugin is running.")
-                    : available.Count > 1 && _engine.PinnedEngine == null
-                        ? "More than one engine is running and none is pinned: a reconnect (any script recompile) may switch the target."
+                    : matching.Count > 1
+                        // Two editors of one engine: a name pin cannot choose between them, and a reconnect
+                        // may land on the other one.
+                        ? (pinned == null
+                            ? "More than one engine is running and none is pinned: a reconnect (any script recompile) may switch the target. Pin by pid or project."
+                            : $"'{pinned}' matches {matching.Count} running editors: a reconnect may switch between them. Pin by pid or project.")
                         : null,
             };
 

@@ -231,10 +231,10 @@ namespace AkerMcp.Server
 
             // ---- server and OS -------------------------------------------------
             ["engine_status"] =
-                "Which engine answers these tools, which others are running, and optionally pin one " +
-                "(engine='unity'; an empty string unpins). A pin survives reconnects and the server stays " +
-                "disconnected rather than switching editors; AKER_MCP_ENGINE does the same. Call it when " +
-                "execute compiles fine but the engine's own types are missing.",
+                "Which engine answers these tools, which others run, and optionally pin one: by engine name, " +
+                "or by pid or project to choose between two editors of one engine. A pin survives reconnects " +
+                "and the server stays disconnected rather than switching editors; AKER_MCP_ENGINE does the " +
+                "same. Call it when execute compiles fine but the engine's own types are missing.",
 
             ["list_windows"] =
                 "Visible top-level windows on the machine running the server: title, process name, " +

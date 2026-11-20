@@ -30,7 +30,12 @@ namespace AkerMcp.Loopback
         /// Drives the pipe name and the discovery lock file, so a test can start TWO of these and
         /// check WHICH one the server picks — the case where the target used to change by itself.
         /// </param>
-        public FakeEnginePlugin(string engineName = "Loopback") => _engineName = engineName;
+        public FakeEnginePlugin(string engineName = "Loopback")
+        {
+            _engineName = engineName;
+            // A project of its own, so two fakes can be told apart by project as well as by engine name.
+            Editor.ProjectPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), engineName + "Game");
+        }
 
         protected override ISceneGraph CreateSceneGraph() => new FakeSceneGraph();
         protected override IEngineCapabilities CreateCapabilities() => new FakeCapabilities(_engineName);
@@ -205,7 +210,8 @@ namespace AkerMcp.Loopback
         public string? GetCurrentScenePath() => "loopback://scene";
         public void OpenScene(string path) { }
         public void SaveScene() { }
-        public string GetProjectPath() => System.IO.Path.GetTempPath();
+        public string ProjectPath = System.IO.Path.GetTempPath();
+        public string GetProjectPath() => ProjectPath;
         // The console buffer, newest last, filled by a test. Like the real plugins, GetRecentLogs hands out a copy of the tail.
         public readonly List<LogEntry> Logs = new List<LogEntry>();
         public IEnumerable<LogEntry> GetRecentLogs(int count = 50) => Logs.Skip(Math.Max(0, Logs.Count - count)).ToList();
