@@ -45,6 +45,56 @@ Then, in order of how likely they are to be wrong:
 Both **Accessibility** and **Screen Recording** permission are required. The tools name the
 right settings pane when they are missing.
 
+## After the November 2026 review: compiled, not yet seen running
+
+Every item of `IMPROVEMENT_PLAN.md` was checked against the code, and the real ones are fixed.
+What the loopback covers is tested; the editor halves below compile (Unity against the 6000.6
+assemblies, Godot in Debug and ExportRelease, Stride against a local Game Studio build) and have
+not run inside an editor. First smoke test on each, in order of risk:
+
+- [ ] **Unity: the DLLs moved to `Editor/Plugins`.** An existing install must have its old
+      `Plugins` folder moved, metas included — copied alongside, Unity sees every assembly twice.
+      That includes the hand-made copy in WaveFunctionCollapse. `copy-dlls` migrates the sample.
+- [ ] **Unity: execute's reference and snippet caches**, `#line` numbers, bare expressions; the
+      scene manager refusing a save without a path and an open over unsaved changes.
+- [ ] **Godot: undo** for create, delete and placed sprites/sounds; `save_scene` through the
+      editor (no more "newer on disk" prompt); importers writing an ext_resource, not inline data.
+- [ ] **Godot: execute.** The project assembly is loaded from memory (empty `Location`), so the
+      old reference builder probably left out `ScriptGlobals` and execute could not compile at
+      all. The new one reads it from `.godot/mono/temp/bin`; whether 4.4 loads the same way is
+      unverified.
+- [ ] **Stride: a Launcher install.** Its assemblies live one per NuGet package, so the installer
+      now gathers them; only a fake layout built from the fork's 4.4 packages was tried.
+- [ ] **Stride: placed sprites** are real entities now, referencing the sheet through
+      `AttachedReferenceManager.CreateProxyObject`.
+
+## After the November 2026 review: not built, and why
+
+- **Godot `set_property` undo.** `EditorUndoRedoManager` takes (object, method): a Godot-bound
+  property goes through `AddDoProperty`/`AddUndoProperty`, a nested path through `set_indexed`,
+  a C#-only property needs a small `[Tool]` GodotObject that applies a captured setter.
+- **Godot engine log capture (4.5+).** A `Godot.Logger` subclass registered with `OS.AddLogger`,
+  compiled under `GODOT4_5_OR_GREATER`; the sample is on 4.4, where the API does not exist.
+- **Godot runtime companion** (`EditorDebuggerPlugin`): pause/step via `scene:suspend_changed` and
+  `scene:next_frame` exist since 4.4, the in-game screenshot message only since 4.5.
+- **Stride audio import and play mode.** Stock Stride has `SoundAsset` in Stride.Assets.dll; play
+  in a stock Game Studio is only build + `Process.Start`.
+- **Builds off the editor thread.** `IBuildManager.Build` is synchronous and called on the main
+  thread, so a Godot export or a Stride build holds the editor (Stride now pumps the dispatcher
+  meanwhile). The fix is an async contract in Shared/Client, for all three adapters at once.
+- **Unity paths:** siblings with the same name, Prefab Mode, multi-scene and DontDestroyOnLoad.
+  Each changes the path format the tools share, so it is one design for all engines.
+- **New tools from the plan** — `set_properties`, `search_assets`, `take_screenshot` with
+  `focus_object` — and an editor panel with an activity feed and a kill switch. Features, not
+  fixes; `execute` already batches.
+- **ImageSharp stays on 3.1.12.** 3.2.0 fixes six advisories but adds a build-time Six Labors
+  licence-key check, which is a licensing decision. Decoding is restricted to PNG and JPEG, so the
+  TIFF ones are unreachable; the ICC one needs `IccProfile.Entries`, which nothing reads.
+- **An `osx-arm64` server build.** A cross-published arm64 apphost is unsigned and macOS kills it;
+  it needs a check on the Mac (`codesign -v`) before it is worth shipping.
+- **Splitting `ToolRegistry`** (about 2,500 lines) into modules: worth doing, but as its own change,
+  not mixed with fixes.
+
 ## Known limits, decided rather than pending
 
 Listed so nobody spends an afternoon rediscovering them as bugs.
