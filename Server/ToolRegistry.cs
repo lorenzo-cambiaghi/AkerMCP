@@ -1449,18 +1449,30 @@ namespace AkerMcp.Server
         private Task<ToolResult> HandleExitPlay(JsonElement? args, CancellationToken ct)
             => HandlePlayTransition(IpcConstants.Methods.ExitPlay, "exit play mode", ct);
 
+        /// <summary>
+        /// How long a play transition may take to show in get_play_state before it counts as failed. Settable so the
+        /// loopback bench can prove the failure without waiting the real eight seconds.
+        /// </summary>
+        public TimeSpan PlaySettleTimeout { get; set; } = TimeSpan.FromSeconds(8);
+
         private async Task<ToolResult> HandlePlayTransition(string method, string label, CancellationToken ct)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            var result = await _engine.ForwardToolCall(method, null, ct, timeoutMs: 120_000);
-
-            // On exit, clear any OS-level keys/buttons left held (an unbalanced pressed:true)
-            // so a forgotten key-down can't stay physically stuck at the OS level. Before the
-            // engine's answer is looked at: an exit that errors or never reconnects is exactly
-            // when nobody else will release them.
-            if (method == IpcConstants.Methods.ExitPlay)
+            ToolResult result;
+            try
             {
-                try { PlatformInput.Current?.ReleaseAll(); } catch { /* best-effort */ }
+                result = await _engine.ForwardToolCall(method, null, ct, timeoutMs: 120_000);
+            }
+            finally
+            {
+                // On exit, clear any OS-level keys/buttons left held (an unbalanced pressed:true)
+                // so a forgotten key-down can't stay physically stuck at the OS level. Before the
+                // engine's answer is looked at, and in a finally: an exit that errors, is
+                // cancelled or never reconnects is exactly when nobody else will release them.
+                if (method == IpcConstants.Methods.ExitPlay)
+                {
+                    try { PlatformInput.Current?.ReleaseAll(); } catch { /* best-effort */ }
+                }
             }
 
             bool reloaded = false;
@@ -1483,8 +1495,20 @@ namespace AkerMcp.Server
             // transition. Poll get_play_state until it reflects the intended state (or a short
             // window elapses) and report the CONFIRMED state, not the optimistic snapshot.
             bool wantPlaying = method == IpcConstants.Methods.EnterPlay;
+            var first = result.Content.Count > 0 ? result.Content[0].Text : null;
+            if (ReadJsonBool(first, "supported", true) == false)
+                // Answered as an error, not as "completed": playtest only stops on an error, and on an engine
+                // without a play mode (Stride) it went on to run its assertions against the edit-mode scene and
+                // could report PASS for a game that never ran.
+                return ToolResult.Error(
+                    $"This engine cannot {label} from the editor: " +
+                    (ReadJsonString(first, "error") ?? ReadJsonString(first, "note") ?? "no play mode."));
+
             var state = result;
-            var deadline = DateTime.UtcNow.AddSeconds(4);
+            bool? reached = null;
+            // Eight seconds, not four: a play transition that reloads the domain (Unity) spends part of the window
+            // reconnecting, and a slow editor reached the deadline while the transition was still under way.
+            var deadline = DateTime.UtcNow + PlaySettleTimeout;
             while (DateTime.UtcNow < deadline && !ct.IsCancellationRequested)
             {
                 var polled = await _engine.ForwardToolCall(IpcConstants.Methods.GetPlayState, null, ct);
@@ -1493,13 +1517,22 @@ namespace AkerMcp.Server
                     state = polled;
                     var txt = polled.Content.Count > 0 ? polled.Content[0].Text : "";
                     var isPlaying = ReadJsonBoolNullable(txt, "isPlaying");
-                    if (isPlaying == wantPlaying) break;                 // reached the intended state
+                    reached = isPlaying == wantPlaying;
+                    if (reached == true) break;                          // reached the intended state
                     if (ReadJsonBool(txt, "supported", true) == false) break; // engine can't report it
                 }
                 await Task.Delay(200, ct).ConfigureAwait(false);
             }
 
             var settled = state.Content.Count > 0 ? state.Content[0].Text : null;
+            if (reached == false && ReadJsonBool(settled, "supported", true) != false)
+                // Compile errors keep Unity out of play; an engine refusing for its own reason does the same. Saying
+                // "completed" here is what let a playtest run in edit mode.
+                return ToolResult.Error(
+                    $"Could not {label}: the engine still reports isPlaying={(!wantPlaying).ToString().ToLowerInvariant()} " +
+                    $"after {(int)sw.Elapsed.TotalSeconds}s. " +
+                    (wantPlaying ? "Check get_compile_errors and the console (get_console_logs) for why it did not start. " : "") +
+                    $"State: {settled}");
 
             // Cache a separate-window game's title (Godot) so send_input/capture_sequence
             // auto-route to it without a manual window_title; clear it on exit.
@@ -2123,6 +2156,8 @@ namespace AkerMcp.Server
             bool hasArgs = a.ValueKind == JsonValueKind.Object;
             bool doEnter = ReadBool(a, "enter", true);
             bool doExit = ReadBool(a, "exit", true);
+            if (hasArgs && ValidatePlaytestSteps(a) is { } invalid)
+                return ToolResult.Error($"playtest: {invalid}"); // before play starts: nothing to undo
 
             var content = new List<ContentItem>();
             var log = new System.Text.StringBuilder();
@@ -2209,6 +2244,8 @@ namespace AkerMcp.Server
                         var r = await HandleSendInput(input, ct);
                         var rt = r.Content.Count > 0 ? r.Content[0].Text : "";
                         log.AppendLine($"[{sw.Elapsed.TotalSeconds:0.0}s] input -> {(r.IsError ? "ERROR: " : "")}{Truncate(rt, 100)}");
+                        // An input that did not land means the run did not test what it describes: not a PASS.
+                        if (r.IsError) record(false);
                     }
                     else if (step.TryGetProperty("capture", out var cap))
                     {
@@ -2267,6 +2304,45 @@ namespace AkerMcp.Server
                 assertionReports.Add(new { step = "criteria", passed = pass, assertions = rep });
                 log.AppendLine($"[{sw.Elapsed.TotalSeconds:0.0}s] criteria -> {(pass ? "PASS" : "FAIL")}");
             }
+        }
+
+        private static readonly string[] PlaytestActions = { "wait_ms", "input", "capture", "assert", "sample" };
+        private static readonly string[] PlaytestModifiers = { "timeout_ms", "poll_ms", "label" };
+        private const int MaxPlaytestCaptures = 8;
+
+        /// <summary>
+        /// The timeline read whole before play starts. A step with two actions ran only the first and dropped the other
+        /// without a word ({"input":…, "wait_ms":300} lost its input), a misspelt key ({"wait":500}) was skipped, and
+        /// any number of captures went back as images — each a few hundred KB of the caller's context.
+        /// </summary>
+        private static string? ValidatePlaytestSteps(JsonElement a)
+        {
+            if (a.ValueKind != JsonValueKind.Object || !a.TryGetProperty("steps", out var steps)) return null;
+            if (steps.ValueKind != JsonValueKind.Array) return "'steps' must be an array of step objects.";
+
+            int idx = 0, captures = 0;
+            foreach (var step in steps.EnumerateArray())
+            {
+                idx++;
+                if (step.ValueKind != JsonValueKind.Object)
+                    return $"Step {idx} is not an object. Each step is one of: {string.Join(", ", PlaytestActions)}.";
+                var actions = new List<string>();
+                foreach (var p in step.EnumerateObject())
+                {
+                    if (Array.IndexOf(PlaytestActions, p.Name) >= 0) actions.Add(p.Name);
+                    else if (Array.IndexOf(PlaytestModifiers, p.Name) < 0)
+                        return $"Step {idx} has an unknown key '{p.Name}'. A step is one of: {string.Join(", ", PlaytestActions)}" +
+                               $" (assert also takes {string.Join(", ", PlaytestModifiers)}).";
+                }
+                if (actions.Count != 1)
+                    return actions.Count == 0
+                        ? $"Step {idx} has no action. A step is one of: {string.Join(", ", PlaytestActions)}."
+                        : $"Step {idx} has {actions.Count} actions ({string.Join(", ", actions)}); give each its own step, in order.";
+                if (actions[0] == "capture" && ++captures > MaxPlaytestCaptures)
+                    return $"More than {MaxPlaytestCaptures} capture steps: each frame costs the caller's context. " +
+                           "Use fewer, or capture_sequence for a burst.";
+            }
+            return null;
         }
 
         private static string Truncate(string? s, int n)

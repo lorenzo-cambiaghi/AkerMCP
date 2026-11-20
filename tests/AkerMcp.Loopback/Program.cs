@@ -835,6 +835,15 @@ namespace AkerMcp.Loopback
             var asr = await Call(reg, "assert_state", new { assertions = new[] { new { expression = "x", op = ">", value = 0 } } });
             Check("assert_state passed:true", Text(asr).Contains("\"passed\":true"), Text(asr));
 
+            // A playtest step with two actions, or a key that is no action, is refused before play starts; each used
+            // to drop the part it did not recognise.
+            var twoInOne = await Call(reg, "playtest", new { steps = new object[] { new { wait_ms = 10, sample = new { y = "y" } } } });
+            Check("a playtest step with two actions is refused", twoInOne.IsError && Text(twoInOne).Contains("2 actions"), Text(twoInOne));
+            var typoStep = await Call(reg, "playtest", new { steps = new object[] { new { wait = 500 } } });
+            Check("a playtest step with an unknown key is refused", typoStep.IsError && Text(typoStep).Contains("unknown key") && Text(typoStep).Contains("wait"), Text(typoStep));
+            var manyCaptures = await Call(reg, "playtest", new { steps = Enumerable.Repeat<object>(new { capture = true }, 9).ToArray() });
+            Check("a playtest with more captures than the cap is refused", manyCaptures.IsError && Text(manyCaptures).Contains("capture steps"), Text(manyCaptures));
+
             var pt = await Call(reg, "playtest", new
             {
                 steps = new object[]
@@ -875,6 +884,22 @@ namespace AkerMcp.Loopback
             var afterAbandon = await Call(reg, "get_play_state", new { });
             Check("a cancelled playtest still exits play",
                 Text(afterAbandon).Contains("\"isPlaying\":false"), Text(afterAbandon));
+
+            // A play mode that never starts is an error, and a playtest stops on it. Both used to say "completed": the
+            // playtest then ran its assertions against the edit-mode scene and could answer PASS.
+            fake.Play.WontStart = true;
+            reg.PlaySettleTimeout = TimeSpan.FromSeconds(1);
+            var noStart = await Call(reg, "enter_play", new { });
+            Check("enter_play that never reaches play mode is an error", noStart.IsError && Text(noStart).Contains("isPlaying=false"), Text(noStart));
+            var ptNoStart = await Call(reg, "playtest", new { criteria = new[] { new { expression = "z", op = "truthy" } } });
+            Check("a playtest whose game never starts fails instead of passing", ptNoStart.IsError && !Text(ptNoStart).Contains("PASS"), Text(ptNoStart));
+            fake.Play.WontStart = false;
+            fake.Play.Unsupported = true;
+            var noPlayMode = await Call(reg, "enter_play", new { });
+            Check("enter_play on an engine without a play mode is an error that says so",
+                noPlayMode.IsError && Text(noPlayMode).Contains("cannot enter play mode"), Text(noPlayMode));
+            fake.Play.Unsupported = false;
+            reg.PlaySettleTimeout = TimeSpan.FromSeconds(8);
 
             // Reconnect: simulate a plugin restart (Unity domain reload) — the retry loop reconnects.
             fake.Stop();

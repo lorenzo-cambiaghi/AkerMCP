@@ -237,8 +237,15 @@ namespace AkerMcp.Loopback
         private double _time;
         private long _frames;
 
-        public PlayState GetState() => Snap();
-        public PlayState EnterPlay() { _playing = true; _paused = false; _time = 0.016; _frames = 1; return Snap(); }
+        // An engine with no play mode (Stride), and one that stays in edit mode (Unity with compile errors).
+        public bool Unsupported, WontStart;
+
+        public PlayState GetState() => Unsupported ? new PlayState { Supported = false, Note = "no play mode" } : Snap();
+        public PlayState EnterPlay()
+        {
+            if (Unsupported) return new PlayState { Supported = false, Error = "no play mode here" };
+            if (WontStart) return Snap();
+            _playing = true; _paused = false; _time = 0.016; _frames = 1; return Snap(); }
         public PlayState ExitPlay() { _playing = false; _paused = false; _time = 0; _frames = 0; return Snap(); }
         public PlayState SetPaused(bool paused) { _paused = paused; return Snap(); }
         public PlayState Step(int frames) { var n = Math.Max(1, frames); _time += 0.016 * n; _frames += n; return Snap(); }
