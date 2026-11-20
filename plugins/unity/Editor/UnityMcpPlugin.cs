@@ -13,6 +13,8 @@ namespace AkerMcp.Unity
         private UnityMainThreadDispatcher? _dispatcher;
         private UnityCompilationSupport? _compilationSupport;
         private DynamicEvaluatorV2? _codeExecutor;
+        private UnityEditorContext? _editorContext;
+        private UnityPlayModeController? _playModeController;
 
         public static UnityMcpPlugin Instance
         {
@@ -38,7 +40,7 @@ namespace AkerMcp.Unity
             _dispatcher = new UnityMainThreadDispatcher();
             return _dispatcher;
         }
-        protected override IEditorContext? CreateEditorContext() => new UnityEditorContext();
+        protected override IEditorContext? CreateEditorContext() => _editorContext = new UnityEditorContext();
         protected override IAssetManager? CreateAssetManager() => null;
         protected override ICompilationSupport? CreateCompilationSupport()
         {
@@ -54,7 +56,7 @@ namespace AkerMcp.Unity
         protected override IBuildManager? CreateBuildManager() => new UnityBuildManager();
         protected override ISpriteImporter? CreateSpriteImporter() => new UnitySpriteImporter();
         protected override ISceneManager? CreateSceneManager() => new UnitySceneManager();
-        protected override IPlayModeController? CreatePlayModeController() => new UnityPlayModeController();
+        protected override IPlayModeController? CreatePlayModeController() => _playModeController = new UnityPlayModeController();
         // In-process input via the new Input System (reflection; falls back to OS-level if absent).
         protected override IInputSimulator? CreateInputSimulator() => new UnityInputSimulator(_dispatcher!);
         protected override ISoundImporter? CreateSoundImporter() => new UnityAudioImporter();
@@ -66,6 +68,8 @@ namespace AkerMcp.Unity
         {
             _dispatcher?.Unregister();
             _compilationSupport?.Unhook();
+            _editorContext?.Detach();
+            _playModeController?.Detach();
             base.Stop();
             _instance = null;
         }

@@ -21,11 +21,38 @@ namespace AkerMcp.Unity
         private bool _lastCompileSucceeded = true;
         private DateTime _lastCompileTime = DateTime.MinValue;
         private bool _hooked;
+        // The editor says the scripts do not compile, but no compile that this plugin heard produced the errors.
+        private bool _failedUnseen;
 
         public UnityCompilationSupport()
         {
             RestoreFromSession();
+            ReconcileWithEditor();
             HookEvents();
+        }
+
+        /// <summary>
+        /// The events only report compiles that run while this instance listens. A project opened with compile errors
+        /// was compiled before this assembly loaded, and SessionState starts empty in a new editor session: the report
+        /// read "Compilation SUCCEEDED at never: 0 error(s)" for a project that does not compile. The editor's own
+        /// verdict on the scripts as they stand wins over a remembered success.
+        /// </summary>
+        private void ReconcileWithEditor()
+        {
+            if (!EditorUtility.scriptCompilationFailed || !_lastCompileSucceeded) return;
+
+            _failedUnseen = true;
+            _lastCompileSucceeded = false;
+            _messages.Clear();
+            // File doubles as the message prefix, so the report prints the sentence alone instead of "(0,0): error:".
+            _messages.Add(new CompileMessage
+            {
+                Type = CompileMessageType.Error,
+                File = "AkerMcp",
+                Message = "AkerMcp: the editor reports script compile errors from a compile that ran before the " +
+                          "plugin started, so their text was not captured. refresh_scripts recompiles and reports them " +
+                          "(the Unity Console shows them too).",
+            });
         }
 
         private void HookEvents()
@@ -46,6 +73,15 @@ namespace AkerMcp.Unity
             // every assembly: tens of seconds of editor downtime per micro-change.)
             AssetDatabase.Refresh();
 
+            // Errors that predate the plugin come back only from a compile that runs now: with nothing changed on
+            // disk, the refresh above compiles nothing and the report would stay a placeholder.
+            if (_failedUnseen && !EditorApplication.isCompiling)
+            {
+                CompilationPipeline.RequestScriptCompilation();
+                Debug.Log("[AkerMcp] Script compilation requested: the current compile errors predate the plugin.");
+                return;
+            }
+
             Debug.Log("[AkerMcp] Asset refresh requested (incremental script compile).");
         }
 
@@ -58,9 +94,11 @@ namespace AkerMcp.Unity
                 LastCompileSucceeded = _lastCompileSucceeded,
                 ErrorCount = _messages.Count(m => m.Type == CompileMessageType.Error),
                 WarningCount = _messages.Count(m => m.Type == CompileMessageType.Warning),
-                LastCompileTime = _lastCompileTime == DateTime.MinValue
-                    ? "never"
-                    : _lastCompileTime.ToString("HH:mm:ss")
+                LastCompileTime = _failedUnseen
+                    ? "unknown (before the plugin started)"
+                    : _lastCompileTime == DateTime.MinValue
+                        ? "never"
+                        : _lastCompileTime.ToString("HH:mm:ss")
             };
         }
 
@@ -72,11 +110,15 @@ namespace AkerMcp.Unity
         public void ClearCompileMessages()
         {
             _messages.Clear();
+            // The SessionState copy too: it is what the next instance restores after a domain reload, and it brought
+            // the cleared messages back.
+            SaveToSession();
         }
 
         private void OnCompilationStarted(object context)
         {
             _isCompiling = true;
+            _failedUnseen = false;
             _messages.Clear();
         }
 

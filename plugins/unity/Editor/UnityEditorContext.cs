@@ -48,13 +48,35 @@ namespace AkerMcp.Unity
             ILogHandler current = Debug.unityLogger.logHandler;
             // A context started again without a domain reload replaces the previous capture instead of stacking on it.
             if (current is CapturingLogHandler previous) current = previous.Inner;
-            Debug.unityLogger.logHandler = new CapturingLogHandler(current, this);
+            _logHandler = new CapturingLogHandler(current, this);
+            Debug.unityLogger.logHandler = _logHandler;
+        }
+
+        private CapturingLogHandler? _logHandler;
+
+        /// <summary>
+        /// Stops recording: called when the plugin stops. Stop/Start from the AkerMcp window does not reload the
+        /// domain, and the old context stayed subscribed to <c>logMessageReceived</c> — the static event kept it
+        /// alive, so the finalizer meant to unsubscribe it never ran — recording every log into a buffer nobody read.
+        /// </summary>
+        public void Detach()
+        {
+            Application.logMessageReceived -= OnLogMessage;
+            if (_logHandler == null) return;
+            _logHandler.Detached = true;
+            // Unwrapped only if nobody wrapped it since; otherwise it stays in the chain as a plain pass-through.
+            if (ReferenceEquals(Debug.unityLogger.logHandler, _logHandler))
+                Debug.unityLogger.logHandler = _logHandler.Inner;
+            _logHandler = null;
         }
 
         public string? GetSelectedObjectPath()
         {
             var selected = Selection.activeGameObject;
             if (selected == null) return null;
+            // A prefab ASSET selected in the Project window is a GameObject too, with no scene: its name path was then
+            // looked up in the open scene, and get_selection described whichever scene object shared that path.
+            if (EditorUtility.IsPersistent(selected)) return null;
             return new UnitySceneNode(selected).Path;
         }
 
@@ -84,7 +106,13 @@ namespace AkerMcp.Unity
 
         public string GetProjectPath()
         {
-            return Application.dataPath.Replace("/Assets", "");
+            // Only the trailing "/Assets": Replace("/Assets", "") also cut it out of the middle, and a project under
+            // D:/Assets/Game resolved to D:/Game — where write_script then wrote its files.
+            var dataPath = Application.dataPath;
+            const string assets = "/Assets";
+            return dataPath.EndsWith(assets, StringComparison.Ordinal)
+                ? dataPath.Substring(0, dataPath.Length - assets.Length)
+                : System.IO.Directory.GetParent(dataPath)?.FullName ?? dataPath;
         }
 
         public IEnumerable<LogEntry> GetRecentLogs(int count = 50)
@@ -137,17 +165,15 @@ namespace AkerMcp.Unity
             }
         }
 
-        ~UnityEditorContext()
-        {
-            Application.logMessageReceived -= OnLogMessage;
-        }
-
         /// <summary>Records each managed log, then hands it to the handler it wraps.</summary>
         private sealed class CapturingLogHandler : ILogHandler
         {
             private readonly UnityEditorContext _owner;
 
             public ILogHandler Inner { get; }
+
+            /// <summary>Set when the owning context stops: from then on the handler only forwards.</summary>
+            public volatile bool Detached;
 
             public CapturingLogHandler(ILogHandler inner, UnityEditorContext owner)
             {
@@ -157,6 +183,7 @@ namespace AkerMcp.Unity
 
             public void LogFormat(LogType logType, UnityEngine.Object context, string format, params object[] args)
             {
+                if (Detached) { Inner.LogFormat(logType, context, format, args); return; }
                 _owner.Record(Format(format, args), StackFor(logType), logType);
                 t_forwarding = true;
                 try { Inner.LogFormat(logType, context, format, args); }
@@ -165,6 +192,7 @@ namespace AkerMcp.Unity
 
             public void LogException(Exception exception, UnityEngine.Object context)
             {
+                if (Detached) { Inner.LogException(exception, context); return; }
                 _owner.Record($"{exception.GetType().Name}: {exception.Message}", exception.StackTrace ?? string.Empty,
                     LogType.Exception);
                 t_forwarding = true;
@@ -181,7 +209,37 @@ namespace AkerMcp.Unity
 
             // The callback carries Unity's stack for every level; here it costs a walk, so only where it is read.
             private static string StackFor(LogType logType) =>
-                logType == LogType.Log ? string.Empty : StackTraceUtility.ExtractStackTrace();
+                logType == LogType.Log ? string.Empty : WithoutLoggingFrames(StackTraceUtility.ExtractStackTrace());
+
+            // The stack is taken from INSIDE the log call, so it opened with this handler and Unity's Debug/Logger
+            // plumbing: since the handler went in, the "Stack:" of every Debug.LogError in get_console_logs pointed at
+            // AkerMcp instead of the code that logged. Only the leading run goes: deeper down the same names are real
+            // callers.
+            private static string WithoutLoggingFrames(string stack)
+            {
+                var lines = stack.Split('\n');
+                int first = 0;
+                while (first < lines.Length && IsLoggingFrame(lines[first])) first++;
+                return first == 0 ? stack : string.Join("\n", lines, first, lines.Length - first);
+            }
+
+            private static readonly string[] LoggingFramePrefixes =
+            {
+                "UnityEngine.StackTraceUtility:",
+                "UnityEngine.Debug:",
+                "UnityEngine.Logger:",
+                "UnityEngine.DebugLogHandler:",
+                // Unity writes a nested type as Outer/Inner; .NET as Outer+Inner.
+                typeof(CapturingLogHandler).FullName!.Replace('+', '/') + ":",
+                typeof(CapturingLogHandler).FullName + ":",
+            };
+
+            private static bool IsLoggingFrame(string line)
+            {
+                foreach (var prefix in LoggingFramePrefixes)
+                    if (line.StartsWith(prefix, StringComparison.Ordinal)) return true;
+                return false;
+            }
         }
     }
 }
