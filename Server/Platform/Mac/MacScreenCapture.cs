@@ -534,7 +534,6 @@ namespace AkerMcp.Server.Platform.Mac
             "/System/Library/Frameworks/ImageIO.framework/ImageIO";
 
         // CGWindowList option flags (from CGWindow.h)
-        private const uint kCGWindowListOptionAll              = 0;
         private const uint kCGWindowListOptionOnScreenOnly     = 1 << 0;
         private const uint kCGWindowListOptionIncludingWindow  = 1 << 3;
         private const uint kCGWindowListExcludeDesktopElements = 1 << 4;
@@ -542,7 +541,6 @@ namespace AkerMcp.Server.Platform.Mac
 
         // CGWindowImageOption flags
         private const uint kCGWindowImageBoundsIgnoreFraming = 1 << 0;
-        private const uint kCGWindowImageBestResolution      = 1 << 3;
         private const uint kCGWindowImageNominalResolution   = 1 << 4;
 
         // CGRect must be passed BY VALUE to CGWindowListCreateImage (4 doubles

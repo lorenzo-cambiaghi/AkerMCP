@@ -1,6 +1,9 @@
+using System;
 using System.IO;
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats;
 using SixLabors.ImageSharp.Formats.Jpeg;
+using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.Processing;
 
 namespace AkerMcp.Server
@@ -50,7 +53,7 @@ namespace AkerMcp.Server
         public static NormalizedImage Normalize(byte[] sourceBytes,
             int maxDimension = DefaultMaxDimension, int quality = DefaultJpegQuality)
         {
-            using var image = Image.Load(sourceBytes);
+            using var image = Decode(sourceBytes);
             int srcW = image.Width, srcH = image.Height;
 
             var (w, h) = FitWithin(srcW, srcH, maxDimension);
@@ -67,6 +70,48 @@ namespace AkerMcp.Server
             using var outStream = new MemoryStream();
             image.SaveAsJpeg(outStream, new JpegEncoder { Quality = quality });
             return new NormalizedImage(outStream.ToArray(), srcW, srcH, image.Width, image.Height);
+        }
+
+        /// <summary>
+        /// Only the two formats a capture ever arrives in. Every path that feeds this produces
+        /// PNG — the Windows and macOS captures, Unity's EncodeToPNG, Godot's SavePngToBuffer,
+        /// Stride's back-buffer save — and IScreenCapture lets a third-party adapter answer
+        /// JPEG. Image.Load's default configuration also carries the TIFF, BMP, GIF, WebP, TGA,
+        /// PBM and QOI decoders, and ImageSharp 3.1 has published advisories against its TIFF
+        /// decoder (a heap write out of bounds on tiled fax data, an endless BigTIFF loop); 3.2
+        /// fixes them but needs a licence key to build. A decoder that is not registered cannot
+        /// be reached, whatever the bytes claim to be.
+        ///
+        /// <para>Metadata is skipped as well, and the ICC profile dropped by hand. The remaining
+        /// ICC advisory (a CLUT sized from the profile before it is checked) is reached in 3.1
+        /// only when a profile's entries are parsed, which nothing here does: the JPEG encoder
+        /// copies the profile's raw bytes. But it did copy them — 3.1.12's PNG decoder reads
+        /// iCCP whatever SkipMetadata says (measured), so a capture's profile travelled into the
+        /// JPEG handed to the client, for whatever parses it there. It costs no pixel: 3.1 does
+        /// not colour-convert on decode (measured identical), and the JPEG is for a model to
+        /// look at, not to colour-manage.</para>
+        /// </summary>
+        private static readonly DecoderOptions CaptureDecoding = new DecoderOptions
+        {
+            Configuration = new Configuration(new PngConfigurationModule(), new JpegConfigurationModule()),
+            SkipMetadata = true,
+        };
+
+        private static Image Decode(byte[] sourceBytes)
+        {
+            try
+            {
+                var image = Image.Load(CaptureDecoding, sourceBytes);
+                image.Metadata.IccProfile = null;
+                return image;
+            }
+            catch (UnknownImageFormatException)
+            {
+                var head = Convert.ToHexString(sourceBytes, 0, Math.Min(8, sourceBytes.Length));
+                throw new NotSupportedException(
+                    $"The image is neither PNG nor JPEG (it starts with 0x{head}); captures are decoded " +
+                    "only in those two formats.");
+            }
         }
 
         private static (int w, int h) FitWithin(int srcW, int srcH, int max)

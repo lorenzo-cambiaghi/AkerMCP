@@ -328,6 +328,14 @@ namespace AkerMcp.Server.Platform.Windows
         {
             error = null;
 
+            // A minimized window has no client area to render, and the answer used to be
+            // "Invalid window dimensions: 0x0" — true, and no help in finding the way out.
+            if (IsIconic(hWnd))
+            {
+                error = $"Window '{GetTitle(hWnd)}' is minimized; call focus_window first.";
+                return null;
+            }
+
             if (!GetClientRect(hWnd, out var client) || !GetWindowRect(hWnd, out var window))
             {
                 error = "GetClientRect/GetWindowRect failed.";
@@ -479,33 +487,36 @@ namespace AkerMcp.Server.Platform.Windows
             IntPtr screenDc = GetDC(IntPtr.Zero);
             if (screenDc == IntPtr.Zero) return null;
 
+            // Each resource is let go once, in the reverse of the order it was taken: the HDC
+            // before the Graphics it came from, the Graphics before the bitmap it draws on. The
+            // failure path used to release the HDC twice and dispose the bitmap while the
+            // Graphics over it was still alive.
             Bitmap? shot = null;
             try
             {
                 shot = new Bitmap(w, h, PixelFormat.Format32bppArgb);
-                using var g = Graphics.FromImage(shot);
-                IntPtr dst = g.GetHdc();
-                try
+                bool copied;
+                using (var g = Graphics.FromImage(shot))
                 {
-                    if (!BitBlt(dst, 0, 0, w, h, screenDc, r.Left, r.Top, SRCCOPY))
-                    {
-                        g.ReleaseHdc(dst);
-                        shot.Dispose();
-                        return null;
-                    }
+                    IntPtr dst = g.GetHdc();
+                    try { copied = BitBlt(dst, 0, 0, w, h, screenDc, r.Left, r.Top, SRCCOPY); }
+                    finally { g.ReleaseHdc(dst); }
                 }
-                finally
-                {
-                    try { g.ReleaseHdc(dst); } catch { /* released above on the failure path */ }
-                }
-                return shot;
+                if (!copied) return null;
+
+                var result = shot;
+                shot = null;                  // handed to the caller, not disposed below
+                return result;
             }
             catch
             {
-                shot?.Dispose();
                 return null;
             }
-            finally { ReleaseDC(IntPtr.Zero, screenDc); }
+            finally
+            {
+                shot?.Dispose();
+                ReleaseDC(IntPtr.Zero, screenDc);
+            }
         }
 
         private const int SRCCOPY = 0x00CC0020;
