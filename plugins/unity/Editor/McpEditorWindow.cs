@@ -194,7 +194,7 @@ namespace AkerMcp.Unity.Editor
             if (rows.Count == 0)
             {
                 EditorGUILayout.LabelField(
-                    "No AI client found on this computer (Claude Code, Claude Desktop, Cursor, Windsurf, Antigravity, VS Code). " +
+                    "No AI client found on this computer (" + string.Join(", ", AiClientCatalog.All.Select(c => c.DisplayName)) + "). " +
                     "Install one, or click 'Show all clients' to set one up anyway.",
                     EditorStyles.wordWrappedMiniLabel);
             }

@@ -5,6 +5,9 @@ using System.Runtime.InteropServices;
 
 namespace AkerMcp.Shared.Setup
 {
+    /// <summary>How a client's config file is written: JSON for most, TOML for Codex.</summary>
+    public enum ConfigFormat { Json, Toml }
+
     /// <summary>
     /// Describes one supported AI MCP client and where its user-level MCP configuration lives
     /// on the current operating system. Shared between the standalone server CLI (`aker-mcp setup`)
@@ -26,6 +29,8 @@ namespace AkerMcp.Shared.Setup
         /// </summary>
         public string? ProjectsProperty { get; }
 
+        public ConfigFormat Format { get; }
+
         public AiClientDefinition(
             string id,
             string displayName,
@@ -34,7 +39,8 @@ namespace AkerMcp.Shared.Setup
             string rootProperty = "mcpServers",
             bool includeTypeStdio = false,
             string restartHint = "",
-            string? projectsProperty = null)
+            string? projectsProperty = null,
+            ConfigFormat format = ConfigFormat.Json)
         {
             Id = id;
             DisplayName = displayName;
@@ -46,6 +52,7 @@ namespace AkerMcp.Shared.Setup
                 ? $"Restart {displayName} to pick up the change."
                 : restartHint;
             ProjectsProperty = projectsProperty;
+            Format = format;
         }
 
         /// <summary>
@@ -97,6 +104,19 @@ namespace AkerMcp.Shared.Setup
             var windsurfDir = Path.Combine(home, ".codeium", "windsurf");
             var antigravityDir = Path.Combine(home, ".gemini", "antigravity");
 
+            // Codex (CLI, desktop app and IDE extension share it) honours CODEX_HOME, ~/.codex by default.
+            var codexHome = Environment.GetEnvironmentVariable("CODEX_HOME");
+            var codexDir = string.IsNullOrWhiteSpace(codexHome) ? Path.Combine(home, ".codex") : codexHome!;
+
+            // Cline keeps its data in ~/.cline/data (CLI and extension); older extension versions kept the MCP settings in
+            // VS Code's globalStorage, which is used only when ~/.cline is not there.
+            var clineDir = Path.Combine(home, ".cline");
+            var clineLegacyDir = Path.Combine(vsCodeUserDir, "globalStorage", "saoudrizwan.claude-dev");
+            var clineSettings = Directory.Exists(clineDir) || !Directory.Exists(clineLegacyDir)
+                ? Path.Combine(clineDir, "data", "settings", "cline_mcp_settings.json")
+                : Path.Combine(clineLegacyDir, "settings", "cline_mcp_settings.json");
+            var clineDetect = Directory.Exists(clineDir) ? clineDir : clineLegacyDir;
+
             return new[]
             {
                 new AiClientDefinition(
@@ -117,6 +137,15 @@ namespace AkerMcp.Shared.Setup
                     rootProperty: "mcpServers",
                     includeTypeStdio: false,
                     restartHint: "Quit and reopen Claude Desktop to pick up the change."),
+
+                new AiClientDefinition(
+                    id: "codex",
+                    displayName: "Codex (OpenAI)",
+                    configPath: Path.Combine(codexDir, "config.toml"),
+                    detectionPath: codexDir,
+                    rootProperty: "mcp_servers",
+                    restartHint: "Start a new Codex session (or restart the Codex app) to pick up the change.",
+                    format: ConfigFormat.Toml),
 
                 new AiClientDefinition(
                     id: "cursor",
@@ -144,6 +173,15 @@ namespace AkerMcp.Shared.Setup
                     rootProperty: "mcpServers",
                     includeTypeStdio: true,
                     restartHint: "Reload Antigravity MCP servers to pick up the change."),
+
+                new AiClientDefinition(
+                    id: "cline",
+                    displayName: "Cline",
+                    configPath: clineSettings,
+                    detectionPath: clineDetect,
+                    rootProperty: "mcpServers",
+                    includeTypeStdio: false,
+                    restartHint: "Cline reloads its MCP settings by itself; if the server is not listed, restart it from Cline's MCP Servers view."),
 
                 new AiClientDefinition(
                     id: "vscode",

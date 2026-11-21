@@ -217,6 +217,7 @@ namespace AkerMcp.Loopback
 
                 ServerInstallLayout(check, tmpDir);
                 ConnectionKinds(check, tmpDir);
+                TomlPatching(check, tmpDir);
             }
             finally
             {
@@ -251,6 +252,74 @@ namespace AkerMcp.Loopback
                 placed == again && File.Exists(placed) && File.ReadAllText(placed) == "binary"
                 && Path.GetFileName(Path.GetDirectoryName(placed)) == "win-x64" && leftovers.Length == 0,
                 $"{placed} | {leftovers.Length} staging");
+        }
+
+        // ---- Codex's config.toml: one table edited, every other byte left alone ----
+        private static void TomlPatching(Action<string, bool, string?> check, string tmpDir)
+        {
+            // Shaped like a real ~/.codex/config.toml on Windows: CRLF, literal-string paths, another server with an env subtable.
+            const string original =
+                "# my settings\r\nmodel = \"gpt-5\"\r\n\r\n" +
+                "[mcp_servers.node_repl]\r\ncommand = 'C:\\Program Files\\x\\node.exe'\r\nargs = []\r\n\r\n" +
+                "[mcp_servers.node_repl.env]\r\nA = \"1\"\r\n\r\n" +
+                "[projects.'C:\\work']\r\ntrust_level = \"trusted\"\r\n";
+            var path = Path.Combine(tmpDir, "config.toml");
+            File.WriteAllText(path, original);
+            var codex = new AiClientDefinition("codex", "Codex", path, tmpDir, rootProperty: "mcp_servers", format: ConfigFormat.Toml);
+
+            var exe = @"C:\Users\José\AkerMcp\server\v1.2.3\win-x64\AkerMcp.Server.exe";
+            var added = McpConfigPatcher.Configure(codex, McpServerLaunchSpec.Executable(exe, "full"));
+            var text = File.ReadAllText(path);
+            var read = McpConfigPatcher.Inspect(codex);
+            check("codex: the table is appended, the rest of the file is untouched byte for byte, CRLF kept",
+                added.Success && added.Changed && text.StartsWith(original, StringComparison.Ordinal)
+                && text.Contains("\r\n[mcp_servers.game-engine]\r\n") && !text.Replace("\r\n", "").Contains("\n"),
+                text);
+            check("codex: inspect reads back the Windows path and the arguments",
+                read.IsConfigured && read.Command == exe && read.Args.Count == 2 && read.Args[1] == "full",
+                $"{read.Command} [{string.Join(",", read.Args)}] {read.ParseError}");
+
+            var again = McpConfigPatcher.Configure(codex, McpServerLaunchSpec.Executable(exe, "full"));
+            var removed = McpConfigPatcher.Remove(codex);
+            check("codex: applying twice changes nothing; removing gives back the original file exactly",
+                again.Success && !again.Changed && removed.Success && removed.Changed && File.ReadAllText(path) == original,
+                File.ReadAllText(path));
+
+            // A table the user edited: multi-line args with a comment, keys of their own, an env subtable, a table after it.
+            File.WriteAllText(path,
+                "[mcp_servers.\"game-engine\"]\ncommand = \"old\"\nargs = [\n  \"--profile\", # theirs\n  \"core\",\n]\n" +
+                "startup_timeout_sec = 120\nenv_vars = [\"X\"]\n\n[mcp_servers.game-engine.env]\nAKER = \"1\"\n\n[other]\nk = 1\n");
+            var reapplied = McpConfigPatcher.Configure(codex, McpServerLaunchSpec.Executable(exe));
+            var edited = File.ReadAllText(path);
+            var afterEdit = McpConfigPatcher.Inspect(codex);
+            check("codex: re-applying replaces command and args only; the user's keys, subtable and the next table stay",
+                reapplied.Success && afterEdit.Command == exe && afterEdit.Args.Count == 0
+                && edited.Contains("startup_timeout_sec = 120") && edited.Contains("env_vars = [\"X\"]")
+                && edited.Contains("[mcp_servers.game-engine.env]\nAKER = \"1\"") && edited.Contains("[other]\nk = 1")
+                && !edited.Contains("old") && !edited.Contains("theirs"),
+                edited);
+            McpConfigPatcher.Remove(codex);
+            var withoutSub = File.ReadAllText(path);
+            check("codex: removing the server removes its subtables too, and only them",
+                !withoutSub.Contains("game-engine") && !withoutSub.Contains("AKER") && withoutSub == "[other]\nk = 1\n",
+                withoutSub);
+
+            // A path with quotes cannot be a literal string: it goes out as a basic string with escapes and comes back the same.
+            var odd = @"C:\it's ""odd""\AkerMcp.Server.exe";
+            McpConfigPatcher.Configure(codex, McpServerLaunchSpec.Executable(odd));
+            check("codex: a value with quotes and backslashes is written as a valid escaped string and reads back the same",
+                McpConfigPatcher.Inspect(codex).Command == odd
+                && File.ReadAllText(path).Contains(@"command = ""C:\\it's \""odd\""\\AkerMcp.Server.exe"""),
+                File.ReadAllText(path));
+
+            // Defined as an inline table: not a form this edits. It must refuse and leave the file alone.
+            const string inline = "[mcp_servers]\ngame-engine = { command = \"x\", args = [] }\n";
+            File.WriteAllText(path, inline);
+            var refused = McpConfigPatcher.Configure(codex, McpServerLaunchSpec.Executable(exe));
+            var inlineStatus = AiConnection.Classify(McpConfigPatcher.Inspect(codex));
+            check("codex: a server defined as an inline table is refused, the file untouched, the entry reported unreadable",
+                !refused.Success && File.ReadAllText(path) == inline && inlineStatus.Kind == ConnectionKind.Unreadable,
+                refused.Message);
         }
 
         // ---- AiConnection: what a client entry starts, as doctor and the editor windows report it ----

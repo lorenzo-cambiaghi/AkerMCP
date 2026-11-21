@@ -149,6 +149,7 @@ namespace AkerMcp.Shared.Setup
 
         public static ClientConfigStatus Inspect(AiClientDefinition client, string serverKey = DefaultServerKey)
         {
+            if (client.Format == ConfigFormat.Toml) return TomlConfigPatcher.Inspect(client, serverKey);
             var status = new ClientConfigStatus { FileExists = File.Exists(client.ConfigPath) };
             if (!status.FileExists)
                 return status;
@@ -193,6 +194,7 @@ namespace AkerMcp.Shared.Setup
             string serverKey = DefaultServerKey,
             bool dryRun = false)
         {
+            if (client.Format == ConfigFormat.Toml) return TomlConfigPatcher.Configure(client, spec, serverKey, dryRun);
             try
             {
                 var exists = File.Exists(client.ConfigPath);
@@ -268,6 +270,7 @@ namespace AkerMcp.Shared.Setup
             string serverKey = DefaultServerKey,
             bool dryRun = false)
         {
+            if (client.Format == ConfigFormat.Toml) return TomlConfigPatcher.Remove(client, serverKey, dryRun);
             try
             {
                 if (!File.Exists(client.ConfigPath))
@@ -377,6 +380,22 @@ namespace AkerMcp.Shared.Setup
 
         private static string? WriteAtomically(string path, JsonObject root, bool createBackup)
         {
+            using (var ms = new MemoryStream())
+            {
+                using (var writer = new Utf8JsonWriter(ms, PrettyWriter))
+                {
+                    root.WriteTo(writer);
+                }
+                return WriteTextAtomically(path, Encoding.UTF8.GetString(ms.ToArray()) + Environment.NewLine, createBackup);
+            }
+        }
+
+        /// <summary>
+        /// Copies the file to &lt;file&gt;.aker-backup, then replaces it with <paramref name="text"/> in one step (temp
+        /// file + File.Replace). Returns the backup's path, or null when there was no file to back up.
+        /// </summary>
+        internal static string? WriteTextAtomically(string path, string text, bool createBackup)
+        {
             var dir = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(dir))
                 Directory.CreateDirectory(dir);
@@ -391,14 +410,7 @@ namespace AkerMcp.Shared.Setup
             var tmp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
-                using (var ms = new MemoryStream())
-                {
-                    using (var writer = new Utf8JsonWriter(ms, PrettyWriter))
-                    {
-                        root.WriteTo(writer);
-                    }
-                    File.WriteAllText(tmp, Encoding.UTF8.GetString(ms.ToArray()) + Environment.NewLine, new UTF8Encoding(false));
-                }
+                File.WriteAllText(tmp, text, new UTF8Encoding(false));
 
                 if (File.Exists(path))
                 {
