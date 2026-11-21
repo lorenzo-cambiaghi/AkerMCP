@@ -30,9 +30,17 @@ namespace AkerMcp.Client
 
         protected ClientConfiguration Config { get; } = new ClientConfiguration();
 
-        private int ActiveConnectionCount
+        /// <summary>Number of MCP servers currently connected to this editor plugin.</summary>
+        public int ActiveConnectionCount
         {
             get { lock (_connectionsLock) return _activeConnections.Count(t => !t.IsCompleted); }
+        }
+
+        /// <summary>Whether dynamic C# execution (`execute`) is permitted on this editor.</summary>
+        public bool EnableExecuteTool
+        {
+            get => Config.EnableExecuteTool;
+            set => Config.EnableExecuteTool = value;
         }
 
         protected abstract ISceneGraph CreateSceneGraph();
