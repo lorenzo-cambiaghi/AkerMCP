@@ -1,6 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
-# The npm launcher starts with a shebang: with CRLF, "env: node" fails on macOS and Linux,
+# The npm launcher starts with a shebang: with CRLF, "env: node\r" fails on macOS and Linux,
 # so it keeps LF even in a Windows checkout (core.autocrlf=true)
 packages/npm/bin/* text eol=lf
