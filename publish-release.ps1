@@ -9,6 +9,9 @@
 #   .\publish-release.ps1 -Version v1.1.0 -Notes "Custom release notes"
 #   .\publish-release.ps1 -Version v1.1.0 -SkipBuild    # reuse existing Build/ output
 #   .\publish-release.ps1 -Version v1.1.0 -DryRun      # everything except tag/release/upload
+#   .\publish-release.ps1 -Version v1.1.0 -Resume -SkipBuild
+#       # a run that stopped after pushing the tag: creates (or finds) the release and uploads
+#       # what is missing; only publish-release.ps1 may have changed since the tag
 #
 # Auth: uses $env:GITHUB_TOKEN if set, otherwise extracts the stored
 # credential from Git Credential Manager (the same one 'git push' uses).
@@ -19,7 +22,8 @@ param(
     [Parameter(Mandatory = $true)][string]$Version,
     [string]$Notes = "",
     [switch]$SkipBuild,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$Resume
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,7 +38,23 @@ if ($Version -notmatch '^v\d+\.\d+\.\d+$') {
 # --- Preflight ---------------------------------------------------------------
 
 $existingTag = git tag -l $Version
-if ($existingTag) { throw "Tag $Version already exists locally. Pick a new version." }
+if ($existingTag -and -not $Resume) {
+    throw "Tag $Version already exists locally. Pick a new version, or -Resume a run that stopped after pushing it."
+}
+if ($Resume) {
+    if (-not $existingTag) { throw "-Resume: there is no tag $Version to resume." }
+    $localTag = git rev-parse $Version
+    $remoteTag = ((git ls-remote --tags origin "refs/tags/$Version") -split "\s+")[0]
+    if ($remoteTag -ne $localTag) {
+        throw "-Resume: tag $Version on origin is '$remoteTag', locally $localTag. Resume only a tag this script pushed."
+    }
+    # What the release ships is the tagged commit. Fixing this script to get past the step that
+    # failed is the one change allowed after it: anything else would be missing from the release.
+    $since = @(git diff --name-only $Version HEAD | Where-Object { $_ -and $_ -ne "publish-release.ps1" })
+    if ($since.Count -gt 0) {
+        throw "-Resume: since $Version, HEAD also changed $($since -join ', '). Those changes would not be in the release."
+    }
+}
 
 $dirty = git status --porcelain
 if ($dirty) { throw "Working tree is not clean - commit or stash first:`n$dirty" }
@@ -163,17 +183,48 @@ if ($DryRun) {
 
 # --- Tag + Release + Upload --------------------------------------------------
 
-git tag $Version
-git push origin $Version
-if ($LASTEXITCODE -ne 0) { throw "Failed to push tag $Version" }
+if (-not $Resume) {
+    git tag $Version
+    git push origin $Version
+    if ($LASTEXITCODE -ne 0) { throw "Failed to push tag $Version" }
+}
 
-$body = @{ tag_name = $Version; name = "AkerMCP $Version"; body = $Notes } | ConvertTo-Json
-$release = Invoke-RestMethod "https://api.github.com/repos/$repoSlug/releases" `
-    -Method Post -Headers $apiHeaders -Body $body -ContentType "application/json"
-Write-Host "Release created: $($release.html_url)"
+$release = $null
+if ($Resume) {
+    try {
+        $release = Invoke-RestMethod "https://api.github.com/repos/$repoSlug/releases/tags/$Version" -Headers $apiHeaders
+        Write-Host "Release found: $($release.html_url)"
+    }
+    catch {
+        $status = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
+        if ($status -ne 404) { throw }
+    }
+}
+
+if (-not $release) {
+    $body = @{ tag_name = $Version; name = "AkerMCP $Version"; body = $Notes } | ConvertTo-Json
+    # Windows PowerShell 5.1 sends a string body as ISO-8859-1. An e with an acute accent in the
+    # notes went out as a byte that is not UTF-8 and GitHub refused the JSON (v1.7.0, "Problems
+    # parsing JSON"); an arrow, which ISO-8859-1 cannot hold, became "?" without an error (v1.6.0's
+    # notes on GitHub). Bytes go out as they are.
+    $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($body)
+    $release = Invoke-RestMethod "https://api.github.com/repos/$repoSlug/releases" `
+        -Method Post -Headers $apiHeaders -Body $bodyBytes -ContentType "application/json; charset=utf-8"
+    Write-Host "Release created: $($release.html_url)"
+}
 
 foreach ($a in $assets) {
     $path = Join-Path "$repoRoot\Build" $a.Name
+    $existing = @($release.assets | Where-Object { $_.name -eq $a.Name })
+    if ($existing.Count -gt 0 -and $existing[0].state -eq "uploaded") {
+        Write-Host "$($a.Name) is already uploaded."
+        continue
+    }
+    if ($existing.Count -gt 0) {
+        # An upload cut off halfway leaves an asset that blocks the name: remove it and start over.
+        Invoke-RestMethod "https://api.github.com/repos/$repoSlug/releases/assets/$($existing[0].id)" `
+            -Method Delete -Headers $apiHeaders | Out-Null
+    }
     $uri = "https://uploads.github.com/repos/$repoSlug/releases/$($release.id)/assets?name=$($a.Name)"
     Write-Host "Uploading $($a.Name)..."
     $uploaded = Invoke-RestMethod $uri -Method Post `
