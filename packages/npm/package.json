@@ -23,7 +23,11 @@
     "gamedev",
     "claude",
     "cursor",
-    "roslyn"
+    "roslyn",
+    "codex",
+    "cline",
+    "claude-code",
+    "mcp-server"
   ],
   "repository": {
     "type": "git",
