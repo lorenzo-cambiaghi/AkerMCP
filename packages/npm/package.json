@@ -1,6 +1,6 @@
 {
   "name": "aker-mcp",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "MCP server for Unity, Godot 4 & Stride Game Studio — live inspection, Roslyn C# execution, screenshots, automated playtesting & asset generation.",
   "license": "Apache-2.0",
   "type": "module",

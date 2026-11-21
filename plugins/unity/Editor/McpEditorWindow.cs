@@ -28,7 +28,7 @@ namespace AkerMcp.Unity.Editor
     public class McpEditorWindow : EditorWindow
     {
         /// <summary>Stamped with the release version; publish-release.ps1 checks it.</summary>
-        internal const string PluginVersion = "1.6.0";
+        internal const string PluginVersion = "1.7.0";
 
         internal const string AllowExecutePref = "AkerMcp_AllowExecute";
         private const string AutoRestartPref = "AkerMcp_AutoRestartEnabled";

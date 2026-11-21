@@ -9,7 +9,7 @@
     <!-- The product version: the GitHub release tag and what the MCP handshake
          reports (see ServerVersion.cs). NOT the IPC protocol version, which
          AkerMcp.Shared and AkerMcp.Client are versioned by. -->
-    <Version>1.6.0</Version>
+    <Version>1.7.0</Version>
 
     <!-- .NET Global Tool packaging (`dotnet tool install -g AkerMcp.Server`) -->
     <PackAsTool>true</PackAsTool>
