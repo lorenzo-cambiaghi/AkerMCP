@@ -901,9 +901,15 @@ namespace AkerMcp.Client
             var errors = messages.Where(m => m.Type == CompileMessageType.Error).ToList();
             var warnings = messages.Where(m => m.Type == CompileMessageType.Warning).ToList();
 
+            // "never" is what the three adapters report when no compile ran since the plugin started (Unity reconciles a
+            // project that already failed before it loaded, and says so). Printed as "SUCCEEDED at never" it read as a
+            // verdict on a compile that did not happen.
+            var header = string.Equals(status.LastCompileTime, "never", StringComparison.Ordinal)
+                ? "No compile since the plugin started"
+                : $"Compilation {(status.LastCompileSucceeded ? "SUCCEEDED" : "FAILED")} at {status.LastCompileTime}";
+
             var sb = new System.Text.StringBuilder();
-            sb.AppendLine($"Compilation {(status.LastCompileSucceeded ? "SUCCEEDED" : "FAILED")} " +
-                          $"at {status.LastCompileTime}: {errors.Count} error(s), {warnings.Count} warning(s).");
+            sb.AppendLine($"{header}: {errors.Count} error(s), {warnings.Count} warning(s).");
 
             foreach (var err in errors)
                 sb.AppendLine(FormatCompileMessage(err, "error"));
