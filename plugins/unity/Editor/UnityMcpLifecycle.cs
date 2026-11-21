@@ -37,6 +37,7 @@ namespace AkerMcp.Unity.Editor
                 UnityMcpPlugin.Instance.Start();
                 UnityEngine.Debug.Log("[AkerMcp] Plugin auto-started.");
             }
+            McpEditorWindow.LogClientsOnOtherServerVersions();
         }
     }
 }

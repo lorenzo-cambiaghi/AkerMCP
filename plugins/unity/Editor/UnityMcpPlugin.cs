@@ -1,5 +1,6 @@
 #nullable enable
 
+using UnityEditor;
 using UnityEngine;
 using AkerMcp.Client;
 using AkerMcp.Shared.Abstraction;
@@ -20,8 +21,13 @@ namespace AkerMcp.Unity
         {
             get
             {
+                // Stop() drops the instance and every recompile builds a new one: the execute switch is read from the
+                // editor preferences each time, or turning it off would last only until the next recompile.
                 if (_instance == null)
-                    _instance = new UnityMcpPlugin();
+                    _instance = new UnityMcpPlugin
+                    {
+                        EnableExecuteTool = EditorPrefs.GetBool(AkerMcp.Unity.Editor.McpEditorWindow.AllowExecutePref, true)
+                    };
                 return _instance;
             }
         }
