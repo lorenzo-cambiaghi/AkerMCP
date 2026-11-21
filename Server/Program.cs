@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using AkerMcp.Server.Setup;
 
 namespace AkerMcp.Server
 {
@@ -8,6 +9,11 @@ namespace AkerMcp.Server
     {
         static async Task<int> Main(string[] args)
         {
+            // Human-facing CLI helpers (`setup`, `doctor`, `--version`, `--help`) exit
+            // cleanly without touching stdio JSON-RPC.
+            if (SetupCli.TryRun(args, out var cliExitCode))
+                return cliExitCode;
+
             // Resolve the command line and the tool profile before anything is opened: a bad
             // name or an unknown flag is a configuration error, answered with exit code 2 and
             // nothing to clean up. An unknown flag used to be ignored, and a `--profile` with no

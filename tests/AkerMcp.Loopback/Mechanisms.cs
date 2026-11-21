@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Text.Json;
 using System.Threading.Tasks;
 using AkerMcp.Server;
 using AkerMcp.Shared.Protocol;
 using AkerMcp.Shared.Reflection;
 using AkerMcp.Shared.Serialization;
+using AkerMcp.Shared.Setup;
 
 namespace AkerMcp.Loopback
 {
@@ -24,6 +26,7 @@ namespace AkerMcp.Loopback
             Resolver(check);
             SharedTwins(check);
             Deadlines(check);
+            ConfigPatching(check);
             await ErrorsReachTheCaller(call, check);
         }
 
@@ -138,6 +141,148 @@ namespace AkerMcp.Loopback
             var skew = EngineConnection.DescribeVersionSkew("1.10.0", "1.7.0");
             check("version skew compares by number (1.10 is newer than 1.7)",
                 !skew.breaking && skew.message != null && skew.message.Contains("after the server's version"), skew.message);
+        }
+
+        // ---- Setup / McpConfigPatcher: safe merge, backup, idempotence, dry-run and clean removal ----
+        private static void ConfigPatching(Action<string, bool, string?> check)
+        {
+            var tmpDir = Path.Combine(Path.GetTempPath(), "akermcp-setup-test-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tmpDir);
+            try
+            {
+                var cfgPath = Path.Combine(tmpDir, "client_config.json");
+                var client = new AiClientDefinition("test-client", "Test Client", cfgPath, tmpDir, "mcpServers", includeTypeStdio: true);
+
+                // Dry-run does not create the file
+                var spec = McpServerLaunchSpec.NpxLatest("full", windows: false);
+                var dry = McpConfigPatcher.Configure(client, spec, dryRun: true);
+                check("setup dry-run reports change without touching disk", dry.Success && dry.Changed && !File.Exists(cfgPath), dry.Message);
+
+                // A client that starts its server without a shell gets ENOENT for a bare "npx" on Windows (npx.cmd).
+                var onWindows = McpServerLaunchSpec.NpxLatest("full", windows: true);
+                check("npx goes through cmd /c on Windows and runs bare elsewhere",
+                    onWindows.Command == "cmd" && onWindows.Args.Count >= 4 && onWindows.Args[0] == "/c" && onWindows.Args[1] == "npx" &&
+                    onWindows.Args[3] == "aker-mcp@latest" && spec.Command == "npx" && spec.Args[0] == "-y",
+                    $"{onWindows} | {spec}");
+
+                // Existing config with another server, comments, and trailing commas
+                File.WriteAllText(cfgPath, "{\n  // user comment\n  \"theme\": \"dark\",\n  \"mcpServers\": {\n    \"other-tool\": { \"command\": \"other\", \"args\": [], },\n  },\n}\n");
+
+                var first = McpConfigPatcher.Configure(client, spec);
+                check("setup merges game-engine and creates a backup",
+                    first.Success && first.Changed && first.BackupPath != null && File.Exists(first.BackupPath), first.Message);
+                check("a file whose comments cannot be kept says so and names the backup",
+                    first.Message.Contains("comments") && first.BackupPath != null && first.Message.Contains(first.BackupPath)
+                    && File.ReadAllText(first.BackupPath).Contains("// user comment"),
+                    first.Message);
+
+                var status = McpConfigPatcher.Inspect(client);
+                check("inspect reads back the written command and profile args",
+                    status.IsConfigured && status.Command == "npx" && status.Args.Count == 4 && status.Args[3] == "full",
+                    $"{status.Command} [{string.Join(",", status.Args)}]");
+
+                var writtenJson = File.ReadAllText(cfgPath);
+                check("setup preserves unrelated settings and other MCP servers",
+                    writtenJson.Contains("\"theme\": \"dark\"") && writtenJson.Contains("\"other-tool\"") && writtenJson.Contains("\"type\": \"stdio\""),
+                    writtenJson);
+
+                // Hand-edited files keep their characters: the default encoder would turn every "é" and "<" in the file into \u escapes.
+                var accentsPath = Path.Combine(tmpDir, "accents.json");
+                File.WriteAllText(accentsPath, "{\n  \"note\": \"José's <scene> & co\",\n  \"mcpServers\": { \"game-engine\": { \"command\": \"x\", \"args\": [], \"env\": { \"AKER_MCP_PROFILE\": \"full\" } } }\n}\n");
+                var accentsClient = new AiClientDefinition("accents", "Accents", accentsPath, tmpDir);
+                var reapplied = McpConfigPatcher.Configure(accentsClient, McpServerLaunchSpec.Executable("/opt/aker/AkerMcp.Server"));
+                var accentsText = File.ReadAllText(accentsPath);
+                check("rewriting a config leaves non-ASCII and HTML characters as they were",
+                    reapplied.Success && accentsText.Contains("José's <scene> & co"), accentsText);
+                check("re-applying the entry keeps keys AkerMCP does not manage (env)",
+                    accentsText.Contains("\"AKER_MCP_PROFILE\": \"full\"") && accentsText.Contains("/opt/aker/AkerMcp.Server"), accentsText);
+
+                // Claude Code keeps per-project servers under "projects"; inside those projects they win over the user-level one.
+                var claudePath = Path.Combine(tmpDir, "claude.json");
+                File.WriteAllText(claudePath, "{ \"projects\": { \"C:/game\": { \"mcpServers\": { \"game-engine\": { \"command\": \"dotnet\" } } }, \"C:/other\": { \"mcpServers\": {} } } }");
+                var claudeClient = new AiClientDefinition("cc", "CC", claudePath, tmpDir, includeTypeStdio: true, projectsProperty: "projects");
+                var claudeStatus = McpConfigPatcher.Inspect(claudeClient);
+                check("per-project entries (Claude Code local scope) are found, user-level stays unconfigured",
+                    !claudeStatus.IsConfigured && claudeStatus.ProjectEntries.Count == 1 && claudeStatus.ProjectEntries[0] == "C:/game",
+                    string.Join(",", claudeStatus.ProjectEntries));
+
+                var second = McpConfigPatcher.Configure(client, spec);
+                check("setup is idempotent when already configured identically", second.Success && !second.Changed, second.Message);
+
+                var removed = McpConfigPatcher.Remove(client);
+                var afterRemove = McpConfigPatcher.Inspect(client);
+                check("uninstall removes game-engine while keeping other servers intact",
+                    removed.Success && removed.Changed && !afterRemove.IsConfigured && File.ReadAllText(cfgPath).Contains("\"other-tool\""),
+                    removed.Message);
+
+                ServerInstallLayout(check, tmpDir);
+                ConnectionKinds(check, tmpDir);
+            }
+            finally
+            {
+                try { Directory.Delete(tmpDir, recursive: true); } catch { /* ignore */ }
+            }
+        }
+
+        // ---- ServerInstall: the folder an AI client config names, and how a release zip lands in it ----
+        private static void ServerInstallLayout(Action<string, bool, string?> check, string tmpDir)
+        {
+            var root = Path.Combine(tmpDir, "server");
+            var exe = ServerInstall.ExecutablePath("1.2.3", root, "win-x64");
+            check("an installed server's path gives back its version; anything else gives null",
+                ServerInstall.VersionOf(exe, root) == "1.2.3"
+                && ServerInstall.VersionOf(Path.Combine(root, "latest", "win-x64", "AkerMcp.Server.exe"), root) == null
+                && ServerInstall.VersionOf(Path.Combine(root + "-v1.2.3", "win-x64", "AkerMcp.Server.exe"), root) == null // a sibling folder sharing the prefix
+                && ServerInstall.VersionOf("npx", root) == null,
+                exe);
+
+            // The release zips hold their files under "./", as build-package's tar writes them.
+            var zipPath = Path.Combine(tmpDir, "release.zip");
+            using (var archive = System.IO.Compression.ZipFile.Open(zipPath, System.IO.Compression.ZipArchiveMode.Create))
+            {
+                archive.CreateEntry("./");
+                using (var w = new StreamWriter(archive.CreateEntry("./" + ServerInstall.ExecutableName).Open())) w.Write("binary");
+                using (var w = new StreamWriter(archive.CreateEntry("./AkerMcp.Server.pdb").Open())) w.Write("symbols");
+            }
+            var placed = ServerInstall.InstallFromZip(zipPath, "v1.2.3", root, "win-x64");
+            var again = ServerInstall.InstallFromZip(zipPath, "1.2.3", root, "win-x64");
+            var leftovers = Directory.GetDirectories(root, ".staging-*");
+            check("a release zip unpacks into <root>/v<version>/<rid>/, a second install finds it in place, no staging left",
+                placed == again && File.Exists(placed) && File.ReadAllText(placed) == "binary"
+                && Path.GetFileName(Path.GetDirectoryName(placed)) == "win-x64" && leftovers.Length == 0,
+                $"{placed} | {leftovers.Length} staging");
+        }
+
+        // ---- AiConnection: what a client entry starts, as doctor and the editor windows report it ----
+        private static void ConnectionKinds(Action<string, bool, string?> check, string tmpDir)
+        {
+            var root = Path.Combine(tmpDir, "server");
+            var installed = ServerInstall.ExecutablePath("1.2.3", root, "win-x64"); // created by ServerInstallLayout
+            AiConnection Of(string command, bool windows, params string[] args) =>
+                AiConnection.Classify(new ClientConfigStatus { FileExists = true, IsConfigured = true, Command = command, Args = args }, root, windows);
+
+            var current = Of(installed, true, "--profile", "full");
+            var gone = Of(ServerInstall.ExecutablePath("9.9.9", root, "win-x64"), true);
+            check("an entry on the installed server reports its version and profile; one whose file is gone is broken",
+                current.Kind == ConnectionKind.Installed && current.ServerVersion == "1.2.3" && current.RunsVersion("v1.2.3")
+                && !current.RunsVersion("1.2.4") && current.Profile == "full" && gone.Kind == ConnectionKind.Broken,
+                $"{current.Kind} {current.ServerVersion} {current.Profile} | {gone.Kind}");
+
+            var bareNpxWindows = Of("npx", true, "-y", "aker-mcp@latest");
+            var cmdNpx = Of("cmd", true, "/c", "npx", "-y", "aker-mcp@latest");
+            var bareNpxMac = Of("npx", false, "-y", "aker-mcp@latest");
+            check("a bare npx is broken on Windows only; cmd /c npx is the npm launcher",
+                bareNpxWindows.Kind == ConnectionKind.Broken && cmdNpx.Kind == ConnectionKind.Npx && bareNpxMac.Kind == ConnectionKind.Npx,
+                $"{bareNpxWindows.Kind} {cmdNpx.Kind} {bareNpxMac.Kind}");
+
+            var source = Of("dotnet", true, "run", "--project", "C:/src/Server");
+            var tool = Of("aker-mcp", true);
+            var custom = Of(Path.Combine(tmpDir, "accents.json"), true); // any file that exists
+            var unconfigured = AiConnection.Classify(new ClientConfigStatus { FileExists = true }, root, true);
+            check("source, global tool, a command of the user's own and no entry are told apart",
+                source.Kind == ConnectionKind.Source && tool.Kind == ConnectionKind.DotnetTool && custom.Kind == ConnectionKind.Custom
+                && unconfigured.Kind == ConnectionKind.NotConfigured && !custom.IsManaged && cmdNpx.IsManaged,
+                $"{source.Kind} {tool.Kind} {custom.Kind} {unconfigured.Kind}");
         }
 
         // ---- Through the pipe: a refused value and an unknown level come back as errors ----
