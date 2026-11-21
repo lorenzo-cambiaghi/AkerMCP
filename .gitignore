@@ -1,5 +1,7 @@
 # .NET
 bin/
+# ...except the npm launcher's executable, which is source (package.json "bin" points at it)
+!packages/npm/bin/
 obj/
 *.user
 *.suo
