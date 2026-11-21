@@ -1,0 +1,37 @@
+{
+  "name": "aker-mcp",
+  "version": "1.6.0",
+  "description": "MCP server for Unity, Godot 4 & Stride Game Studio — live inspection, Roslyn C# execution, screenshots, automated playtesting & asset generation.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "aker-mcp": "./bin/aker-mcp.js"
+  },
+  "files": [
+    "bin/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "unity",
+    "godot",
+    "stride",
+    "gamedev",
+    "claude",
+    "cursor",
+    "roslyn"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lorenzo-cambiaghi/AkerMCP.git",
+    "directory": "packages/npm"
+  },
+  "homepage": "https://github.com/lorenzo-cambiaghi/AkerMCP",
+  "bugs": {
+    "url": "https://github.com/lorenzo-cambiaghi/AkerMCP/issues"
+  }
+}
