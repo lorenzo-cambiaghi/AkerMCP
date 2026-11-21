@@ -51,6 +51,18 @@ $godotCfg = Get-Content "$repoRoot\plugins\godot\plugin.cfg" -Raw
 if ($godotCfg -notmatch "(?m)^version=`"$([regex]::Escape($bare))`"") {
     throw "plugins/godot/plugin.cfg does not declare version=`"$bare`" (Godot shows it in the plugin list)."
 }
+$unityPkg = Get-Content "$repoRoot\plugins\unity\package.json" -Raw | ConvertFrom-Json
+if ($unityPkg.version -ne $bare) {
+    throw "plugins/unity/package.json is at '$($unityPkg.version)', not $bare. Stamp the version and commit first."
+}
+$npmPkg = Get-Content "$repoRoot\packages\npm\package.json" -Raw | ConvertFrom-Json
+if ($npmPkg.version -ne $bare) {
+    throw "packages/npm/package.json is at '$($npmPkg.version)', not $bare. Stamp the version and commit first."
+}
+$unityWin = Get-Content "$repoRoot\plugins\unity\Editor\McpEditorWindow.cs" -Raw
+if ($unityWin -notmatch "PluginVersion\s*=\s*`"$([regex]::Escape($bare))`"") {
+    throw "plugins/unity/Editor/McpEditorWindow.cs does not declare PluginVersion = `"$bare`"."
+}
 
 $branch = git rev-parse --abbrev-ref HEAD
 if ($branch -ne "main") {
