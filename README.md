@@ -5,7 +5,7 @@
 [![Engines](https://img.shields.io/badge/engines-Unity%20%7C%20Godot%204%20%7C%20Stride-orange.svg)](#supported-engines)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4.svg)](https://dotnet.microsoft.com)
 
-**Give Claude Code, Cursor, Copilot, Windsurf or Antigravity eyes and hands inside your running game editor:** read and change the live scene, run C# on the editor's main thread, look at the result, play the game and check what happened.
+**Give Claude Code, Codex, Cursor, Copilot, Cline, Windsurf or Antigravity eyes and hands inside your running game editor:** read and change the live scene, run C# on the editor's main thread, look at the result, play the game and check what happened.
 
 <!--
   VIDEO SLOT: drag the 30-second MP4 into a GitHub issue or PR to get a hosted URL,
@@ -16,7 +16,7 @@
   <img src="docs/images/unity-execution-demo.png" alt="AkerMCP in Unity: a ring of spheres spawned by one execute call" width="880">
 </p>
 
-AkerMCP is an MCP server that runs on your machine, next to the editor, and lets an AI client (Claude Code, Cursor, Copilot, Antigravity, any stdio MCP client) work inside a running C# game editor: read the scene, change it (objects created or deleted are steps in the editor's undo history), run C# on the editor's main thread, take a screenshot, enter play mode and check what happened. One server and one tool set for three engines, Unity, Godot and Stride Game Studio, each behind a small adapter over the same core.
+AkerMCP is an MCP server that runs on your machine, next to the editor, and lets an AI client (Claude Code, Codex, Cursor, Copilot, Cline, Antigravity, any stdio MCP client) work inside a running C# game editor: read the scene, change it (objects created or deleted are steps in the editor's undo history), run C# on the editor's main thread, take a screenshot, enter play mode and check what happened. One server and one tool set for three engines, Unity, Godot and Stride Game Studio, each behind a small adapter over the same core.
 
 ## Why AkerMCP?
 
@@ -77,7 +77,7 @@ Every ✅ is implemented and was verified live in that engine's editor; the fixe
 ### 2. Connect your AI client
 
 - **In Unity:** open **Window → AkerMcp** and click **Connect** next to your AI client. It downloads the server that matches the plugin (once, about 30 MB) and writes the client's config, keeping a `.aker-backup` copy of the file.
-- **From a terminal, for any engine:** `npx -y aker-mcp@latest setup` (needs Node 18+), or unpack `AkerMcp.Server-<os>-x64.zip` from the release and run `AkerMcp.Server setup`. Both find Claude Code, Claude Desktop, Cursor, Windsurf, Google Antigravity and VS Code and connect them; `doctor` then says whether everything is ready.
+- **From a terminal, for any engine:** `npx -y aker-mcp@latest setup` (needs Node 18+), or unpack `AkerMcp.Server-<os>-x64.zip` from the release and run `AkerMcp.Server setup`. Both find Claude Code, Claude Desktop, Codex, Cursor, Windsurf, Google Antigravity, Cline and VS Code and connect them; `doctor` then says whether everything is ready.
 
 Restart the AI client and ask it: *"Inspect the scene hierarchy"*. A tree of your scene's objects means it works.
 

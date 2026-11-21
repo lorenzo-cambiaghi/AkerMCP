@@ -1,6 +1,6 @@
 # AkerMcp.Server
 
-The live MCP server for **Unity**, **Godot 4** and **Stride Game Studio**, as a .NET global tool: it lets an AI client (Claude Code, Claude Desktop, Cursor, Windsurf, Copilot, Antigravity) inspect and edit the running editor's scene, run C# on its main thread, take screenshots and playtest, all on your machine.
+The live MCP server for **Unity**, **Godot 4** and **Stride Game Studio**, as a .NET global tool: it lets an AI client (Claude Code, Claude Desktop, Codex, Cursor, Windsurf, Copilot, Cline, Antigravity) inspect and edit the running editor's scene, run C# on its main thread, take screenshots and playtest, all on your machine.
 
 ```bash
 dotnet tool install -g AkerMcp.Server

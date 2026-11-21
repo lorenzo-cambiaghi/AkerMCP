@@ -2,7 +2,7 @@
   "name": "com.akermcp.unity",
   "version": "1.7.0",
   "displayName": "AkerMCP — Game Engine MCP Bridge",
-  "description": "Connect AI coding assistants (Claude Code, Cursor, Copilot, Antigravity) to a live Unity Editor for scene inspection, Roslyn C# execution, viewport screenshots, and automated playtesting.",
+  "description": "Connect AI coding assistants (Claude Code, Codex, Cursor, Copilot, Cline, Antigravity) to a live Unity Editor for scene inspection, Roslyn C# execution, viewport screenshots, and automated playtesting.",
   "keywords": [
     "mcp",
     "ai",

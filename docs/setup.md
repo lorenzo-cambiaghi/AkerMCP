@@ -105,7 +105,7 @@ The AI client starts the server; it only has to know where the server is. Three 
 
 ### From the Unity editor (no terminal)
 
-**Window → AkerMcp** lists the AI clients installed on this computer: Claude Code, Claude Desktop, Cursor, Windsurf, Google Antigravity and VS Code (**Show all clients** lists the others too). **Connect** downloads the AkerMCP server of the plugin's own version from its GitHub release (about 30 MB, once per version) into a folder of your user:
+**Window → AkerMcp** lists the AI clients installed on this computer: Claude Code, Claude Desktop, Codex (CLI, app and IDE extension, which share one config), Cursor, Windsurf, Google Antigravity, Cline and VS Code (**Show all clients** lists the others too). **Connect** downloads the AkerMCP server of the plugin's own version from its GitHub release (about 30 MB, once per version) into a folder of your user:
 
 | OS | Folder |
 |---|---|
@@ -148,7 +148,7 @@ AkerMcp.Server doctor         # (or npx -y aker-mcp@latest doctor, aker-mcp doct
 
 | Option | |
 |---|---|
-| `--client <id\|all>` | `claude-code`, `claude-desktop`, `cursor`, `windsurf`, `antigravity`, `vscode`, or `all`. Default: the clients installed here |
+| `--client <id\|all>` | `claude-code`, `claude-desktop`, `codex`, `cursor`, `windsurf`, `antigravity`, `cline`, `vscode`, or `all`. Default: the clients installed here |
 | `--profile <core\|standard\|full>` | the tool profile the client starts the server with |
 | `--launcher <installed\|npx\|dotnet-tool\|source>` | what the entry runs, instead of the default above |
 | `--dry-run` | print what would change, write nothing |
@@ -186,6 +186,23 @@ Open the MCP settings (or `claude_desktop_config.json`) and add the server:
 ```
 
 > **Windows users:** Replace the command path with the full Windows path to the `.exe`, for example `"C:\\Tools\\AkerMcp.Server\\AkerMcp.Server.exe"`. Remember to use double backslashes in JSON!
+
+#### Codex (OpenAI)
+
+Codex's CLI, desktop app and IDE extension read `~/.codex/config.toml` (`%USERPROFILE%\.codex\config.toml`; `CODEX_HOME` moves it). It is TOML, not JSON:
+
+```toml
+[mcp_servers.game-engine]
+command = 'C:\Tools\AkerMcp.Server\AkerMcp.Server.exe'
+args = []
+startup_timeout_sec = 60
+```
+
+Single quotes make a literal string, so a Windows path needs no doubled backslashes. Codex waits 10 seconds for a server to start unless `startup_timeout_sec` says otherwise; `setup` and the Unity window write 60, since the first start of a freshly downloaded server can spend longer than that in an antivirus scan. They edit only that table and leave the rest of the file as it is; a `game-engine` written as an inline table or with dotted keys is left for you to change.
+
+#### Cline
+
+Cline keeps its servers in `~/.cline/data/settings/cline_mcp_settings.json` (older versions of the VS Code extension: `globalStorage/saoudrizwan.claude-dev/settings/` under VS Code's user folder), in the same `mcpServers` form as Claude Desktop above. Its **MCP Servers** view opens the file.
 
 #### Google Antigravity
 

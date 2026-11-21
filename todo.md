@@ -84,6 +84,9 @@ the release, the zip unpacked by Unity's Mono, a config written and read back. W
       Only compiled and run headless so far.
 - [ ] **Update to v… in the window**: `AssetDatabase.ImportPackage` over the installed plugin, whose
       DLLs the editor has loaded. The first real test is the first release after v1.7.0.
+- [ ] **Codex and Cline, started by the client.** The Codex table was written to a copy of a real
+      `~/.codex/config.toml` and removed byte for byte; Cline's entry was only dry-run against a real
+      `~/.cline/data/settings/cline_mcp_settings.json`. Neither client has started the server yet.
 - [ ] **macOS and Linux paths** of `ServerInstall` and the npm launcher (folders, `chmod`, the
       Rosetta x64 build on Apple Silicon): written, never run there.
 - [ ] **Publish the launchers with v1.7.0, before the README reaches `main`**: `npm publish` from

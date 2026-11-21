@@ -1,6 +1,6 @@
 # aker-mcp
 
-Launcher for **[AkerMCP](https://github.com/lorenzo-cambiaghi/AkerMCP)**, the live MCP server for **Unity**, **Godot 4** and **Stride Game Studio**: it gives Claude Code, Claude Desktop, Cursor, Windsurf, Copilot and Antigravity live scene inspection and editing, Roslyn C# execution, viewport screenshots, automated playtesting and placeholder sprite and audio generation, all running on your machine.
+Launcher for **[AkerMCP](https://github.com/lorenzo-cambiaghi/AkerMCP)**, the live MCP server for **Unity**, **Godot 4** and **Stride Game Studio**: it gives Claude Code, Claude Desktop, Codex, Cursor, Windsurf, Copilot, Cline and Antigravity live scene inspection and editing, Roslyn C# execution, viewport screenshots, automated playtesting and placeholder sprite and audio generation, all running on your machine.
 
 ## Connect your AI clients
 
@@ -27,7 +27,7 @@ claude mcp add --scope user game-engine -- cmd /c npx -y aker-mcp@latest
 }
 ```
 
-On Windows the entry is `"command": "cmd"` with `"args": ["/c", "npx", "-y", "aker-mcp@latest"]`. Add `"--profile", "full"` to the arguments for sprite and audio authoring, `playtest`, build tools and `ui_action`.
+On Windows the entry is `"command": "cmd"` with `"args": ["/c", "npx", "-y", "aker-mcp@latest"]`. Codex uses TOML in `~/.codex/config.toml`: a `[mcp_servers.game-engine]` table with the same `command` and `args`. Add `"--profile", "full"` to the arguments for sprite and audio authoring, `playtest`, build tools and `ui_action`.
 
 ## What it does
 
