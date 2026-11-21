@@ -68,6 +68,38 @@ not run inside an editor. First smoke test on each, in order of risk:
 - [ ] **Stride: placed sprites** are real entities now, referencing the sheet through
       `AttachedReferenceManager.CreateProxyObject`.
 
+## Setup and updates (v1.7.0): what was seen working, and what was not
+
+`Shared/Setup` (client catalog, config patcher, installed server, entry classification) is shared by
+`aker-mcp setup`/`doctor` and the Unity window. Seen working on Windows: the loopback checks of
+every mechanism (each sabotaged once); `setup --dry-run` and `doctor` against real client configs,
+including Claude Code's per-project entries; the npm launcher downloading v1.6.0 from the release
+and, with a newer launcher than any release, starting the server on disk and failing the background
+download cleanly; the Unity side in a batchmode Unity 6000.6.5 — UnityWebRequest to the API and to
+the release, the zip unpacked by Unity's Mono, a config written and read back. Writing
+`~/.claude.json` while Claude Code runs is safe: a probe key survived a save of a running session.
+
+- [ ] **The Unity window, clicked.** Connect with its progress bar, Update after a plugin update,
+      Apply, Disconnect, Repair, Replace; the console line about clients on another server version.
+      Only compiled and run headless so far.
+- [ ] **Update to v… in the window**: `AssetDatabase.ImportPackage` over the installed plugin, whose
+      DLLs the editor has loaded. The first real test is the first release after v1.7.0.
+- [ ] **macOS and Linux paths** of `ServerInstall` and the npm launcher (folders, `chmod`, the
+      Rosetta x64 build on Apple Silicon): written, never run there.
+- [ ] **Publish the launchers with v1.7.0, before the README reaches `main`**: `npm publish` from
+      `packages/npm`, `dotnet pack Server` + `dotnet nuget push`. Until then the README's
+      `npx -y aker-mcp@latest setup` and `dotnet tool install -g AkerMcp.Server` answer 404.
+
+Not built:
+
+- **Old server versions are never deleted** (about 70 MB each under the per-user folder). A cleanup
+  must skip every version some client config still names, which the npm launcher cannot see.
+- **Godot and Stride have no Connect button.** They use `AkerMcp.Server setup`; a Godot dock or a
+  Game Studio menu would reuse `Shared/Setup` as the Unity window does.
+- **Install from a Unity Package Manager git URL.** `plugins/unity/package.json` makes the folder a
+  package, but the DLLs under `Editor/Plugins` are not in git, so a git-URL install does not
+  compile. It needs a `upm` branch (or tag) with the DLLs, made by the release script.
+
 ## After the November 2026 review: not built, and why
 
 - **Unity `set_property` undo, and the dirty mark.** No `Undo.RecordObject`, no
@@ -131,7 +163,7 @@ Listed so nobody spends an afternoon rediscovering them as bugs.
 
 ## The SoundFont, once
 
-- [ ] Upload `FluidR3_GM_GS.sf2` as the `soundfont-v1` release asset, so the default URL
+- [x] Upload `FluidR3_GM_GS.sf2` as the `soundfont-v1` release asset, so the default URL
       resolves. Until then, `engine: "soundfont"` works only with `AKER_MCP_SOUNDFONT` set to
       a local copy — which is what the error message says.
       `.github/workflows/soundfont-asset.yml` does it on the next published release (or by
