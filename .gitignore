@@ -77,7 +77,8 @@ plugins/unity/Editor/Plugins/*.dll.meta
 plugins/unity/Plugins/*.dll
 plugins/unity/Plugins/*.dll.meta
 
-# Local demo / recording notes (not for the repo)
+# Local demo / recording / launch notes (not for the repo)
 flappy-bird-demo.md
+piano-lancio.md
 *.demo.md
 out/
