@@ -259,6 +259,14 @@ namespace AkerMcp.Unity.Editor
                 case ConnectionKind.Installed:
                     return ($"Uses server {c.ServerVersion}", _warnStyle!,
                         $"This plugin is {PluginVersion}. Update points {row.Client.DisplayName} at server {PluginVersion}." + projectNote);
+                // What `npx -y aker-mcp@latest setup` and `aker-mcp setup` write, as the README tells people to: connected,
+                // not "your own setup" — a reader who followed the README must not be offered to replace it.
+                case ConnectionKind.Npx:
+                    return ("Connected (npx)" + (c.Profile != "standard" ? $" ({c.Profile})" : ""), _okStyle!,
+                        $"Starts npx aker-mcp@latest, which follows new releases by itself; profile {c.Profile}." + projectNote);
+                case ConnectionKind.DotnetTool:
+                    return ("Connected (dotnet tool)" + (c.Profile != "standard" ? $" ({c.Profile})" : ""), _okStyle!,
+                        $"Starts the .NET global tool aker-mcp (update it with: dotnet tool update -g AkerMcp.Server); profile {c.Profile}." + projectNote);
                 case ConnectionKind.Broken:
                 case ConnectionKind.Unreadable:
                     return ("Cannot start", _errorStyle!, c.Summary + projectNote);
@@ -277,6 +285,9 @@ namespace AkerMcp.Unity.Editor
                 case ConnectionKind.Broken: return RowAction.Repair;
                 case ConnectionKind.Installed:
                     if (!c.RunsVersion(PluginVersion)) return RowAction.Update;
+                    return c.Profile != SelectedProfile ? RowAction.Apply : RowAction.Disconnect;
+                case ConnectionKind.Npx:
+                case ConnectionKind.DotnetTool:
                     return c.Profile != SelectedProfile ? RowAction.Apply : RowAction.Disconnect;
                 default: return RowAction.Replace;
             }
@@ -303,6 +314,19 @@ namespace AkerMcp.Unity.Editor
                 var removed = McpConfigPatcher.Remove(row.Client);
                 SetBanner(removed.Message, removed.Success ? MessageType.Info : MessageType.Error);
                 RescanClients();
+                return;
+            }
+
+            // A new profile for an npx or global-tool entry keeps the launcher it has: Apply is not a way to switch to the
+            // installed server (Replace would be, and it is not offered for these).
+            if (action == RowAction.Apply && row.Connection.Kind == ConnectionKind.Npx)
+            {
+                ConfigureWith(row.Client, McpServerLaunchSpec.NpxLatest(SelectedProfile));
+                return;
+            }
+            if (action == RowAction.Apply && row.Connection.Kind == ConnectionKind.DotnetTool)
+            {
+                ConfigureWith(row.Client, McpServerLaunchSpec.DotnetTool(SelectedProfile));
                 return;
             }
 
@@ -354,9 +378,11 @@ namespace AkerMcp.Unity.Editor
                 ConfigureWithInstalledServer(client);
         }
 
-        private void ConfigureWithInstalledServer(AiClientDefinition client)
+        private void ConfigureWithInstalledServer(AiClientDefinition client) =>
+            ConfigureWith(client, McpServerLaunchSpec.Executable(ServerInstall.ExecutablePath(PluginVersion), SelectedProfile));
+
+        private void ConfigureWith(AiClientDefinition client, McpServerLaunchSpec spec)
         {
-            var spec = McpServerLaunchSpec.Executable(ServerInstall.ExecutablePath(PluginVersion), SelectedProfile);
             var result = McpConfigPatcher.Configure(client, spec);
             SetBanner(result.Message, result.Success ? MessageType.Info : MessageType.Error);
             RescanClients();

@@ -120,11 +120,11 @@ The button next to each client says what it would do:
 | Button | When |
 |---|---|
 | **Connect** | the client has no `game-engine` entry |
-| **Disconnect** | it starts this plugin's server; removes the entry and nothing else |
+| **Disconnect** | it starts this plugin's server, or AkerMCP through npx or the .NET global tool (shown as *Connected (npx)* or *(dotnet tool)*); removes the entry and nothing else |
 | **Update** | it starts the server of another plugin version, typically right after you updated the plugin |
-| **Apply** | it starts this server with another tool profile than the one chosen under **Advanced** |
+| **Apply** | it starts AkerMCP with another tool profile than the one chosen under **Advanced**; an npx or global-tool entry keeps its launcher |
 | **Repair** | its entry cannot start: the file it points to is gone, or a bare `npx` on Windows |
-| **Replace** | it starts a command of your own; it is left alone unless you click |
+| **Replace** | it starts a command of your own (a path of yours, `dotnet run` from a checkout); it is left alone unless you click |
 
 The tool profile written by these buttons (`standard` by default, `core`, `full`) is under **Advanced**, with the switch that turns `execute` off for this editor. The server folder is shown there too.
 
