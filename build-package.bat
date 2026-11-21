@@ -94,7 +94,7 @@ REM The addon compiles against AkerMcp.Shared/AkerMcp.Client. Shipping only the 
 REM download-only user with ProjectReferences to files they did not have, so the two projects
 REM travel inside it, under core\ (Client references ..\Shared, so they stay siblings). The
 REM .gdignore keeps the Godot editor from scanning that source as project scripts; the game's
-REM .csproj excludes it from its own compile (see README "1b. Godot Setup").
+REM .csproj excludes it from its own compile (see docs/setup.md "1b. Godot Setup").
 robocopy "%~dp0Shared" "%~dp0Build\_godot_stage\aker_mcp\core\Shared" /E /XD bin obj /XF .DS_Store /NFL /NDL /NJH /NJS /NP >nul
 if errorlevel 8 goto :error
 robocopy "%~dp0Client" "%~dp0Build\_godot_stage\aker_mcp\core\Client" /E /XD bin obj /XF .DS_Store /NFL /NDL /NJH /NJS /NP >nul
@@ -104,7 +104,7 @@ tar -a -c -f "%~dp0Build\AkerMcp.Godot-addon.zip" --exclude=*/.godot/* -C "%~dp0
 if errorlevel 1 goto :error
 rmdir /s /q "%~dp0Build\_godot_stage"
 
-echo   - Stride adapter source + install scripts (build against your Game Studio; see README "1c. Stride Setup")
+echo   - Stride adapter source + install scripts (build against your Game Studio; see docs/setup.md "1c. Stride Setup")
 REM Shared\ and Client\ go in too: the adapter's .csproj references them by path
 REM (..\..\Shared, ..\..\Client), and without them install-stride-wrapper.ps1 fails.
 tar -a -c -f "%~dp0Build\AkerMcp.Stride-source.zip" --exclude=*/bin/* --exclude=*/obj/* --exclude=*/bin --exclude=*/obj --exclude=*.DS_Store -C "%~dp0." plugins/stride plugins/stride-startuphook plugins/stride-launcher Shared Client install-stride-wrapper.ps1 setup-stride.ps1 LICENSE

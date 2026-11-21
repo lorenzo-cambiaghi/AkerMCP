@@ -80,7 +80,7 @@ rm -rf "$BUILD_DIR/_godot_stage/aker_mcp/.godot"
 # download-only user with ProjectReferences to files they did not have, so the two projects
 # travel inside it, under core/ (Client references ../Shared, so they stay siblings). The
 # .gdignore keeps the Godot editor from scanning that source as project scripts; the game's
-# .csproj excludes it from its own compile (see README "1b. Godot Setup").
+# .csproj excludes it from its own compile (see docs/setup.md "1b. Godot Setup").
 mkdir -p "$BUILD_DIR/_godot_stage/aker_mcp/core"
 for proj in Shared Client; do
     cp -r "$proj" "$BUILD_DIR/_godot_stage/aker_mcp/core/$proj"
@@ -91,7 +91,7 @@ touch "$BUILD_DIR/_godot_stage/aker_mcp/core/.gdignore"
 (cd "$BUILD_DIR/_godot_stage" && zip -r "$BUILD_DIR/AkerMcp.Godot-addon.zip" aker_mcp > /dev/null)
 rm -rf "$BUILD_DIR/_godot_stage"
 
-echo "  - Stride adapter source + install scripts (build against your Game Studio; see README \"1c. Stride Setup\")"
+echo "  - Stride adapter source + install scripts (build against your Game Studio; see docs/setup.md \"1c. Stride Setup\")"
 # Same tree as build-package.bat, repo-relative: the adapter's .csproj references
 # ../../Shared and ../../Client by path, and the installer builds the hook and the
 # launcher too, so all of them ship (sources only, no bin/obj).
