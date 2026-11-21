@@ -10,6 +10,19 @@
          reports (see ServerVersion.cs). NOT the IPC protocol version, which
          AkerMcp.Shared and AkerMcp.Client are versioned by. -->
     <Version>1.6.0</Version>
+
+    <!-- .NET Global Tool packaging (`dotnet tool install -g AkerMcp.Server`) -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>aker-mcp</ToolCommandName>
+    <PackageId>AkerMcp.Server</PackageId>
+    <Authors>Lorenzo Cambiaghi</Authors>
+    <Description>MCP server for Unity, Godot 4, and Stride Game Studio — live scene inspection, Roslyn C# execution, viewport screenshots, automated playtesting, and placeholder asset generation.</Description>
+    <PackageTags>mcp;model-context-protocol;unity;godot;stride;gamedev;ai;claude;roslyn</PackageTags>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/lorenzo-cambiaghi/AkerMCP</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/lorenzo-cambiaghi/AkerMCP.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
   <ItemGroup>
     <!-- System.Drawing.Common is kept for the Windows-only OS-level capture
@@ -24,5 +37,7 @@
   <ItemGroup>
     <!-- Written next to a downloaded SoundFont: MIT asks that the notice go with every copy. -->
     <EmbeddedResource Include="..\docs\FluidR3-LICENSE.txt" LogicalName="FluidR3-LICENSE.txt" />
+    <!-- Its own short README: the repository's has relative links and images, which nuget.org cannot show. -->
+    <None Include="README.nuget.md" Pack="true" PackagePath="\README.md" />
   </ItemGroup>
 </Project>
